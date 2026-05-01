@@ -351,7 +351,11 @@ final class BaseUserNotificationsManager: NSObject, UserNotificationsManager, In
                 content.body = body
 
                 if notificationAlarm {
-                    content.sound = .default
+                    if glucoseStorage.alarm == .low {
+                        content.sound = .defaultCritical
+                    } else {
+                        content.sound = .default
+                    }
                     content.userInfo[NotificationAction.key] = NotificationAction.snooze.rawValue
                     content.categoryIdentifier = NotificationCategoryIdentifier.trioAlert.rawValue
                 }
