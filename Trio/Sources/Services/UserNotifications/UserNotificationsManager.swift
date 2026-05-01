@@ -101,7 +101,9 @@ final class BaseUserNotificationsManager: NSObject, UserNotificationsManager, In
         broadcaster.register(BolusFailureObserver.self, observer: self)
         broadcaster.register(pumpNotificationObserver.self, observer: self)
         broadcaster.register(alertMessageNotificationObserver.self, observer: self)
-//        requestNotificationPermissionsIfNeeded()
+        
+        requestNotificationPermissions { _ in }
+        
         Task {
             await sendGlucoseNotification()
         }
