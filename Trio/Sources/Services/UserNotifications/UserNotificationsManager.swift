@@ -458,7 +458,7 @@ final class BaseUserNotificationsManager: NSObject, UserNotificationsManager, In
 
     func requestNotificationPermissions(completion: @escaping (Bool) -> Void) {
         debug(.service, "requestNotificationPermissions")
-        notificationCenter.requestAuthorization(options: [.badge, .sound, .alert]) { granted, error in
+        notificationCenter.requestAuthorization(options: [.badge, .sound, .alert, .criticalAlert]) { granted, error in
             if granted {
                 debug(.service, "requestNotificationPermissions was granted")
                 DispatchQueue.main.async {
