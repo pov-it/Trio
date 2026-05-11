@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		67EB1D800233401EAA7FBEE9 /* ZGlucoParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17529C0F13BA4AB79FAFCDE6 /* ZGlucoParser.swift */; };
+		BA986A0471AE45108775314B /* AIInsightsRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E69494986447F4BF5EC179 /* AIInsightsRootView.swift */; };
+		1654E148757D47C399026CA2 /* AIInsightsStateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B04F560D0E4AF897D805ED /* AIInsightsStateModel.swift */; };
+		C7C8D8354E63450CA571EC7F /* AIInsightsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */; };
+		2643E278F279487DBC4A5B43 /* AIInsightsDataFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F58F806C7AC54FA2A5AA7A87 /* AIInsightsDataFlow.swift */; };
 		041D1E995A6AE92E9289DC49 /* TreatmentsDataFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8D1A7CA8C10C4403D4BBFA7 /* TreatmentsDataFlow.swift */; };
 		0437CE46C12535A56504EC19 /* SnoozeRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5822B15939E719628E9FF7C /* SnoozeRootView.swift */; };
 		0D9A5E34A899219C5C4CDFAF /* HistoryStateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9455FA2D92E77A6C4AFED8A3 /* HistoryStateModel.swift */; };
@@ -870,6 +875,11 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		17529C0F13BA4AB79FAFCDE6 /* ZGlucoParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZGlucoParser.swift; sourceTree = "<group>"; };
+		C2E69494986447F4BF5EC179 /* AIInsightsRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsRootView.swift; sourceTree = "<group>"; };
+		77B04F560D0E4AF897D805ED /* AIInsightsStateModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsStateModel.swift; sourceTree = "<group>"; };
+		9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsProvider.swift; sourceTree = "<group>"; };
+		F58F806C7AC54FA2A5AA7A87 /* AIInsightsDataFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsDataFlow.swift; sourceTree = "<group>"; };
 		110AEDE02C5193D100615CC9 /* BolusIntent.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BolusIntent.swift; sourceTree = "<group>"; };
 		110AEDE12C5193D100615CC9 /* BolusIntentRequest.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BolusIntentRequest.swift; sourceTree = "<group>"; };
 		110AEDE52C51A0AE00615CC9 /* ShortcutsConfigView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ShortcutsConfigView.swift; sourceTree = "<group>"; };
@@ -1708,6 +1718,26 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
+			isa = PBXGroup;
+			children = (
+				C2E69494986447F4BF5EC179 /* AIInsightsRootView.swift */,
+			);
+			path = View;
+			sourceTree = "<group>";
+		};
+		1307459B9D494BECAB3B785F /* AIInsights */ = {
+			isa = PBXGroup;
+			children = (
+				F58F806C7AC54FA2A5AA7A87 /* AIInsightsDataFlow.swift */,
+				9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */,
+				77B04F560D0E4AF897D805ED /* AIInsightsStateModel.swift */,
+				17529C0F13BA4AB79FAFCDE6 /* ZGlucoParser.swift */,
+				E1D69A8BBF1D49FB9AF8DF95 /* View */,
+			);
+			path = AIInsights;
+			sourceTree = "<group>";
+		};
 		0610F7D6D2EC00E3BA1569F0 /* ConfigEditor */ = {
 			isa = PBXGroup;
 			children = (
@@ -4248,6 +4278,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				67EB1D800233401EAA7FBEE9 /* ZGlucoParser.swift in Sources */,
+				BA986A0471AE45108775314B /* AIInsightsRootView.swift in Sources */,
+				1654E148757D47C399026CA2 /* AIInsightsStateModel.swift in Sources */,
+				C7C8D8354E63450CA571EC7F /* AIInsightsProvider.swift in Sources */,
+				2643E278F279487DBC4A5B43 /* AIInsightsDataFlow.swift in Sources */,
 				DDA40BBA2F4DB18800257798 /* AlgorithmGlucose.swift in Sources */,
 				DD5DC9F12CF3D97C00AB8703 /* AdjustmentsStateModel+Overrides.swift in Sources */,
 				3811DE2325C9D48300A708ED /* MainDataFlow.swift in Sources */,

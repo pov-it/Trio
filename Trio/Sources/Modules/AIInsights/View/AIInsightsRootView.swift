@@ -13,15 +13,23 @@ extension AIInsights {
 
         var body: some View {
             Form {
-                Section(header: Text("Configuration")) {
+                Section(header: Text("Google Gemini Configuration")) {
                     SecureField("API Key", text: $state.apiKey)
-                    TextField("Base URL", text: $state.baseURL)
+                        .onChange(of: state.apiKey) { _ in
+                            state.saveAPIKey()
+                        }
                     TextField("Model", text: $state.model)
+                    Text("Using Google Gemini for AI Insights. Make sure your API key has access to the specified model.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
                 
-                Section(header: Text("zGluco Data")) {
+                Section(header: Text("Manual Context (zGluco)")) {
                     TextEditor(text: $state.zglucoData)
                         .frame(height: 100)
+                    Text("Additional text data from zGluco reports can be pasted here to provide more context to the AI.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
                 
                 Section {
@@ -31,19 +39,27 @@ extension AIInsights {
                         }
                     }) {
                         if state.isGenerating {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle())
+                            HStack {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle())
+                                    .padding(.trailing, 5)
+                                Text("Analyzing Data...")
+                            }
                         } else {
-                            Text("Generate Insights")
+                            Text("Generate AI Insights")
                         }
                     }
                     .disabled(state.isGenerating || state.apiKey.isEmpty)
                 }
                 
                 if !state.insightsResult.isEmpty {
-                    Section(header: Text("AI Insights")) {
-                        Text(state.insightsResult)
-                            .font(.body)
+                    Section(header: Text("Results")) {
+                        ScrollView {
+                            Text(state.insightsResult)
+                                .font(.system(.body, design: .monospaced))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(minHeight: 200)
                     }
                 }
             }
