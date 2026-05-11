@@ -5,6 +5,12 @@
       "comment" : "Bundle display name",
       "extractionState" : "extracted_with_value",
       "localizations" : {
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trio"
+          }
+        },
         "en" : {
           "stringUnit" : {
             "state" : "new",
@@ -17,6 +23,12 @@
       "comment" : "Bundle name",
       "extractionState" : "extracted_with_value",
       "localizations" : {
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trio"
+          }
+        },
         "en" : {
           "stringUnit" : {
             "state" : "new",
@@ -104,7 +116,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "NFC wordt gebruikt voor het scannen van Libre sensoren."
+            "value" : "NFC wordt gebruikt om Libre-sensoren te scannen."
           }
         },
         "pl" : {
@@ -248,7 +260,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Bluetooth wordt gebruikt om te communiceren met de insuline pomp en de continue glucose meter"
+            "value" : "Bluetooth wordt gebruikt om met je insulinepomp en continue glucosemonitor (CGM) te communiceren."
           }
         },
         "pl" : {
@@ -392,7 +404,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Bluetooth wordt gebruikt om te communiceren met de insuline pomp en de continue glucose meter"
+            "value" : "Bluetooth wordt gebruikt om met je insulinepomp en continue glucosemonitor (CGM) te communiceren."
           }
         },
         "pl" : {
@@ -461,6 +473,12 @@
       "comment" : "Privacy - Calendars Full Access Usage Description",
       "extractionState" : "extracted_with_value",
       "localizations" : {
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenda-toegang wordt gebruikt om glucosewaarden als agenda-afspraken aan te maken, zodat ze op Apple Watch en CarPlay zichtbaar zijn."
+          }
+        },
         "en" : {
           "stringUnit" : {
             "state" : "new",
@@ -512,7 +530,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Agenda wordt gebruikt om nieuwe glucose gebeurtenissen aan te maken."
+            "value" : "Agenda wordt gebruikt om nieuwe glucosegebeurtenissen aan te maken."
           }
         },
         "ru" : {
@@ -562,6 +580,12 @@
     "NSContactsUsageDescription" : {
       "comment" : "Privacy - Contacts Usage Description",
       "localizations" : {
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trio gebruikt je contacten voor live updates op de Apple Watch-contactcomplicatie via de functie Contact Trick."
+          }
+        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
@@ -613,7 +637,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Voor geautoriseerde toegang tot bolus"
+            "value" : "Voor geautoriseerde toegang tot bolussen."
           }
         },
         "ru" : {
@@ -738,7 +762,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Apple Gezondheid wordt gebruikt om bloedglucose, insuline en koolhydraten op te slaan"
+            "value" : "Apple Gezondheid wordt gebruikt om bloedglucose, insuline en koolhydraten op te slaan."
           }
         },
         "pl" : {
@@ -881,7 +905,7 @@
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Apple Gezondheid wordt gebruikt om bloedglucose, insuline en koolhydraten op te slaan"
+            "value" : "Apple Gezondheid wordt gebruikt om bloedglucose, insuline en koolhydraten op te slaan."
           }
         },
         "pl" : {
