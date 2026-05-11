@@ -315,7 +315,7 @@ extension AIInsights {
 
 // MARK: - Array Average Extension
 
-private extension [Double] {
+private extension Array where Element == Double {
     var mean: Double? {
         guard !isEmpty else { return nil }
         return reduce(0, +) / Double(count)

@@ -2,7 +2,7 @@ import CoreData
 import Observation
 import SwiftUI
 
-extension [Decimal] {
+extension Array where Element == Decimal {
     func findClosestIndex(to target: Element) -> Int? {
         guard !isEmpty else { return nil }
 
