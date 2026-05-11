@@ -103,13 +103,14 @@ extension AIInsights {
             // Filter glucose to period
             let filteredGlucose = glucose.filter { gl ->
                 Bool in
-                guard let date = gl.dateString else { return false }
+                let date = gl.dateString
                 return date >= startDate && date <= endDate
             }
 
             // Build glucose points
             let glucosePoints = filteredGlucose.compactMap { gl -> GlucosePoint? in
-                guard let sgv = gl.sgv, let date = gl.dateString else { return nil }
+                guard let sgv = gl.sgv else { return nil }
+                let date = gl.dateString
                 let glucoseValue = units == .mmolL ? Double(Decimal(sgv).asMmolL) : Double(sgv)
                 return GlucosePoint(
                     date: date,
@@ -139,7 +140,7 @@ extension AIInsights {
             let gmi = computeGMI(averageGlucose: averageGlucose, units: units)
 
             // Hourly averages
-            let hourlyGlucose = computeHourlyAverages(glucosePoints)
+            let hourlyGlucose = computeHourlyAverages(points: glucosePoints)
 
             // Pattern detection
             let patterns = detectPatterns(hourlyGlucose: hourlyGlucose, tir: tir, stdDev: glucoseStdDev)
@@ -249,8 +250,10 @@ extension AIInsights {
             // Dawn phenomenon: 3-7 AM average significantly higher than overnight
             let earlyMorning = hourlyGlucose.filter { $0.hour >= 3 && $0.hour <= 7 }
             let overnight = hourlyGlucose.filter { $0.hour >= 0 && $0.hour <= 2 }
-            if let earlyAvg = earlyMorning.map(\.average).mean,
-               let nightAvg = overnight.map(\.average).mean,
+            let earlyMorningAvgArray: [Double] = earlyMorning.map(\.average)
+            let overnightAvgArray: [Double] = overnight.map(\.average)
+            if let earlyAvg = earlyMorningAvgArray.mean,
+               let nightAvg = overnightAvgArray.mean,
                earlyAvg > nightAvg + 20
             {
                 patterns.append(.dawnPhenomenon)
@@ -258,7 +261,8 @@ extension AIInsights {
 
             // Overnight low: average glucose between 0-5 AM below low threshold
             let lateNight = hourlyGlucose.filter { $0.hour >= 0 && $0.hour <= 5 }
-            if let nightAvg = lateNight.map(\.average).mean, nightAvg < 70 {
+            let lateNightAvgArray: [Double] = lateNight.map(\.average)
+            if let nightAvg = lateNightAvgArray.mean, nightAvg < 70 {
                 patterns.append(.overnightLow)
             }
 

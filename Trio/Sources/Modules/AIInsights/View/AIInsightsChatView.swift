@@ -322,16 +322,4 @@ private struct ErrorBubble: View {
     }
 }
 
-// MARK: - AnyShapeStyle helper
 
-private struct AnyShapeStyle: ShapeStyle {
-    let resolvedStyle: any ShapeStyle
-
-    init<S: ShapeStyle>(_ style: S) {
-        resolvedStyle = style
-    }
-
-    func resolve(in environment: inout EnvironmentValues) -> some Shape {
-        resolvedStyle.resolve(in: &environment)
-    }
-}
