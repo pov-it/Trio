@@ -39,6 +39,70 @@ struct AlertEntry: JSON, Codable, Hashable {
     }
 }
 
+extension AlertEntry {
+    var interruptionLevel: Alert.InterruptionLevel? {
+        guard let primitiveInterruptionLevel else {
+            return nil
+        }
+
+        return Alert.InterruptionLevel(storedValue: NSDecimalNumber(decimal: primitiveInterruptionLevel))
+    }
+
+    var allowsCriticalNotificationSound: Bool {
+        guard case .critical? = interruptionLevel else {
+            return false
+        }
+
+        return !isSensorExpirationReminder
+    }
+
+    var isSensorExpirationReminder: Bool {
+        let alertText = [
+            alertIdentifier,
+            managerIdentifier,
+            contentTitle,
+            contentBody,
+            errorMessage
+        ]
+        .compactMap { $0 }
+        .joined(separator: " ")
+        .lowercased()
+
+        let sensorTerms = ["sensor", "cgm", "transmitter"]
+        let expiryReminderTerms = [
+            "expires in",
+            "expires soon",
+            "will expire",
+            "expiration soon",
+            "is ending",
+            "ending soon",
+            "ends in",
+            "will end",
+            "time remaining",
+            "replace sensor",
+            "loopt bijna af",
+            "loopt af",
+            "verloopt",
+            "eindigt"
+        ]
+        let alreadyExpiredTerms = [
+            "expired",
+            "has expired",
+            "ended",
+            "has ended",
+            "session ended",
+            "is verlopen"
+        ]
+
+        let mentionsSensor = sensorTerms.contains { alertText.contains($0) }
+        let mentionsExpiryReminder = expiryReminderTerms.contains { alertText.contains($0) }
+        let isAlreadyExpired = alreadyExpiredTerms.contains { alertText.contains($0) }
+
+        // Pre-expiry sensor reminders are useful, but should not bypass sleep/focus as critical alerts.
+        return mentionsSensor && mentionsExpiryReminder && !isAlreadyExpired
+    }
+}
+
 //
 //  StoredAlert.swift
 //  Loop

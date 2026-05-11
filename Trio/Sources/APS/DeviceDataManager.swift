@@ -649,7 +649,7 @@ extension BaseDeviceDataManager: DeviceManagerDelegate {
         alertHistoryStorage.addAlert(
             AlertEntry(
                 alertIdentifier: alert.identifier.alertIdentifier,
-                primitiveInterruptionLevel: alert.interruptionLevel.storedValue as? Decimal,
+                primitiveInterruptionLevel: alert.interruptionLevel.storedValue.decimalValue,
                 issuedDate: Date(),
                 managerIdentifier: alert.identifier.managerIdentifier,
                 triggerType: alert.trigger.storedType,

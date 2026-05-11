@@ -632,7 +632,7 @@ extension BaseUserNotificationsManager: pumpNotificationObserver {
         }
         content.title = alert.contentTitle ?? "Unknown"
         content.body = alert.contentBody ?? "Unknown"
-        content.sound = .default
+        content.sound = alert.allowsCriticalNotificationSound ? .defaultCritical : .default
         addRequest(
             identifier: .pumpNotification,
             content: content,
