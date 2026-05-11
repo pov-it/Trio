@@ -79,7 +79,7 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var aiProvider: AIInsights.AIProvider = .google
     var aiModel: String = "gemini-1.5-flash"
     var aiBaseURL: String = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-    var aiSystemPrompt: String = "Analyze the following glucose and treatment data for a person with Type 1 Diabetes.\nFormat your response strictly using this structure:\nObservation: [Summary of the situation]\nEvidence: [Specific data points supporting the observation]\nInterpretation: [What this means for the treatment]\nCandidate Adjustment: [Proposed changes to settings like basal, ISF, or CR]\nEvaluation: [What to watch for after making changes]"
+    var aiSystemPrompt: String = AIInsights.defaultSystemPrompt
 
     /// Selected Garmin watchface (Trio or SwissAlpine)
     var garminWatchface: GarminWatchface = .trio

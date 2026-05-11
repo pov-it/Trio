@@ -1,15 +1,11 @@
 import SwiftUI
 import Swinject
+import UIKit
 
 extension AIInsights {
     struct RootView: BaseView {
         let resolver: Resolver
-        @State var state: StateModel
-
-        init(resolver: Resolver) {
-            self.resolver = resolver
-            _state = State(initialValue: StateModel(resolver: resolver))
-        }
+        @State var state = StateModel()
 
         var body: some View {
             Form {
@@ -29,7 +25,13 @@ extension AIInsights {
                         }
                     
                     TextField("Model", text: $state.model)
+                        .onChange(of: state.model) { _ in
+                            state.saveSettings()
+                        }
                     TextField("Base URL", text: $state.baseURL)
+                        .onChange(of: state.baseURL) { _ in
+                            state.saveSettings()
+                        }
                     
                     Button("Reset to Defaults") {
                         state.resetToDefaults()
@@ -41,6 +43,9 @@ extension AIInsights {
                     TextEditor(text: $state.systemPrompt)
                         .frame(height: 150)
                         .font(.system(.body, design: .monospaced))
+                        .onChange(of: state.systemPrompt) { _ in
+                            state.saveSettings()
+                        }
                     Text("The instructions given to the AI. Use this to customize the analysis style and focus.")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -84,6 +89,7 @@ extension AIInsights {
                     }
                 }
             }
+            .onAppear(perform: configureView)
             .navigationTitle("AI Insights")
             .navigationBarTitleDisplayMode(.inline)
         }

@@ -11,6 +11,7 @@
 		1654E148757D47C399026CA2 /* AIInsightsStateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B04F560D0E4AF897D805ED /* AIInsightsStateModel.swift */; };
 		C7C8D8354E63450CA571EC7F /* AIInsightsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */; };
 		2643E278F279487DBC4A5B43 /* AIInsightsDataFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F58F806C7AC54FA2A5AA7A87 /* AIInsightsDataFlow.swift */; };
+		7B4D2C611A9D4F5FA4243D65 /* ZGlucoParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D54C0C321B4C65A5C42097 /* ZGlucoParser.swift */; };
 		041D1E995A6AE92E9289DC49 /* TreatmentsDataFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8D1A7CA8C10C4403D4BBFA7 /* TreatmentsDataFlow.swift */; };
 		0437CE46C12535A56504EC19 /* SnoozeRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5822B15939E719628E9FF7C /* SnoozeRootView.swift */; };
 		0D9A5E34A899219C5C4CDFAF /* HistoryStateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9455FA2D92E77A6C4AFED8A3 /* HistoryStateModel.swift */; };
@@ -878,6 +879,7 @@
 		77B04F560D0E4AF897D805ED /* AIInsightsStateModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsStateModel.swift; sourceTree = "<group>"; };
 		9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsProvider.swift; sourceTree = "<group>"; };
 		F58F806C7AC54FA2A5AA7A87 /* AIInsightsDataFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsDataFlow.swift; sourceTree = "<group>"; };
+		F8D54C0C321B4C65A5C42097 /* ZGlucoParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZGlucoParser.swift; sourceTree = "<group>"; };
 		110AEDE02C5193D100615CC9 /* BolusIntent.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BolusIntent.swift; sourceTree = "<group>"; };
 		110AEDE12C5193D100615CC9 /* BolusIntentRequest.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BolusIntentRequest.swift; sourceTree = "<group>"; };
 		110AEDE52C51A0AE00615CC9 /* ShortcutsConfigView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ShortcutsConfigView.swift; sourceTree = "<group>"; };
@@ -1730,6 +1732,7 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 				F58F806C7AC54FA2A5AA7A87 /* AIInsightsDataFlow.swift */,
 				9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */,
 				77B04F560D0E4AF897D805ED /* AIInsightsStateModel.swift */,
+				F8D54C0C321B4C65A5C42097 /* ZGlucoParser.swift */,
 				E1D69A8BBF1D49FB9AF8DF95 /* View */,
 			);
 			path = AIInsights;
@@ -1974,6 +1977,7 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 			isa = PBXGroup;
 			children = (
 				DDD163032C4C67B400CD525A /* Adjustments */,
+				1307459B9D494BECAB3B785F /* AIInsights */,
 				DD1745382C55BF8B00211FAC /* AlgorithmAdvancedSettings */,
 				DDF690FE2DA2C9EE008BF16C /* AppDiagnostics */,
 				DD1745422C55C5C400211FAC /* AutosensSettings */,
@@ -4279,6 +4283,7 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 				1654E148757D47C399026CA2 /* AIInsightsStateModel.swift in Sources */,
 				C7C8D8354E63450CA571EC7F /* AIInsightsProvider.swift in Sources */,
 				2643E278F279487DBC4A5B43 /* AIInsightsDataFlow.swift in Sources */,
+				7B4D2C611A9D4F5FA4243D65 /* ZGlucoParser.swift in Sources */,
 				DDA40BBA2F4DB18800257798 /* AlgorithmGlucose.swift in Sources */,
 				DD5DC9F12CF3D97C00AB8703 /* AdjustmentsStateModel+Overrides.swift in Sources */,
 				3811DE2325C9D48300A708ED /* MainDataFlow.swift in Sources */,

@@ -1,6 +1,17 @@
 import Foundation
 
 enum AIInsights {
+    static let defaultSystemPrompt = """
+    Analyze the following glucose and treatment data for a person with Type 1 Diabetes.
+    Format your response strictly using this structure:
+    Observation: [Summary of the situation]
+    Evidence: [Specific data points supporting the observation]
+    Possible interpretation: [What this may mean]
+    Candidate adjustment: [Conservative setting change to consider]
+    Evaluation plan: [What to watch for after making changes]
+    Reasons not to change: [Contraindications or reasons the evidence is weak]
+    """
+
     enum AIProvider: String, CaseIterable, Identifiable, Codable, JSON {
         case google = "Google Gemini"
         case openai = "OpenAI"

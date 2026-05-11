@@ -7,44 +7,51 @@ extension AIInsights {
         var isGenerating: Bool = false
         var insightsResult: String = ""
         var apiKey: String = ""
-        
-        var providerType: AIProvider {
-            get { provider.settings.aiProvider }
-            set { provider.settings.aiProvider = newValue }
-        }
-        
-        var model: String {
-            get { provider.settings.aiModel }
-            set { provider.settings.aiModel = newValue }
-        }
-        
-        var baseURL: String {
-            get { provider.settings.aiBaseURL }
-            set { provider.settings.aiBaseURL = newValue }
-        }
-        
-        var systemPrompt: String {
-            get { provider.settings.aiSystemPrompt }
-            set { provider.settings.aiSystemPrompt = newValue }
-        }
+        var providerType: AIProvider = .google
+        var model: String = AIProvider.google.defaultModel
+        var baseURL: String = AIProvider.google.defaultBaseURL
+        var systemPrompt: String = AIInsights.defaultSystemPrompt
         
         override func subscribe() {
             if let savedKey = provider.keychain.getValue(String.self, forKey: "ai_insights_api_key") {
                 self.apiKey = savedKey
             }
+
+            providerType = provider.settings.aiProvider
+            model = provider.settings.aiModel
+            baseURL = provider.settings.aiBaseURL
+            systemPrompt = provider.settings.aiSystemPrompt
         }
         
         func saveAPIKey() {
+            guard provider != nil else { return }
             provider.keychain.setValue(apiKey, forKey: "ai_insights_api_key")
+        }
+
+        func saveSettings() {
+            guard provider != nil else { return }
+
+            var settings = provider.settings
+            settings.aiProvider = providerType
+            settings.aiModel = model
+            settings.aiBaseURL = baseURL
+            settings.aiSystemPrompt = systemPrompt
+            provider.settings = settings
         }
         
         func resetToDefaults() {
             baseURL = providerType.defaultBaseURL
             model = providerType.defaultModel
+            saveSettings()
         }
         
         @MainActor
         func generateInsights() async {
+            guard provider != nil else {
+                insightsResult = "Error: AI Insights is not ready yet."
+                return
+            }
+
             guard !apiKey.isEmpty else {
                 insightsResult = "Error: API Key is missing."
                 return
@@ -58,7 +65,7 @@ extension AIInsights {
                 let carbs = await provider.fetchCarbs()
                 
                 let dataContext = """
-                Glucose (last 24h): \(glucose.map { "\($0.dateString): \($0.sgv) \($0.direction ?? "")" }.joined(separator: "\n"))
+                Glucose (last 24h): \(glucose.map { "\($0.dateString): \($0.sgv ?? 0) \($0.direction?.rawValue ?? "")" }.joined(separator: "\n"))
                 Carbs: \(carbs.map { "\($0.createdAt): \($0.carbs)g" }.joined(separator: "\n"))
                 """
                 
