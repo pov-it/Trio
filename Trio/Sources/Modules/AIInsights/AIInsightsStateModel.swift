@@ -7,10 +7,26 @@ extension AIInsights {
         var isGenerating: Bool = false
         var insightsResult: String = ""
         var apiKey: String = ""
-        var baseURL: String = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-        var model: String = "gemini-1.5-flash"
         
-        var zglucoData: String = ""
+        var providerType: AIProvider {
+            get { provider.settings.aiProvider }
+            set { provider.settings.aiProvider = newValue }
+        }
+        
+        var model: String {
+            get { provider.settings.aiModel }
+            set { provider.settings.aiModel = newValue }
+        }
+        
+        var baseURL: String {
+            get { provider.settings.aiBaseURL }
+            set { provider.settings.aiBaseURL = newValue }
+        }
+        
+        var systemPrompt: String {
+            get { provider.settings.aiSystemPrompt }
+            set { provider.settings.aiSystemPrompt = newValue }
+        }
         
         override func subscribe() {
             if let savedKey = provider.keychain.getValue(String.self, forKey: "ai_insights_api_key") {
@@ -20,6 +36,11 @@ extension AIInsights {
         
         func saveAPIKey() {
             provider.keychain.setValue(apiKey, forKey: "ai_insights_api_key")
+        }
+        
+        func resetToDefaults() {
+            baseURL = providerType.defaultBaseURL
+            model = providerType.defaultModel
         }
         
         @MainActor
@@ -33,66 +54,100 @@ extension AIInsights {
             defer { isGenerating = false }
             
             do {
-                // Fetch data from Nightscout
                 let glucose = await provider.fetchGlucose(since: Date().addingTimeInterval(-24 * 3600))
                 let carbs = await provider.fetchCarbs()
                 
-                let promptText = """
-                Analyze the following glucose and treatment data for a person with Type 1 Diabetes.
-                Format your response strictly using this structure:
-                Observation: [Summary of the situation]
-                Evidence: [Specific data points supporting the observation]
-                Interpretation: [What this means for the treatment]
-                Candidate Adjustment: [Proposed changes to settings like basal, ISF, or CR]
-                Evaluation: [What to watch for after making changes]
-                
-                Data:
+                let dataContext = """
                 Glucose (last 24h): \(glucose.map { "\($0.dateString): \($0.sgv) \($0.direction ?? "")" }.joined(separator: "\n"))
                 Carbs: \(carbs.map { "\($0.createdAt): \($0.carbs)g" }.joined(separator: "\n"))
-                
-                Additional Context (zGluco):
-                \(zglucoData)
                 """
                 
-                let urlString = "\(baseURL)?key=\(apiKey)"
-                guard let url = URL(string: urlString) else { throw URLError(.badURL) }
+                let fullPrompt = "\(systemPrompt)\n\nData:\n\(dataContext)"
                 
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-                
-                let body: [String: Any] = [
-                    "contents": [[
-                        "parts": [[
-                            "text": promptText
-                        ]]
-                    ]]
-                ]
-                
-                request.httpBody = try JSONSerialization.data(withJSONObject: body)
-                
-                let (data, response) = try await URLSession.shared.data(for: request)
-                
-                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                    let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
-                    insightsResult = "Error from Gemini API: \(errorBody)"
-                    return
-                }
-                
-                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let candidates = json["candidates"] as? [[String: Any]],
-                   let firstCandidate = candidates.first,
-                   let content = firstCandidate["content"] as? [String: Any],
-                   let parts = content["parts"] as? [[String: Any]],
-                   let firstPart = parts.first,
-                   let text = firstPart["text"] as? String {
-                    insightsResult = text
-                } else {
-                    insightsResult = "Error: Could not parse response from Gemini."
+                switch providerType {
+                case .google:
+                    try await callGemini(prompt: fullPrompt)
+                case .openai, .custom:
+                    try await callOpenAICompatible(prompt: fullPrompt)
                 }
                 
             } catch {
                 insightsResult = "Error generating insights: \(error.localizedDescription)"
+            }
+        }
+        
+        private func callGemini(prompt: String) async throws {
+            let urlString = "\(baseURL)?key=\(apiKey)"
+            guard let url = URL(string: urlString) else { throw URLError(.badURL) }
+            
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            
+            let body: [String: Any] = [
+                "contents": [[
+                    "parts": [[
+                        "text": prompt
+                    ]]
+                ]]
+            ]
+            
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+                insightsResult = "Error from Gemini API (\((response as? HTTPURLResponse)?.statusCode ?? 0)): \(errorBody)"
+                return
+            }
+            
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let candidates = json["candidates"] as? [[String: Any]],
+               let firstCandidate = candidates.first,
+               let content = firstCandidate["content"] as? [String: Any],
+               let parts = content["parts"] as? [[String: Any]],
+               let firstPart = parts.first,
+               let text = firstPart["text"] as? String {
+                insightsResult = text
+            } else {
+                insightsResult = "Error: Could not parse response from Gemini."
+            }
+        }
+        
+        private func callOpenAICompatible(prompt: String) async throws {
+            guard let url = URL(string: baseURL) else { throw URLError(.badURL) }
+            
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            
+            let body: [String: Any] = [
+                "model": model,
+                "messages": [
+                    ["role": "user", "content": prompt]
+                ]
+            ]
+            
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+                insightsResult = "Error from API (\((response as? HTTPURLResponse)?.statusCode ?? 0)): \(errorBody)"
+                return
+            }
+            
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let choices = json["choices"] as? [[String: Any]],
+               let firstChoice = choices.first,
+               let message = firstChoice["message"] as? [String: Any],
+               let content = message["content"] as? String {
+                insightsResult = content
+            } else {
+                insightsResult = "Error: Could not parse response from API."
             }
         }
     }

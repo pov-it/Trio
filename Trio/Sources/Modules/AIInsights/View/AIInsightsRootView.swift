@@ -13,21 +13,35 @@ extension AIInsights {
 
         var body: some View {
             Form {
-                Section(header: Text("Google Gemini Configuration")) {
+                Section(header: Text("AI Provider Configuration")) {
+                    Picker("Provider", selection: $state.providerType) {
+                        ForEach(AIProvider.allCases) { provider in
+                            Text(provider.rawValue).tag(provider)
+                        }
+                    }
+                    .onChange(of: state.providerType) { _ in
+                        state.resetToDefaults()
+                    }
+                    
                     SecureField("API Key", text: $state.apiKey)
                         .onChange(of: state.apiKey) { _ in
                             state.saveAPIKey()
                         }
+                    
                     TextField("Model", text: $state.model)
-                    Text("Using Google Gemini for AI Insights. Make sure your API key has access to the specified model.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    TextField("Base URL", text: $state.baseURL)
+                    
+                    Button("Reset to Defaults") {
+                        state.resetToDefaults()
+                    }
+                    .font(.caption)
                 }
                 
-                Section(header: Text("Manual Context (zGluco)")) {
-                    TextEditor(text: $state.zglucoData)
-                        .frame(height: 100)
-                    Text("Additional text data from zGluco reports can be pasted here to provide more context to the AI.")
+                Section(header: Text("System Prompt")) {
+                    TextEditor(text: $state.systemPrompt)
+                        .frame(height: 150)
+                        .font(.system(.body, design: .monospaced))
+                    Text("The instructions given to the AI. Use this to customize the analysis style and focus.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -60,6 +74,13 @@ extension AIInsights {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .frame(minHeight: 200)
+                        
+                        Button(action: {
+                            UIPasteboard.general.string = state.insightsResult
+                        }) {
+                            Label("Copy to Clipboard", systemImage: "doc.on.doc")
+                        }
+                        .font(.caption)
                     }
                 }
             }

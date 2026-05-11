@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		67EB1D800233401EAA7FBEE9 /* ZGlucoParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17529C0F13BA4AB79FAFCDE6 /* ZGlucoParser.swift */; };
 		BA986A0471AE45108775314B /* AIInsightsRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E69494986447F4BF5EC179 /* AIInsightsRootView.swift */; };
 		1654E148757D47C399026CA2 /* AIInsightsStateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B04F560D0E4AF897D805ED /* AIInsightsStateModel.swift */; };
 		C7C8D8354E63450CA571EC7F /* AIInsightsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */; };
@@ -875,7 +874,6 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		17529C0F13BA4AB79FAFCDE6 /* ZGlucoParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZGlucoParser.swift; sourceTree = "<group>"; };
 		C2E69494986447F4BF5EC179 /* AIInsightsRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsRootView.swift; sourceTree = "<group>"; };
 		77B04F560D0E4AF897D805ED /* AIInsightsStateModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsStateModel.swift; sourceTree = "<group>"; };
 		9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsProvider.swift; sourceTree = "<group>"; };
@@ -1732,7 +1730,6 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 				F58F806C7AC54FA2A5AA7A87 /* AIInsightsDataFlow.swift */,
 				9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */,
 				77B04F560D0E4AF897D805ED /* AIInsightsStateModel.swift */,
-				17529C0F13BA4AB79FAFCDE6 /* ZGlucoParser.swift */,
 				E1D69A8BBF1D49FB9AF8DF95 /* View */,
 			);
 			path = AIInsights;
@@ -4278,7 +4275,6 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				67EB1D800233401EAA7FBEE9 /* ZGlucoParser.swift in Sources */,
 				BA986A0471AE45108775314B /* AIInsightsRootView.swift in Sources */,
 				1654E148757D47C399026CA2 /* AIInsightsStateModel.swift in Sources */,
 				C7C8D8354E63450CA571EC7F /* AIInsightsProvider.swift in Sources */,

@@ -76,6 +76,10 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var bolusShortcut: BolusShortcutLimit = .notAllowed
     var timeInRangeType: TimeInRangeType = .timeInTightRange
     var requireAdjustmentsConfirmation: Bool = false
+    var aiProvider: AIInsights.AIProvider = .google
+    var aiModel: String = "gemini-1.5-flash"
+    var aiBaseURL: String = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    var aiSystemPrompt: String = "Analyze the following glucose and treatment data for a person with Type 1 Diabetes.\nFormat your response strictly using this structure:\nObservation: [Summary of the situation]\nEvidence: [Specific data points supporting the observation]\nInterpretation: [What this means for the treatment]\nCandidate Adjustment: [Proposed changes to settings like basal, ISF, or CR]\nEvaluation: [What to watch for after making changes]"
 
     /// Selected Garmin watchface (Trio or SwissAlpine)
     var garminWatchface: GarminWatchface = .trio
@@ -386,6 +390,22 @@ extension TrioSettings: Decodable {
 
         if let isWatchfaceDataEnabled = try? container.decode(Bool.self, forKey: .isWatchfaceDataEnabled) {
             settings.isWatchfaceDataEnabled = isWatchfaceDataEnabled
+        }
+
+        if let aiProvider = try? container.decode(AIInsights.AIProvider.self, forKey: .aiProvider) {
+            settings.aiProvider = aiProvider
+        }
+
+        if let aiModel = try? container.decode(String.self, forKey: .aiModel) {
+            settings.aiModel = aiModel
+        }
+
+        if let aiBaseURL = try? container.decode(String.self, forKey: .aiBaseURL) {
+            settings.aiBaseURL = aiBaseURL
+        }
+
+        if let aiSystemPrompt = try? container.decode(String.self, forKey: .aiSystemPrompt) {
+            settings.aiSystemPrompt = aiSystemPrompt
         }
 
         self = settings
