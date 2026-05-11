@@ -77,9 +77,12 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var timeInRangeType: TimeInRangeType = .timeInTightRange
     var requireAdjustmentsConfirmation: Bool = false
     var aiProvider: AIInsights.AIProvider = .google
-    var aiModel: String = "gemini-1.5-flash"
-    var aiBaseURL: String = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    var aiModel: String = AIInsights.AIProvider.google.defaultModel
+    var aiBaseURL: String = AIInsights.AIProvider.google.defaultEndpoint
     var aiSystemPrompt: String = AIInsights.defaultSystemPrompt
+    var aiEnabled: Bool = false
+    var aiAnalysisPeriodDays: Int = 7
+    var aiPersonality: AIPersonality = .clinicalExpert
 
     /// Selected Garmin watchface (Trio or SwissAlpine)
     var garminWatchface: GarminWatchface = .trio
@@ -408,6 +411,47 @@ extension TrioSettings: Decodable {
             settings.aiSystemPrompt = aiSystemPrompt
         }
 
+        if let aiEnabled = try? container.decode(Bool.self, forKey: .aiEnabled) {
+            settings.aiEnabled = aiEnabled
+        }
+
+        if let aiAnalysisPeriodDays = try? container.decode(Int.self, forKey: .aiAnalysisPeriodDays) {
+            settings.aiAnalysisPeriodDays = aiAnalysisPeriodDays
+        }
+
+        if let aiPersonality = try? container.decode(AIPersonality.self, forKey: .aiPersonality) {
+            settings.aiPersonality = aiPersonality
+        }
+
         self = settings
+    }
+}
+
+// MARK: - AI Personality
+
+enum AIPersonality: String, CaseIterable, Identifiable, Codable, JSON {
+    case clinicalExpert = "Clinical Expert"
+    case supportiveCoach = "Supportive Coach"
+    case dryWit = "Dry Wit"
+    case toughLove = "Tough Love"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .clinicalExpert: return String(localized: "Clinical Expert", comment: "AI personality style")
+        case .supportiveCoach: return String(localized: "Supportive Coach", comment: "AI personality style")
+        case .dryWit: return String(localized: "Dry Wit", comment: "AI personality style")
+        case .toughLove: return String(localized: "Tough Love", comment: "AI personality style")
+        }
+    }
+
+    var systemPromptSuffix: String {
+        switch self {
+        case .clinicalExpert: return "Use precise medical terminology. Be concise and evidence-based."
+        case .supportiveCoach: return "Be warm and encouraging. Acknowledge the effort of managing diabetes. Use supportive language."
+        case .dryWit: return "Use dry humor where appropriate. Keep it factual but not boring. A light touch helps with tough topics."
+        case .toughLove: return "Be direct and honest. If settings are clearly off, say so plainly. No sugar-coating."
+        }
     }
 }

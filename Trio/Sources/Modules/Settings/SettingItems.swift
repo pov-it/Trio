@@ -259,6 +259,44 @@ enum SettingItems {
         )
     ]
 
+    static let aiItems = [
+        SettingItem(
+            title: "AI Insights",
+            view: .aiInsights,
+            searchContents: [
+                "AI Chat",
+                "AI Provider",
+                "API Key",
+                "AI Model",
+                "AI Personality",
+                "Analysis Period",
+                "System Prompt",
+                "Enable AI Insights"
+            ],
+            path: ["AI", "AI Insights"]
+        ),
+        SettingItem(
+            title: "AI Settings",
+            view: .aiSettings,
+            searchContents: [
+                "AI Provider",
+                "Google Gemini",
+                "OpenAI",
+                "Anthropic",
+                "API Key",
+                "Model",
+                "Endpoint URL",
+                "Test Connection",
+                "Analysis Period",
+                "AI Personality",
+                "Clinical Expert",
+                "Supportive Coach",
+                "System Prompt"
+            ],
+            path: ["AI", "AI Settings"]
+        )
+    ]
+
     static let notificationItems = [
         SettingItem(title: "Manage iOS Preferences", view: .notificationSettings),
         SettingItem(
@@ -331,7 +369,7 @@ enum SettingItems {
     ]
 
     static var allItems: [SettingItem] {
-        trioConfig + devicesItems + therapyItems + algorithmItems + trioFeaturesItems + notificationItems + serviceItems
+        trioConfig + devicesItems + therapyItems + algorithmItems + trioFeaturesItems + aiItems + notificationItems + serviceItems
     }
 
     static func filteredItems(searchText: String) -> [FilteredSettingItem] {

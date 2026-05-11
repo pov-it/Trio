@@ -9,9 +9,12 @@ extension AIInsights {
         var apiKey: String = ""
         var providerType: AIProvider = .google
         var model: String = AIProvider.google.defaultModel
-        var baseURL: String = AIProvider.google.defaultBaseURL
+        var baseURL: String = AIProvider.google.defaultEndpoint
         var systemPrompt: String = AIInsights.defaultSystemPrompt
-        
+        var personality: AIPersonality = .clinicalExpert
+        var analysisPeriodDays: Int = 7
+        var aiEnabled: Bool = false
+
         override func subscribe() {
             if let savedKey = provider.keychain.getValue(String.self, forKey: "ai_insights_api_key") {
                 self.apiKey = savedKey
@@ -21,8 +24,11 @@ extension AIInsights {
             model = provider.settings.aiModel
             baseURL = provider.settings.aiBaseURL
             systemPrompt = provider.settings.aiSystemPrompt
+            personality = provider.settings.aiPersonality
+            analysisPeriodDays = provider.settings.aiAnalysisPeriodDays
+            aiEnabled = provider.settings.aiEnabled
         }
-        
+
         func saveAPIKey() {
             guard provider != nil else { return }
             provider.keychain.setValue(apiKey, forKey: "ai_insights_api_key")
@@ -36,15 +42,18 @@ extension AIInsights {
             settings.aiModel = model
             settings.aiBaseURL = baseURL
             settings.aiSystemPrompt = systemPrompt
+            settings.aiPersonality = personality
+            settings.aiAnalysisPeriodDays = analysisPeriodDays
+            settings.aiEnabled = aiEnabled
             provider.settings = settings
         }
-        
+
         func resetToDefaults() {
-            baseURL = providerType.defaultBaseURL
+            baseURL = providerType.defaultEndpoint
             model = providerType.defaultModel
             saveSettings()
         }
-        
+
         @MainActor
         func generateInsights() async {
             guard provider != nil else {
@@ -56,105 +65,46 @@ extension AIInsights {
                 insightsResult = "Error: API Key is missing."
                 return
             }
-            
+
             isGenerating = true
             defer { isGenerating = false }
-            
+
             do {
                 let glucose = await provider.fetchGlucose(since: Date().addingTimeInterval(-24 * 3600))
                 let carbs = await provider.fetchCarbs()
-                
+
                 let dataContext = """
                 Glucose (last 24h): \(glucose.map { "\($0.dateString): \($0.sgv ?? 0) \($0.direction?.rawValue ?? "")" }.joined(separator: "\n"))
                 Carbs: \(carbs.map { "\($0.createdAt): \($0.carbs)g" }.joined(separator: "\n"))
                 """
-                
-                let fullPrompt = "\(systemPrompt)\n\nData:\n\(dataContext)"
-                
-                switch providerType {
-                case .google:
-                    try await callGemini(prompt: fullPrompt)
-                case .openai, .custom:
-                    try await callOpenAICompatible(prompt: fullPrompt)
-                }
-                
+
+                let personalitySuffix = personality.systemPromptSuffix
+                let fullPrompt = "\(systemPrompt)\n\nPERSONALITY: \(personalitySuffix)\n\nData:\n\(dataContext)"
+
+                let request = AIServiceAdapter.AIRequest(
+                    model: model,
+                    messages: [
+                        AIServiceAdapter.ChatMessagePayload(role: .user, content: fullPrompt)
+                    ],
+                    temperature: 0.7,
+                    topP: nil,
+                    topK: nil,
+                    maxTokens: 2048
+                )
+
+                let response = try await AIServiceAdapter.send(
+                    request: request,
+                    provider: providerType,
+                    baseURL: baseURL,
+                    apiKey: apiKey
+                )
+
+                insightsResult = response.text
+
+            } catch let error as AIServiceAdapter.AIError {
+                insightsResult = error.errorDescription ?? error.localizedDescription
             } catch {
                 insightsResult = "Error generating insights: \(error.localizedDescription)"
-            }
-        }
-        
-        private func callGemini(prompt: String) async throws {
-            let urlString = "\(baseURL)?key=\(apiKey)"
-            guard let url = URL(string: urlString) else { throw URLError(.badURL) }
-            
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-            
-            let body: [String: Any] = [
-                "contents": [[
-                    "parts": [[
-                        "text": prompt
-                    ]]
-                ]]
-            ]
-            
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
-                insightsResult = "Error from Gemini API (\((response as? HTTPURLResponse)?.statusCode ?? 0)): \(errorBody)"
-                return
-            }
-            
-            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let candidates = json["candidates"] as? [[String: Any]],
-               let firstCandidate = candidates.first,
-               let content = firstCandidate["content"] as? [String: Any],
-               let parts = content["parts"] as? [[String: Any]],
-               let firstPart = parts.first,
-               let text = firstPart["text"] as? String {
-                insightsResult = text
-            } else {
-                insightsResult = "Error: Could not parse response from Gemini."
-            }
-        }
-        
-        private func callOpenAICompatible(prompt: String) async throws {
-            guard let url = URL(string: baseURL) else { throw URLError(.badURL) }
-            
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-            
-            let body: [String: Any] = [
-                "model": model,
-                "messages": [
-                    ["role": "user", "content": prompt]
-                ]
-            ]
-            
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
-                insightsResult = "Error from API (\((response as? HTTPURLResponse)?.statusCode ?? 0)): \(errorBody)"
-                return
-            }
-            
-            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let choices = json["choices"] as? [[String: Any]],
-               let firstChoice = choices.first,
-               let message = firstChoice["message"] as? [String: Any],
-               let content = message["content"] as? String {
-                insightsResult = content
-            } else {
-                insightsResult = "Error: Could not parse response from API."
             }
         }
     }

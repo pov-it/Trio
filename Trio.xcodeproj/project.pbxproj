@@ -11,6 +11,11 @@
 		1654E148757D47C399026CA2 /* AIInsightsStateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B04F560D0E4AF897D805ED /* AIInsightsStateModel.swift */; };
 		C7C8D8354E63450CA571EC7F /* AIInsightsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */; };
 		2643E278F279487DBC4A5B43 /* AIInsightsDataFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F58F806C7AC54FA2A5AA7A87 /* AIInsightsDataFlow.swift */; };
+		B2C3D4E5F6A7B8C9D0E1F2A3 /* AIInsightsChatStateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* AIInsightsChatStateModel.swift */; };
+		D4E5F6A7B8C9D0E1F2A3B4C5 /* AIInsightsChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F6A7B8C9D0E1F2A3B4 /* AIInsightsChatView.swift */; };
+		F6A7B8C9D0E1F2A3B4C5D6E7 /* AIInsightsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5F6A7B8C9D0E1F2A3B4C5D6 /* AIInsightsSettingsView.swift */; };
+		B8C9D0E1F2A3B4C5D6E7F8A9 /* AIInsights_AIServiceAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B8C9D0E1F2A3B4C5D6E7F8 /* AIInsights_AIServiceAdapter.swift */; };
+		D0E1F2A3B4C5D6E7F8A9B0C1 /* AIInsights_DataAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B4C5D6E7F8A9B0 /* AIInsights_DataAggregator.swift */; };
 		7B4D2C611A9D4F5FA4243D65 /* ZGlucoParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D54C0C321B4C65A5C42097 /* ZGlucoParser.swift */; };
 		041D1E995A6AE92E9289DC49 /* TreatmentsDataFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8D1A7CA8C10C4403D4BBFA7 /* TreatmentsDataFlow.swift */; };
 		0437CE46C12535A56504EC19 /* SnoozeRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5822B15939E719628E9FF7C /* SnoozeRootView.swift */; };
@@ -879,6 +884,11 @@
 		77B04F560D0E4AF897D805ED /* AIInsightsStateModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsStateModel.swift; sourceTree = "<group>"; };
 		9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsProvider.swift; sourceTree = "<group>"; };
 		F58F806C7AC54FA2A5AA7A87 /* AIInsightsDataFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsDataFlow.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* AIInsightsChatStateModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsChatStateModel.swift; sourceTree = "<group>"; };
+		C3D4E5F6A7B8C9D0E1F2A3B4 /* AIInsightsChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsChatView.swift; sourceTree = "<group>"; };
+		E5F6A7B8C9D0E1F2A3B4C5D6 /* AIInsightsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsSettingsView.swift; sourceTree = "<group>"; };
+		A7B8C9D0E1F2A3B4C5D6E7F8 /* AIInsights_AIServiceAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsights_AIServiceAdapter.swift; sourceTree = "<group>"; };
+		C9D0E1F2A3B4C5D6E7F8A9B0 /* AIInsights_DataAggregator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsights_DataAggregator.swift; sourceTree = "<group>"; };
 		F8D54C0C321B4C65A5C42097 /* ZGlucoParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZGlucoParser.swift; sourceTree = "<group>"; };
 		110AEDE02C5193D100615CC9 /* BolusIntent.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BolusIntent.swift; sourceTree = "<group>"; };
 		110AEDE12C5193D100615CC9 /* BolusIntentRequest.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BolusIntentRequest.swift; sourceTree = "<group>"; };
@@ -1722,6 +1732,8 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 			isa = PBXGroup;
 			children = (
 				C2E69494986447F4BF5EC179 /* AIInsightsRootView.swift */,
+				C3D4E5F6A7B8C9D0E1F2A3B4 /* AIInsightsChatView.swift */,
+				E5F6A7B8C9D0E1F2A3B4C5D6 /* AIInsightsSettingsView.swift */,
 			);
 			path = View;
 			sourceTree = "<group>";
@@ -1732,10 +1744,21 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 				F58F806C7AC54FA2A5AA7A87 /* AIInsightsDataFlow.swift */,
 				9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */,
 				77B04F560D0E4AF897D805ED /* AIInsightsStateModel.swift */,
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* AIInsightsChatStateModel.swift */,
 				F8D54C0C321B4C65A5C42097 /* ZGlucoParser.swift */,
+				A1B2C3D4E5F6A7B8C9D0E1FA /* Services */,
 				E1D69A8BBF1D49FB9AF8DF95 /* View */,
 			);
 			path = AIInsights;
+			sourceTree = "<group>";
+		};
+		A1B2C3D4E5F6A7B8C9D0E1FA /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				A7B8C9D0E1F2A3B4C5D6E7F8 /* AIInsights_AIServiceAdapter.swift */,
+				C9D0E1F2A3B4C5D6E7F8A9B0 /* AIInsights_DataAggregator.swift */,
+			);
+			path = Services;
 			sourceTree = "<group>";
 		};
 		0610F7D6D2EC00E3BA1569F0 /* ConfigEditor */ = {
@@ -4283,6 +4306,11 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 				1654E148757D47C399026CA2 /* AIInsightsStateModel.swift in Sources */,
 				C7C8D8354E63450CA571EC7F /* AIInsightsProvider.swift in Sources */,
 				2643E278F279487DBC4A5B43 /* AIInsightsDataFlow.swift in Sources */,
+				B2C3D4E5F6A7B8C9D0E1F2A3 /* AIInsightsChatStateModel.swift in Sources */,
+				D4E5F6A7B8C9D0E1F2A3B4C5 /* AIInsightsChatView.swift in Sources */,
+				F6A7B8C9D0E1F2A3B4C5D6E7 /* AIInsightsSettingsView.swift in Sources */,
+				B8C9D0E1F2A3B4C5D6E7F8A9 /* AIInsights_AIServiceAdapter.swift in Sources */,
+				D0E1F2A3B4C5D6E7F8A9B0C1 /* AIInsights_DataAggregator.swift in Sources */,
 				7B4D2C611A9D4F5FA4243D65 /* ZGlucoParser.swift in Sources */,
 				DDA40BBA2F4DB18800257798 /* AlgorithmGlucose.swift in Sources */,
 				DD5DC9F12CF3D97C00AB8703 /* AdjustmentsStateModel+Overrides.swift in Sources */,

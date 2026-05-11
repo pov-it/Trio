@@ -773,6 +773,52 @@ extension Home {
             }.padding(.horizontal, 10).padding(.bottom, UIDevice.adjustPadding(min: nil, max: 10))
         }
 
+        // MARK: - AI Chat Button
+
+        @State private var showAIChat = false
+
+        private var aiChatButton: some View {
+            NavigationLink {
+                AIInsights.ChatView(resolver: resolver)
+            } label: {
+                ZStack {
+                    Circle()
+                        .stroke(
+                            AngularGradient(
+                                colors: [
+                                    Color(red: 0.7215686275, green: 0.3411764706, blue: 1),
+                                    Color(red: 0.6235294118, green: 0.4235294118, blue: 0.9803921569),
+                                    Color(red: 0.4862745098, green: 0.5450980392, blue: 0.9529411765),
+                                    Color(red: 0.3411764706, green: 0.6666666667, blue: 0.9254901961),
+                                    Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902),
+                                    Color(red: 0.7215686275, green: 0.3411764706, blue: 1)
+                                ],
+                                center: .center,
+                                startAngle: .degrees(270),
+                                endAngle: .degrees(-90)
+                            ),
+                            lineWidth: 2.5
+                        )
+                    Circle()
+                        .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color.insulin.opacity(0.15))
+
+                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.7215686275, green: 0.3411764706, blue: 1),
+                                    Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
+                .frame(width: 44, height: 44)
+            }
+        }
+
         @ViewBuilder func bolusView(geo: GeometryProxy, _ progress: Decimal) -> some View {
             /// ensure that state.lastPumpBolus has a value, i.e. there is a last bolus done by the pump and not an external bolus
             /// - TRUE:  show the pump bolus
@@ -952,7 +998,11 @@ extension Home {
                     bolusView(geo: geo, progress)
                         .padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
                 } else {
-                    adjustmentView(geo: geo).padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
+                    HStack(alignment: .center, spacing: 10) {
+                        adjustmentView(geo: geo)
+                        aiChatButton
+                    }
+                    .padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
                 }
             }
             .background(appState.trioBackgroundColor(for: colorScheme))
