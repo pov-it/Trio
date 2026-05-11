@@ -2,16 +2,11 @@ import Foundation
 import Swinject
 
 extension AIInsights {
-    final class Provider: BaseProvider, Injectable {
+    final class Provider: BaseProvider {
         @Injected() var keychain: Keychain!
         @Injected() var nightscoutManager: NightscoutManager!
         @Injected() var settingsManager: SettingsManager!
-        
-        init(resolver: Resolver) {
-            super.init()
-            injectServices(resolver)
-        }
-        
+
         var settings: TrioSettings {
             get { settingsManager.settings }
             set { settingsManager.settings = newValue }
