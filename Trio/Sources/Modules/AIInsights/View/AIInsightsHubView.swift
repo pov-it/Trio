@@ -4,6 +4,7 @@ import Swinject
 extension AIInsights {
     struct HubView: BaseView {
         let resolver: Resolver
+        @State var state = StateModel()
 
         @Environment(\.colorScheme) var colorScheme
         @Environment(AppState.self) var appState
@@ -88,6 +89,7 @@ extension AIInsights {
                     }
                 }
             }
+            .onAppear(perform: configureView)
         }
     }
 }
