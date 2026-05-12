@@ -19,7 +19,7 @@ extension AIInsights {
                     Toggle(isOn: $state.aiEnabled) {
                         Label(String(localized: "Enable AI Insights", comment: "Toggle label"), systemImage: "brain")
                     }
-                    .onChange(of: state.aiEnabled) { _ in
+                    .onChange(of: state.aiEnabled) {
                         state.saveSettings()
                     }
                 }
@@ -35,22 +35,22 @@ extension AIInsights {
                             Text(provider.rawValue).tag(provider)
                         }
                     }
-                    .onChange(of: state.providerType) { _ in
+                    .onChange(of: state.providerType) {
                         state.resetToDefaults()
                     }
 
                     SecureField(String(localized: "API Key", comment: "API key field placeholder"), text: $state.apiKey)
-                        .onChange(of: state.apiKey) { _ in
+                        .onChange(of: state.apiKey) {
                             state.saveAPIKey()
                         }
 
                     TextField(String(localized: "Model", comment: "Model field placeholder"), text: $state.model)
-                        .onChange(of: state.model) { _ in
+                        .onChange(of: state.model) {
                             state.saveSettings()
                         }
 
                     TextField(String(localized: "Endpoint URL", comment: "URL field placeholder"), text: $state.baseURL)
-                        .onChange(of: state.baseURL) { _ in
+                        .onChange(of: state.baseURL) {
                             state.saveSettings()
                         }
                         .font(.system(.caption, design: .monospaced))
@@ -90,7 +90,7 @@ extension AIInsights {
                         Text("30 days", comment: "30 day period").tag(30)
                         Text("90 days", comment: "90 day period").tag(90)
                     }
-                    .onChange(of: state.analysisPeriodDays) { _ in
+                    .onChange(of: state.analysisPeriodDays) {
                         state.saveSettings()
                     }
 
@@ -99,7 +99,7 @@ extension AIInsights {
                             Text(p.displayName).tag(p)
                         }
                     }
-                    .onChange(of: state.personality) { _ in
+                    .onChange(of: state.personality) {
                         state.saveSettings()
                     }
                 }
@@ -113,7 +113,7 @@ extension AIInsights {
                     TextEditor(text: $state.systemPrompt)
                         .frame(height: 150)
                         .font(.system(.body, design: .monospaced))
-                        .onChange(of: state.systemPrompt) { _ in
+                        .onChange(of: state.systemPrompt) {
                             state.saveSettings()
                         }
                 }

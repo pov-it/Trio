@@ -98,7 +98,7 @@ enum AIInsights {
     // MARK: - Chat Message
 
     struct ChatMessage: Identifiable {
-        let id = UUID()
+        var id: UUID = UUID()
         let content: String
         let isUser: Bool
         let timestamp: Date
@@ -108,7 +108,7 @@ enum AIInsights {
     // MARK: - Suggestion
 
     struct Suggestion: Identifiable, Codable {
-        let id = UUID()
+        var id: UUID = UUID()
         let settingType: SettingType
         let timeBlock: String
         let currentValue: String
