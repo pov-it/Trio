@@ -2,7 +2,7 @@ import SwiftUI
 import Swinject
 
 extension AIInsights {
-    struct HubView: BaseView {
+    struct HubView: View {
         let resolver: Resolver
 
         @Environment(\.colorScheme) var colorScheme
