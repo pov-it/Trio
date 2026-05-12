@@ -49,6 +49,16 @@ extension AIInsights {
                 }
             }
             .onAppear(perform: configureView)
+            .sheet(isPresented: $state.showCamera) {
+                AIInsights.CameraCaptureView { imageData in
+                    Task { await state.analyzeImage(imageData) }
+                }
+            }
+            .sheet(isPresented: $state.showBarcodeScanner) {
+                AIInsights.BarcodeScannerView { barcode in
+                    Task { await state.lookupBarcode(barcode) }
+                }
+            }
         }
 
         // MARK: - Empty State
@@ -329,7 +339,35 @@ extension AIInsights {
         // MARK: - Input Bar
 
         private var foodInputBar: some View {
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
+                // Camera button
+                Button {
+                    state.showCamera = true
+                } label: {
+                    Image(systemName: "camera.fill")
+                        .frame(width: 36, height: 36)
+                        .background(
+                            Circle()
+                                .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray5))
+                        )
+                        .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                }
+                .disabled(state.isAnalyzing)
+
+                // Barcode button
+                Button {
+                    state.showBarcodeScanner = true
+                } label: {
+                    Image(systemName: "barcode.viewfinder")
+                        .frame(width: 36, height: 36)
+                        .background(
+                            Circle()
+                                .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray5))
+                        )
+                        .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                }
+                .disabled(state.isAnalyzing)
+
                 TextField(
                     String(localized: "Describe your meal...", comment: "FoodFinder input placeholder"),
                     text: $state.foodDescription,
@@ -338,7 +376,7 @@ extension AIInsights {
                 .lineLimit(1 ... 3)
                 .focused($isTextFieldFocused)
                 .textFieldStyle(.plain)
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 12)
                 .padding(.vertical, 10)
                 .background(
                     RoundedRectangle(cornerRadius: 20)
@@ -377,7 +415,7 @@ extension AIInsights {
                 .disabled(state.foodDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || state.isAnalyzing)
                 .opacity(state.foodDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || state.isAnalyzing ? 0.5 : 1)
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(colorScheme == .dark ? Color.bgDarkBlue : Color.white)
         }

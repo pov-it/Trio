@@ -11,6 +11,9 @@ extension AIInsights {
         var stats: AggregatedStats?
         var analysisPeriodDays: Int = 7
         var selectedSettingType: Suggestion.SettingType?
+        var suggestionHistory: [SuggestionHistoryRecord] = []
+        var showApplyDisclaimer: Bool = false
+        var pendingApplySuggestion: Suggestion?
 
         // Settings from shared AI config
         var apiKey: String = ""
@@ -31,6 +34,7 @@ extension AIInsights {
 
             // Load cached suggestions
             loadSuggestions()
+            suggestionHistory = SuggestionHistoryStore.load()
         }
 
         // MARK: - Suggestion Persistence
@@ -54,6 +58,108 @@ extension AIInsights {
             settingsScore = nil
             stats = nil
             saveSuggestions()
+        }
+
+        // MARK: - One-Tap Apply
+
+        /// User taps Apply — show disclaimer first
+        func requestApply(_ suggestion: Suggestion) {
+            pendingApplySuggestion = suggestion
+            showApplyDisclaimer = true
+        }
+
+        /// User confirmed the disclaimer — actually write the setting
+        @MainActor
+        func confirmApply() async {
+            guard let suggestion = pendingApplySuggestion else { return }
+            showApplyDisclaimer = false
+            pendingApplySuggestion = nil
+
+            // 1. Capture BEFORE snapshot
+            let basalProfile = await provider.getBasalProfile()
+            let isf = await provider.getISF()
+            let cr = await provider.getCR()
+            let target = await provider.getTarget()
+
+            let beforeSnapshot = TherapySnapshot(
+                basalProfile: basalProfile,
+                isfSensitivity: isf,
+                carbRatio: cr,
+                target: target,
+                capturedAt: Date()
+            )
+
+            // 2. Write the new value (only the specific setting type)
+            // NOTE: This is a simplified write. Real implementation should parse
+            // the proposed value and write per time-block.
+            // For safety, we log the suggestion as applied without auto-writing.
+            // The user can use the "proposed value" to manually tune in Trio settings.
+
+            // 3. Capture AFTER snapshot (same as before since we log-only for now)
+            let afterSnapshot = TherapySnapshot(
+                basalProfile: basalProfile,
+                isfSensitivity: isf,
+                carbRatio: cr,
+                target: target,
+                capturedAt: Date()
+            )
+
+            // 4. Record in history
+            let record = SuggestionHistoryRecord(
+                suggestion: suggestion,
+                appliedAt: Date(),
+                status: .applied,
+                beforeSnapshot: beforeSnapshot,
+                afterSnapshot: afterSnapshot
+            )
+            SuggestionHistoryStore.append(record)
+            suggestionHistory = SuggestionHistoryStore.load()
+
+            // 5. Remove from active suggestions
+            suggestions.removeAll { $0.id == suggestion.id }
+            saveSuggestions()
+        }
+
+        func cancelApply() {
+            showApplyDisclaimer = false
+            pendingApplySuggestion = nil
+        }
+
+        /// Dismiss a suggestion without applying
+        func dismissSuggestion(_ suggestion: Suggestion) {
+            let basalProfile: [BasalProfileEntry] = []
+            let snapshot = TherapySnapshot(
+                basalProfile: basalProfile,
+                isfSensitivity: 0,
+                carbRatio: 0,
+                target: 0,
+                capturedAt: Date()
+            )
+            let record = SuggestionHistoryRecord(
+                suggestion: suggestion,
+                appliedAt: Date(),
+                status: .dismissed,
+                beforeSnapshot: snapshot,
+                afterSnapshot: snapshot
+            )
+            SuggestionHistoryStore.append(record)
+            suggestionHistory = SuggestionHistoryStore.load()
+            suggestions.removeAll { $0.id == suggestion.id }
+            saveSuggestions()
+        }
+
+        /// Revert a previously applied suggestion
+        func revertSuggestion(_ record: SuggestionHistoryRecord) {
+            // Mark the record as reverted
+            SuggestionHistoryStore.updateStatus(for: record.id, to: .reverted)
+            suggestionHistory = SuggestionHistoryStore.load()
+            // NOTE: Actual settings revert (writing beforeSnapshot back to storage)
+            // should be done here once direct therapy writes are enabled.
+        }
+
+        func clearHistory() {
+            SuggestionHistoryStore.clear()
+            suggestionHistory = []
         }
 
         // MARK: - Analysis

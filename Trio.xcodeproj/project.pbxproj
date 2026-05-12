@@ -767,6 +767,14 @@
 		BD175EBE000010000000000B /* HistoryRootView+Filters.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD175EFE000010000000000B /* HistoryRootView+Filters.swift */; };
 		BD175EBE000010000000000C /* HistoryRootView+AddGlucose.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD175EFE000010000000000C /* HistoryRootView+AddGlucose.swift */; };
 		BD175EBE000010000000000D /* HistoryRootView+Confirmations.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD175EFE000010000000000D /* HistoryRootView+Confirmations.swift */; };
+		AF26B3ADD7E9D37166D70B69 /* AIInsightsCameraBarcode.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE90345E829478AADBBEAB9D /* AIInsightsCameraBarcode.swift */; };
+		25D0DAACD1CE0CFDAA89CD00 /* AIInsightsFoodFinderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D65EB518A6B8BFAB7461AB23 /* AIInsightsFoodFinderView.swift */; };
+		91867683623C244632410C8B /* AIInsightsHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E449AE43643A27DF4237F0B /* AIInsightsHubView.swift */; };
+		5F285860DCE234306124B2C4 /* AIInsightsTherapyInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48206642A413432490D2D8A0 /* AIInsightsTherapyInsightsView.swift */; };
+		5DF1E896A440773414E19B3A /* AIInsights_BackgroundMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF6617AE4D486199D4B4BFA3 /* AIInsights_BackgroundMonitor.swift */; };
+		E8F324C38D0BBA22600C21E1 /* AIInsights_SuggestionHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED1F19964F2ACBB9FAD28B67 /* AIInsights_SuggestionHistory.swift */; };
+		D26A63997C2FBCABD9A7D2EF /* AIInsightsFoodFinderStateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E10AD1C04CB08A2E386B2E1 /* AIInsightsFoodFinderStateModel.swift */; };
+		1BFCEE8860D8786328460975 /* AIInsightsTherapyInsightsStateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA643F8DCF09F3FEA8182B3 /* AIInsightsTherapyInsightsStateModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1632,6 +1640,14 @@
 		BD175EFE000010000000000B /* HistoryRootView+Filters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HistoryRootView+Filters.swift"; sourceTree = "<group>"; };
 		BD175EFE000010000000000C /* HistoryRootView+AddGlucose.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HistoryRootView+AddGlucose.swift"; sourceTree = "<group>"; };
 		BD175EFE000010000000000D /* HistoryRootView+Confirmations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HistoryRootView+Confirmations.swift"; sourceTree = "<group>"; };
+		CE90345E829478AADBBEAB9D /* AIInsightsCameraBarcode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsCameraBarcode.swift; sourceTree = "<group>"; };
+		D65EB518A6B8BFAB7461AB23 /* AIInsightsFoodFinderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsFoodFinderView.swift; sourceTree = "<group>"; };
+		9E449AE43643A27DF4237F0B /* AIInsightsHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsHubView.swift; sourceTree = "<group>"; };
+		48206642A413432490D2D8A0 /* AIInsightsTherapyInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsTherapyInsightsView.swift; sourceTree = "<group>"; };
+		AF6617AE4D486199D4B4BFA3 /* AIInsights_BackgroundMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsights_BackgroundMonitor.swift; sourceTree = "<group>"; };
+		ED1F19964F2ACBB9FAD28B67 /* AIInsights_SuggestionHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsights_SuggestionHistory.swift; sourceTree = "<group>"; };
+		5E10AD1C04CB08A2E386B2E1 /* AIInsightsFoodFinderStateModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsFoodFinderStateModel.swift; sourceTree = "<group>"; };
+		9DA643F8DCF09F3FEA8182B3 /* AIInsightsTherapyInsightsStateModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsTherapyInsightsStateModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -1731,6 +1747,10 @@
 E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 			isa = PBXGroup;
 			children = (
+				48206642A413432490D2D8A0 /* AIInsightsTherapyInsightsView.swift */,
+				9E449AE43643A27DF4237F0B /* AIInsightsHubView.swift */,
+				D65EB518A6B8BFAB7461AB23 /* AIInsightsFoodFinderView.swift */,
+				CE90345E829478AADBBEAB9D /* AIInsightsCameraBarcode.swift */,
 				C2E69494986447F4BF5EC179 /* AIInsightsRootView.swift */,
 				C3D4E5F6A7B8C9D0E1F2A3B4 /* AIInsightsChatView.swift */,
 				E5F6A7B8C9D0E1F2A3B4C5D6 /* AIInsightsSettingsView.swift */,
@@ -1741,6 +1761,8 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 		1307459B9D494BECAB3B785F /* AIInsights */ = {
 			isa = PBXGroup;
 			children = (
+				9DA643F8DCF09F3FEA8182B3 /* AIInsightsTherapyInsightsStateModel.swift */,
+				5E10AD1C04CB08A2E386B2E1 /* AIInsightsFoodFinderStateModel.swift */,
 				F58F806C7AC54FA2A5AA7A87 /* AIInsightsDataFlow.swift */,
 				9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */,
 				77B04F560D0E4AF897D805ED /* AIInsightsStateModel.swift */,
@@ -1755,6 +1777,8 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 		A1B2C3D4E5F6A7B8C9D0E1FA /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				ED1F19964F2ACBB9FAD28B67 /* AIInsights_SuggestionHistory.swift */,
+				AF6617AE4D486199D4B4BFA3 /* AIInsights_BackgroundMonitor.swift */,
 				A7B8C9D0E1F2A3B4C5D6E7F8 /* AIInsights_AIServiceAdapter.swift */,
 				C9D0E1F2A3B4C5D6E7F8A9B0 /* AIInsights_DataAggregator.swift */,
 			);
@@ -4302,6 +4326,14 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1BFCEE8860D8786328460975 /* AIInsightsTherapyInsightsStateModel.swift in Sources */,
+				D26A63997C2FBCABD9A7D2EF /* AIInsightsFoodFinderStateModel.swift in Sources */,
+				E8F324C38D0BBA22600C21E1 /* AIInsights_SuggestionHistory.swift in Sources */,
+				5DF1E896A440773414E19B3A /* AIInsights_BackgroundMonitor.swift in Sources */,
+				5F285860DCE234306124B2C4 /* AIInsightsTherapyInsightsView.swift in Sources */,
+				91867683623C244632410C8B /* AIInsightsHubView.swift in Sources */,
+				25D0DAACD1CE0CFDAA89CD00 /* AIInsightsFoodFinderView.swift in Sources */,
+				AF26B3ADD7E9D37166D70B69 /* AIInsightsCameraBarcode.swift in Sources */,
 				BA986A0471AE45108775314B /* AIInsightsRootView.swift in Sources */,
 				1654E148757D47C399026CA2 /* AIInsightsStateModel.swift in Sources */,
 				C7C8D8354E63450CA571EC7F /* AIInsightsProvider.swift in Sources */,

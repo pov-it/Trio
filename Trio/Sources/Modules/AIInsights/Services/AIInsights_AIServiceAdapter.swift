@@ -15,6 +15,7 @@ extension AIInsights {
             let topP: Double?
             let topK: Int?
             let maxTokens: Int?
+            var imageData: Data? = nil
         }
 
         struct ChatMessagePayload {
@@ -144,9 +145,23 @@ extension AIInsights {
             for msg in request.messages {
                 if msg.role == .system { continue } // handled separately
                 let role = msg.role == .assistant ? "model" : "user"
+                var parts: [[String: Any]] = [["text": msg.content]]
+
+                // Attach image to the last user message if available
+                if msg.role == .user && request.imageData != nil {
+                    if let imgData = request.imageData {
+                        parts.insert([
+                            "inline_data": [
+                                "mime_type": "image/jpeg",
+                                "data": imgData.base64EncodedString()
+                            ]
+                        ], at: 0)
+                    }
+                }
+
                 contents.append([
                     "role": role,
-                    "parts": [["text": msg.content]]
+                    "parts": parts
                 ])
             }
 
@@ -228,9 +243,24 @@ extension AIInsights {
             urlRequest.addValue("application/json", forHTTPHeaderField: "Content-Type")
             urlRequest.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
-            var messagesPayload: [[String: String]] = []
+            var messagesPayload: [[String: Any]] = []
             for msg in request.messages {
-                messagesPayload.append(["role": msg.role.rawValue, "content": msg.content])
+                if msg.role == .user, let imgData = request.imageData {
+                    // Multimodal: send image + text as content array
+                    let contentParts: [[String: Any]] = [
+                        [
+                            "type": "image_url",
+                            "image_url": ["url": "data:image/jpeg;base64,\(imgData.base64EncodedString())"]
+                        ],
+                        [
+                            "type": "text",
+                            "text": msg.content
+                        ]
+                    ]
+                    messagesPayload.append(["role": msg.role.rawValue, "content": contentParts] as [String: Any])
+                } else {
+                    messagesPayload.append(["role": msg.role.rawValue, "content": msg.content])
+                }
             }
 
             var body: [String: Any] = [

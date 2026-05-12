@@ -33,6 +33,8 @@ extension AIInsights {
         enum FoodSource: String, Codable {
             case aiText
             case aiVoice
+            case aiCamera
+            case barcode
         }
     }
 
@@ -44,6 +46,9 @@ extension AIInsights {
         var currentResult: FoodAnalysisResult?
         var foodDescription: String = ""
         var recentResults: [FoodAnalysisResult] = []
+        var showCamera: Bool = false
+        var showBarcodeScanner: Bool = false
+        var capturedImageData: Data?
 
         // Shared AI config
         var apiKey: String = ""
@@ -251,6 +256,132 @@ extension AIInsights {
         func clearResult() {
             currentResult = nil
             errorMessage = nil
+        }
+
+        // MARK: - Camera Analysis (Multimodal)
+
+        @MainActor
+        func analyzeImage(_ imageData: Data) async {
+            guard provider != nil else {
+                errorMessage = String(localized: "AI Insights is not ready yet.", comment: "AI error")
+                return
+            }
+            guard !apiKey.isEmpty else {
+                errorMessage = String(localized: "API Key is missing. Configure it in AI Settings.", comment: "AI error")
+                return
+            }
+
+            isAnalyzing = true
+            errorMessage = nil
+            defer { isAnalyzing = false }
+
+            do {
+                let request = AIServiceAdapter.AIRequest(
+                    model: model,
+                    messages: [
+                        AIServiceAdapter.ChatMessagePayload(role: .system, content: foodFinderSystemPrompt),
+                        AIServiceAdapter.ChatMessagePayload(role: .user, content: "Analyze the food in this photo. Identify each item and provide the nutritional breakdown.")
+                    ],
+                    temperature: 0.2,
+                    topP: 0.9,
+                    topK: nil,
+                    maxTokens: 2048,
+                    imageData: imageData
+                )
+
+                let response = try await AIServiceAdapter.send(
+                    request: request,
+                    provider: providerType,
+                    baseURL: baseURL,
+                    apiKey: apiKey
+                )
+
+                let items = parseFoodItems(from: response.text)
+                let result = FoodAnalysisResult(
+                    items: items,
+                    rawResponse: response.text,
+                    timestamp: Date(),
+                    source: .aiCamera
+                )
+                currentResult = result
+                recentResults.insert(result, at: 0)
+                saveRecentResults()
+
+            } catch let error as AIServiceAdapter.AIError {
+                errorMessage = error.errorDescription ?? error.localizedDescription
+            } catch {
+                errorMessage = String(localized: "Error: \(error.localizedDescription)", comment: "AI error")
+            }
+        }
+
+        // MARK: - Barcode Lookup (OpenFoodFacts)
+
+        @MainActor
+        func lookupBarcode(_ barcode: String) async {
+            isAnalyzing = true
+            errorMessage = nil
+            defer { isAnalyzing = false }
+
+            do {
+                let urlString = "https://world.openfoodfacts.org/api/v2/product/\(barcode).json?fields=product_name,nutriments,serving_size"
+                guard let url = URL(string: urlString) else {
+                    errorMessage = String(localized: "Invalid barcode.", comment: "Barcode error")
+                    return
+                }
+
+                let (data, response) = try await URLSession.shared.data(from: url)
+
+                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                    errorMessage = String(localized: "Product not found in OpenFoodFacts.", comment: "Barcode error")
+                    return
+                }
+
+                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let status = json["status"] as? Int, status == 1,
+                      let product = json["product"] as? [String: Any]
+                else {
+                    errorMessage = String(localized: "Product not found. Try the AI Camera instead.", comment: "Barcode error")
+                    return
+                }
+
+                let name = product["product_name"] as? String ?? "Unknown Product"
+                let serving = product["serving_size"] as? String ?? "1 serving"
+                let nutriments = product["nutriments"] as? [String: Any] ?? [:]
+
+                let carbs = nutriments["carbohydrates_serving"] as? Double
+                    ?? nutriments["carbohydrates_100g"] as? Double ?? 0
+                let fat = nutriments["fat_serving"] as? Double
+                    ?? nutriments["fat_100g"] as? Double ?? 0
+                let protein = nutriments["proteins_serving"] as? Double
+                    ?? nutriments["proteins_100g"] as? Double ?? 0
+                let fiber = nutriments["fiber_serving"] as? Double
+                    ?? nutriments["fiber_100g"] as? Double ?? 0
+                let calories = nutriments["energy-kcal_serving"] as? Double
+                    ?? nutriments["energy-kcal_100g"] as? Double ?? 0
+
+                let item = FoodItem(
+                    name: name,
+                    portion: serving,
+                    carbs: carbs,
+                    fat: fat,
+                    protein: protein,
+                    fiber: fiber,
+                    calories: calories
+                )
+
+                let result = FoodAnalysisResult(
+                    items: [item],
+                    rawResponse: nil,
+                    timestamp: Date(),
+                    source: .barcode
+                )
+                currentResult = result
+                recentResults.insert(result, at: 0)
+                saveRecentResults()
+
+            } catch {
+                errorMessage = String(localized: "Network error looking up barcode: \(error.localizedDescription)", comment: "Barcode error")
+            }
         }
     }
 }

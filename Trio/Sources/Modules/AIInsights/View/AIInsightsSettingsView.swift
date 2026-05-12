@@ -126,12 +126,11 @@ extension AIInsights {
             .navigationBarTitleDisplayMode(.inline)
             .alert(
                 String(localized: "Connection Test", comment: "Test alert title"),
-                isPresented: $showTestResult,
-                presenting: testErrorMessage
-            ) { _ in
+                isPresented: $showTestResult
+            ) {
                 Button("OK") {}
-            } message: { errorMsg in
-                if let errorMsg = errorMsg {
+            } message: {
+                if let errorMsg = testErrorMessage {
                     Text(String(localized: "Connection failed:\n", comment: "Test failure prefix") + errorMsg)
                 } else {
                     Text("Connection successful! ✅", comment: "Test success")

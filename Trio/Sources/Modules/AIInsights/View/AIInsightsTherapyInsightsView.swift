@@ -42,8 +42,13 @@ extension AIInsights {
                     // Suggestions
                     if !state.suggestions.isEmpty {
                         suggestionsSection
-                    } else if !state.isAnalyzing && state.settingsScore == nil {
+                    } else if !state.isAnalyzing && state.settingsScore == nil && state.suggestionHistory.isEmpty {
                         emptyStateView
+                    }
+
+                    // Suggestion History
+                    if !state.suggestionHistory.isEmpty {
+                        historySection
                     }
                 }
                 .padding(.horizontal)
@@ -64,6 +69,19 @@ extension AIInsights {
                 }
             }
             .onAppear(perform: configureView)
+            .alert(
+                String(localized: "Apply Suggestion?", comment: "Disclaimer alert title"),
+                isPresented: $state.showApplyDisclaimer
+            ) {
+                Button(String(localized: "Cancel", comment: "Cancel button"), role: .cancel) {
+                    state.cancelApply()
+                }
+                Button(String(localized: "I Understand, Apply", comment: "Apply button"), role: .destructive) {
+                    Task { await state.confirmApply() }
+                }
+            } message: {
+                Text(String(localized: "This AI suggestion is informational only and NOT medical advice. Always consult your healthcare provider before adjusting therapy settings. Incorrect settings can cause dangerous hypo- or hyperglycemia. By proceeding, you acknowledge that you take full responsibility for any changes.", comment: "Disclaimer message"))
+            }
         }
 
         // MARK: - Period Selector
@@ -234,7 +252,42 @@ extension AIInsights {
                     .padding(.top, 4)
 
                 ForEach(state.suggestions) { suggestion in
-                    SuggestionCard(suggestion: suggestion, colorScheme: colorScheme)
+                    SuggestionCard(
+                        suggestion: suggestion,
+                        colorScheme: colorScheme,
+                        onApply: { state.requestApply(suggestion) },
+                        onDismiss: { state.dismissSuggestion(suggestion) }
+                    )
+                }
+            }
+        }
+
+        // MARK: - History Section
+
+        private var historySection: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text(String(localized: "History", comment: "Suggestion history header"))
+                        .font(.headline)
+                    Spacer()
+                    Button {
+                        state.clearHistory()
+                    } label: {
+                        Text(String(localized: "Clear", comment: "Clear history"))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.top, 8)
+
+                ForEach(state.suggestionHistory) { record in
+                    HistoryRecordCard(
+                        record: record,
+                        colorScheme: colorScheme,
+                        onRevert: {
+                            state.revertSuggestion(record)
+                        }
+                    )
                 }
             }
         }
@@ -291,6 +344,8 @@ extension AIInsights {
 private struct SuggestionCard: View {
     let suggestion: AIInsights.Suggestion
     let colorScheme: ColorScheme
+    var onApply: (() -> Void)? = nil
+    var onDismiss: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -343,6 +398,46 @@ private struct SuggestionCard: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .lineLimit(4)
+
+            // Action Buttons
+            if onApply != nil || onDismiss != nil {
+                HStack(spacing: 12) {
+                    if let onDismiss {
+                        Button {
+                            onDismiss()
+                        } label: {
+                            Text(String(localized: "Dismiss", comment: "Dismiss suggestion"))
+                                .font(.caption.bold())
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color(.systemGray6))
+                                )
+                        }
+                    }
+                    if let onApply {
+                        Button {
+                            onApply()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.caption)
+                                Text(String(localized: "Apply", comment: "Apply suggestion"))
+                                    .font(.caption.bold())
+                            }
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(settingColor)
+                            )
+                        }
+                    }
+                }
+            }
         }
         .padding()
         .background(
@@ -389,6 +484,102 @@ private struct SuggestionCard: View {
         case 0.7...: return .green
         case 0.4..<0.7: return .orange
         default: return .red
+        }
+    }
+}
+
+// MARK: - History Record Card
+
+private struct HistoryRecordCard: View {
+    let record: AIInsights.SuggestionHistoryRecord
+    let colorScheme: ColorScheme
+    var onRevert: (() -> Void)? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: statusIcon)
+                    .foregroundStyle(statusColor)
+                    .font(.caption)
+                Text(record.suggestion.settingType.rawValue)
+                    .font(.caption.bold())
+                Spacer()
+                Text(record.appliedAt, style: .relative)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            // Before → After
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "Before", comment: "Before snapshot"))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text(record.suggestion.currentValue)
+                        .font(.caption.bold())
+                }
+
+                Image(systemName: "arrow.right")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "After", comment: "After snapshot"))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text(record.suggestion.proposedValue)
+                        .font(.caption.bold())
+                }
+
+                Spacer()
+
+                // Status badge
+                Text(record.status.rawValue.capitalized)
+                    .font(.caption2.bold())
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule()
+                            .fill(statusColor.opacity(0.15))
+                    )
+                    .foregroundStyle(statusColor)
+            }
+
+            // Revert button
+            if record.status == .applied, let onRevert {
+                Button {
+                    onRevert()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.uturn.backward")
+                            .font(.caption2)
+                        Text(String(localized: "Revert", comment: "Revert suggestion"))
+                            .font(.caption.bold())
+                    }
+                    .foregroundStyle(.orange)
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.5) : Color(.systemGray6).opacity(0.7))
+        )
+    }
+
+    private var statusIcon: String {
+        switch record.status {
+        case .applied: return "checkmark.circle.fill"
+        case .reverted: return "arrow.uturn.backward.circle.fill"
+        case .dismissed: return "xmark.circle.fill"
+        }
+    }
+
+    private var statusColor: Color {
+        switch record.status {
+        case .applied: return .green
+        case .reverted: return .orange
+        case .dismissed: return .gray
         }
     }
 }
