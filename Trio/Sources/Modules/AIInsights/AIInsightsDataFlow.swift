@@ -53,7 +53,7 @@ enum AIInsights {
 
     // MARK: - Chat Hint Chips
 
-    enum HintChip: String, CaseIterable, Identifiable {
+    enum HintChip: String, CaseIterable, Identifiable, Codable {
         case nightSettings = "How are my night settings?"
         case endoVisit = "Prepare my endocrinologist visit"
         case postMeal = "Analyze my post-meal patterns"
@@ -97,7 +97,7 @@ enum AIInsights {
 
     // MARK: - Chat Message
 
-    struct ChatMessage: Identifiable {
+    struct ChatMessage: Identifiable, Codable {
         var id: UUID = UUID()
         let content: String
         let isUser: Bool

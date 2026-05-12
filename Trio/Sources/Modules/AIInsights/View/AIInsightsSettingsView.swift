@@ -49,7 +49,8 @@ extension AIInsights {
                             state.saveSettings()
                         }
 
-                    TextField(String(localized: "Endpoint URL", comment: "URL field placeholder"), text: $state.baseURL)
+                    TextField(String(localized: "Endpoint URL", comment: "URL field placeholder"), text: $state.baseURL, axis: .vertical)
+                        .lineLimit(1...5)
                         .onChange(of: state.baseURL) {
                             state.saveSettings()
                         }
@@ -126,11 +127,15 @@ extension AIInsights {
             .alert(
                 String(localized: "Connection Test", comment: "Test alert title"),
                 isPresented: $showTestResult,
-                presenting: testResult
+                presenting: testErrorMessage
             ) { _ in
                 Button("OK") {}
-            } message: { result in
-                Text(result ? String(localized: "Connection successful! ✅", comment: "Test success") : String(localized: "Connection failed. Check your settings.", comment: "Test failure"))
+            } message: { errorMsg in
+                if let errorMsg = errorMsg {
+                    Text(String(localized: "Connection failed:\n", comment: "Test failure prefix") + errorMsg)
+                } else {
+                    Text("Connection successful! ✅", comment: "Test success")
+                }
             }
             .onAppear(perform: configureView)
         }
@@ -139,7 +144,7 @@ extension AIInsights {
 
         @State private var isTestingConnection = false
         @State private var showTestResult = false
-        @State private var testResult = false
+        @State private var testErrorMessage: String?
 
         private func testConnection() async {
             isTestingConnection = true
@@ -152,9 +157,11 @@ extension AIInsights {
                     baseURL: state.baseURL,
                     apiKey: state.apiKey
                 )
-                testResult = success
+                testErrorMessage = success ? nil : String(localized: "Unknown error occurred.")
+            } catch let error as AIServiceAdapter.AIError {
+                testErrorMessage = error.errorDescription ?? error.localizedDescription
             } catch {
-                testResult = false
+                testErrorMessage = error.localizedDescription
             }
             showTestResult = true
         }

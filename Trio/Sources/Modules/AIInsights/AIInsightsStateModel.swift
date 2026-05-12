@@ -74,7 +74,7 @@ extension AIInsights {
                 let carbs = await provider.fetchCarbs()
 
                 let dataContext = """
-                Glucose (last 24h): \(glucose.map { "\($0.dateString): \($0.sgv ?? 0) \($0.direction?.rawValue ?? "")" }.joined(separator: "\n"))
+                Glucose (last 24h): \(glucose.map { "\($0.dateString): \($0.glucose ?? $0.sgv ?? 0) \($0.direction?.rawValue ?? "")" }.joined(separator: "\n"))
                 Carbs: \(carbs.map { "\($0.createdAt): \($0.carbs)g" }.joined(separator: "\n"))
                 """
 

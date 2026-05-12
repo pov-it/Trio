@@ -34,6 +34,8 @@ extension AIInsights {
 
             // Load live status
             currentIOB = provider.currentIOB
+            
+            loadMessages()
         }
 
         func saveAPIKey() {
@@ -61,6 +63,22 @@ extension AIInsights {
             saveSettings()
         }
 
+        // MARK: - Persistence
+
+        func saveMessages() {
+            if let data = try? JSONEncoder().encode(messages) {
+                UserDefaults.standard.set(data, forKey: "ai_insights_chat_history")
+            }
+        }
+
+        func loadMessages() {
+            if let data = UserDefaults.standard.data(forKey: "ai_insights_chat_history"),
+               let savedMessages = try? JSONDecoder().decode([ChatMessage].self, from: data)
+            {
+                messages = savedMessages
+            }
+        }
+
         // MARK: - Chat Actions
 
         func sendHintChip(_ chip: HintChip) {
@@ -71,6 +89,7 @@ extension AIInsights {
                 hintChip: chip
             )
             messages.append(userMessage)
+            saveMessages()
             Task {
                 await generateResponse(for: chip.localizedTitle)
             }
@@ -85,6 +104,7 @@ extension AIInsights {
                 timestamp: Date()
             )
             messages.append(userMessage)
+            saveMessages()
             Task {
                 await generateResponse(for: text)
             }
@@ -93,6 +113,7 @@ extension AIInsights {
         func clearChat() {
             messages = []
             errorMessage = nil
+            saveMessages()
         }
 
         // MARK: - AI Response Generation
@@ -174,6 +195,7 @@ extension AIInsights {
                     timestamp: Date()
                 )
                 messages.append(assistantMessage)
+                saveMessages()
 
             } catch let error as AIServiceAdapter.AIError {
                 errorMessage = error.errorDescription ?? error.localizedDescription

@@ -9,6 +9,7 @@ extension AIInsights {
         @Environment(\.colorScheme) var colorScheme
         @Environment(AppState.self) var appState
         @FocusState private var isTextFieldFocused: Bool
+        @State private var searchText = ""
 
         var body: some View {
             VStack(spacing: 0) {
@@ -20,7 +21,7 @@ extension AIInsights {
                                 welcomeView
                             }
 
-                            ForEach(state.messages) { message in
+                            ForEach(messages) { message in
                                 MessageBubble(message: message, units: state.provider?.units ?? .mgdL)
                                     .id(message.id)
                             }
@@ -75,13 +76,18 @@ extension AIInsights {
                     }
                 }
             }
+            .searchable(text: $searchText, prompt: String(localized: "Search chats...", comment: "Chat search prompt"))
             .onAppear(perform: configureView)
         }
 
         // MARK: - Subviews
 
         private var messages: [ChatMessage] {
-            state.messages
+            if searchText.isEmpty {
+                return state.messages
+            } else {
+                return state.messages.filter { $0.content.localizedCaseInsensitiveContains(searchText) }
+            }
         }
 
         private var welcomeView: some View {
@@ -100,11 +106,11 @@ extension AIInsights {
                     )
                     .padding(.top, 40)
 
-                Text("Ask about your glucose data")
+                Text(String(localized: "Ask about your glucose data", comment: "Chat welcome title"))
                     .font(.title3.bold())
                     .multilineTextAlignment(.center)
 
-                Text("I can analyze your patterns, review your settings, and help you prepare for appointments.")
+                Text(String(localized: "I can analyze your patterns, review your settings, and help you prepare for appointments.", comment: "Chat welcome subtitle"))
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -114,13 +120,13 @@ extension AIInsights {
                     VStack(spacing: 8) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundColor(.orange)
-                        Text("AI Insights is disabled. Enable it in Settings.")
+                        Text(String(localized: "AI Insights is disabled. Enable it in Settings.", comment: "AI disabled message"))
                             .font(.caption)
                             .foregroundColor(.secondary)
                         NavigationLink {
                             AISettingsView(resolver: resolver)
                         } label: {
-                            Text("Open AI Settings")
+                            Text(String(localized: "Open AI Settings", comment: "AI settings link"))
                                 .font(.caption.bold())
                         }
                     }
@@ -178,7 +184,7 @@ extension AIInsights {
             HStack(spacing: 8) {
                 ProgressView()
                     .progressViewStyle(CircularProgressViewStyle(tint: colorScheme == .dark ? .white : .primary))
-                Text("Analyzing...")
+                Text(String(localized: "Analyzing...", comment: "AI generating state"))
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }

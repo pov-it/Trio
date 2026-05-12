@@ -109,9 +109,9 @@ extension AIInsights {
 
             // Build glucose points
             let glucosePoints = filteredGlucose.compactMap { gl -> GlucosePoint? in
-                guard let sgv = gl.sgv else { return nil }
+                guard let val = gl.glucose ?? gl.sgv else { return nil }
                 let date = gl.dateString
-                let glucoseValue = units == .mmolL ? Double(Decimal(sgv).asMmolL) : Double(sgv)
+                let glucoseValue = units == .mmolL ? Double(Decimal(val).asMmolL) : Double(val)
                 return GlucosePoint(
                     date: date,
                     glucose: glucoseValue,

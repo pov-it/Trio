@@ -363,10 +363,12 @@ extension Home {
                                 Text(button.hours.description)
                             }
                         }
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                         .font(.footnote)
                         .fontWeight(button.active ? .semibold : .regular)
                         .padding(.vertical, 5)
-                        .padding(.horizontal, 10)
+                        .padding(.horizontal, 6)
                         .foregroundColor(
                             button
                                 .active ? (colorScheme == .dark ? Color.bgDarkerDarkBlue : Color.white) : buttonColor
@@ -779,7 +781,7 @@ extension Home {
 
         private var aiChatButton: some View {
             NavigationLink {
-                AIInsights.ChatView(resolver: resolver)
+                AIInsights.HubView(resolver: resolver)
             } label: {
                 ZStack {
                     Circle()
@@ -802,8 +804,8 @@ extension Home {
                     Circle()
                         .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color.insulin.opacity(0.15))
 
-                    Image(systemName: "bubble.left.and.bubble.right.fill")
-                        .font(.system(size: 16))
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 20))
                         .foregroundStyle(
                             LinearGradient(
                                 colors: [
@@ -816,6 +818,7 @@ extension Home {
                         )
                 }
                 .frame(width: 44, height: 44)
+                .padding(.trailing, 10)
             }
         }
 

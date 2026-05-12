@@ -49,7 +49,6 @@ struct FeatureSettingsView: BaseView {
             Section(
                 header: Text("AI", comment: "AI section header in Feature Settings"),
                 content: {
-                    Text("AI Insights").navigationLink(to: .aiInsights, from: self)
                     Text("AI Settings").navigationLink(to: .aiSettings, from: self)
                 }
             )
