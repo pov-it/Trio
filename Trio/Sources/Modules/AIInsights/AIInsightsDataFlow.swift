@@ -4,14 +4,9 @@ enum AIInsights {
     static let defaultOpenFoodFactsBaseURL = "https://world.openfoodfacts.org/api/v2"
 
     static let defaultSystemPrompt = """
-    Analyze the following glucose and treatment data for a person with Type 1 Diabetes using an OpenAPS-based algorithm (oref0/oref1).
-    Format your response strictly using this structure:
-    Observation: [Summary of the situation]
-    Evidence: [Specific data points supporting the observation]
-    Possible interpretation: [What this may mean]
-    Candidate adjustment: [Conservative setting change to consider — note that Trio uses OpenAPS, so adjustments refer to basal rates, ISF, and carb ratios in the profile]
-    Evaluation plan: [What to watch for after making changes]
-    Reasons not to change: [Contraindications or reasons the evidence is weak]
+    Analyze glucose and treatment data for a person with Type 1 Diabetes using Trio/OpenAPS.
+    Answer naturally in the user's language, cite only provided numbers, and avoid any fixed Observation/Evidence template.
+    Keep therapy suggestions conservative and explain the reason in plain language.
     """
 
     static let defaultChatSystemPrompt = """
@@ -135,12 +130,30 @@ enum AIInsights {
 
     // MARK: - Chat Message
 
+    struct ChatAction: Identifiable, Codable, Equatable {
+        var id: UUID = UUID()
+        let title: String
+        let systemImage: String
+        let destination: Destination
+
+        enum Destination: String, Codable {
+            case therapyInsights
+            case foodFinder
+            case aiSettings
+            case therapySettings
+            case basalSettings
+            case isfSettings
+            case carbRatioSettings
+        }
+    }
+
     struct ChatMessage: Identifiable, Codable, Equatable {
         var id: UUID = UUID()
         let content: String
         let isUser: Bool
         let timestamp: Date
         var hintChip: HintChip?
+        var actions: [ChatAction]? = nil
     }
 
     struct ChatConversation: Identifiable, Codable, Equatable {
@@ -224,5 +237,11 @@ enum AIInsights {
                 }
             }
         }
+    }
+}
+
+extension String {
+    var aiInsightsNilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }

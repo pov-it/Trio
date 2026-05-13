@@ -33,6 +33,9 @@ extension AIInsights {
         let source: FoodSource
         var imageData: Data?
         var mealDescription: String?
+        var mealName: String? = nil
+        var mealPortion: String? = nil
+        var confidence: Double? = nil
 
         var totalCarbs: Double { items.reduce(0) { $0 + $1.adjustedCarbs } }
         var totalFat: Double { items.reduce(0) { $0 + $1.adjustedFat } }
@@ -112,6 +115,13 @@ extension AIInsights {
         @ObservationIgnored private var recognitionTask: SFSpeechRecognitionTask?
         @ObservationIgnored private var hasAudioTap = false
 
+        private struct ParsedFoodAnalysis {
+            var items: [FoodItem]
+            var mealName: String?
+            var mealPortion: String?
+            var confidence: Double?
+        }
+
         override func subscribe() {
             if let savedKey = provider.keychain.getValue(String.self, forKey: "ai_insights_api_key") {
                 self.apiKey = savedKey
@@ -187,7 +197,8 @@ extension AIInsights {
                     temperature: 0.2,
                     topP: 0.9,
                     topK: nil,
-                    maxTokens: 2048
+                    maxTokens: 2048,
+                    responseFormat: foodFinderResponseFormat
                 )
 
                 let response = try await AIServiceAdapter.send(
@@ -197,15 +208,32 @@ extension AIInsights {
                     apiKey: apiKey
                 )
 
-                let items = parseFoodItems(from: response.text)
+                var parsed = parseFoodAnalysis(from: response.text)
+                if shouldRetrySuspiciousResult(parsed, description: description, hasImage: false) {
+                    let retryResponse = try await requestFoodAnalysis(
+                        prompt: "Re-evaluate this likely carb-containing meal. The previous estimate returned zero or near-zero carbs, which is implausible. Return the same strict JSON object schema with realistic standard portions. Food: \(description)",
+                        imageData: nil
+                    )
+                    parsed = parseFoodAnalysis(from: retryResponse)
+                }
+
+                guard !parsed.items.isEmpty,
+                      !isSuspiciousZeroCarbResult(parsed, description: description, hasImage: false)
+                else {
+                    errorMessage = String(localized: "The AI returned an implausible nutrition estimate. Add portion details and try again.", comment: "FoodFinder implausible estimate error")
+                    return
+                }
 
                 let result = FoodAnalysisResult(
-                    items: items,
+                    items: parsed.items,
                     rawResponse: response.text,
                     timestamp: Date(),
                     source: .aiText,
                     imageData: nil,
-                    mealDescription: description
+                    mealDescription: description,
+                    mealName: parsed.mealName ?? description,
+                    mealPortion: parsed.mealPortion,
+                    confidence: parsed.confidence
                 )
 
                 currentResult = result
@@ -230,52 +258,110 @@ extension AIInsights {
             The user's glucose unit preference is \(unitsStr).
             \(AIInsights.responseLanguageInstruction())
 
-            When given a food description, respond ONLY with a valid JSON array of food items:
-            [
-              {
-                "name": "Brown Rice",
-                "portion": "1 cup (195g)",
-                "carbs": 45.0,
-                "fat": 1.8,
-                "protein": 5.0,
-                "fiber": 3.5,
-                "calories": 216
-              }
-            ]
+            When given a food description or image, respond ONLY with one valid JSON object matching this schema:
+            {
+              "mealName": "Spaghetti gamberi e zucchine",
+              "mealPortion": "1 plate (about 450g)",
+              "confidence": 0.78,
+              "items": [
+                {
+                  "name": "Spaghetti",
+                  "portion": "1 plate portion (250g cooked)",
+                  "carbs": 75.0,
+                  "fat": 2.0,
+                  "protein": 13.0,
+                  "fiber": 4.0,
+                  "calories": 395
+                }
+              ]
+            }
 
             RULES:
             - Be as accurate as possible with carb counts — this directly affects insulin dosing
             - Break compound meals into individual items (e.g. "burger and fries" → separate items)
             - Use standard serving sizes when portions are not specified
             - Include fiber separately — the user's pump system can use net carbs
-            - If you cannot identify the food, respond with: [{"name":"Unknown","portion":"Unknown","carbs":0,"fat":0,"protein":0,"fiber":0,"calories":0}]
+            - Use the user's text as a strong clue when the photo is ambiguous
+            - If a named meal is likely carb-containing (pasta, rice, bread, pizza, potato, fruit, dessert), do not return 0 carbs unless the portion is truly negligible
+            - If you cannot identify the food, respond with: {"mealName":"Unknown","mealPortion":"Unknown","confidence":0.1,"items":[]}
             - Food names and portion descriptions should match the user's app language when possible
-            - Respond ONLY with the JSON array. No markdown, no explanation outside the JSON.
+            - Respond ONLY with the JSON object. No markdown, no explanation outside the JSON.
             """
+        }
+
+        private var foodFinderResponseFormat: [String: Any]? {
+            switch providerType {
+            case .google:
+                return ["type": "json_object"]
+            case .openai:
+                return [
+                "type": "json_schema",
+                "json_schema": [
+                    "name": "food_finder_analysis",
+                    "strict": true,
+                    "schema": [
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["mealName", "mealPortion", "confidence", "items"],
+                        "properties": [
+                            "mealName": ["type": "string"],
+                            "mealPortion": ["type": "string"],
+                            "confidence": ["type": "number"],
+                            "items": [
+                                "type": "array",
+                                "items": [
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": ["name", "portion", "carbs", "fat", "protein", "fiber", "calories"],
+                                    "properties": [
+                                        "name": ["type": "string"],
+                                        "portion": ["type": "string"],
+                                        "carbs": ["type": "number"],
+                                        "fat": ["type": "number"],
+                                        "protein": ["type": "number"],
+                                        "fiber": ["type": "number"],
+                                        "calories": ["type": "number"]
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+                ]
+            case .anthropic, .custom:
+                return nil
+            }
         }
 
         // MARK: - Response Parsing
 
-        private func parseFoodItems(from text: String) -> [FoodItem] {
+        private func parseFoodAnalysis(from text: String) -> ParsedFoodAnalysis {
             guard let jsonText = extractJSONFragment(from: text),
                   let data = jsonText.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data)
             else {
-                return []
+                return ParsedFoodAnalysis(items: [])
             }
 
             let rawItems: [[String: Any]]
+            var mealName: String?
+            var mealPortion: String?
+            var confidence: Double?
+
             if let array = json as? [[String: Any]] {
                 rawItems = array
             } else if let object = json as? [String: Any],
                       let items = object["items"] as? [[String: Any]]
             {
                 rawItems = items
+                mealName = stringValue(object["mealName"] ?? object["meal_name"] ?? object["name"], fallback: "")
+                mealPortion = stringValue(object["mealPortion"] ?? object["meal_portion"] ?? object["portion"], fallback: "")
+                confidence = doubleValue(object["confidence"])
             } else {
                 rawItems = []
             }
 
-            return rawItems.map { item in
+            let items = rawItems.map { item in
                 FoodItem(
                     name: stringValue(item["name"], fallback: String(localized: "Unknown", comment: "Unknown food item")),
                     portion: stringValue(item["portion"] ?? item["serving"], fallback: "1 serving"),
@@ -286,6 +372,17 @@ extension AIInsights {
                     calories: doubleValue(item["calories"] ?? item["kcal"] ?? item["energy_kcal"])
                 )
             }
+
+            return ParsedFoodAnalysis(
+                items: items,
+                mealName: mealName?.trimmingCharacters(in: .whitespacesAndNewlines).aiInsightsNilIfEmpty,
+                mealPortion: mealPortion?.trimmingCharacters(in: .whitespacesAndNewlines).aiInsightsNilIfEmpty,
+                confidence: confidence
+            )
+        }
+
+        private func parseFoodItems(from text: String) -> [FoodItem] {
+            parseFoodAnalysis(from: text).items
         }
 
         // MARK: - Helpers
@@ -296,6 +393,58 @@ extension AIInsights {
             else { return }
             result.items[idx].portionMultiplier = max(0.25, multiplier)
             currentResult = result
+        }
+
+        func updateItemName(for itemId: UUID, name: String) {
+            guard var result = currentResult,
+                  let idx = result.items.firstIndex(where: { $0.id == itemId })
+            else { return }
+            result.items[idx].name = name
+            currentResult = result
+        }
+
+        @MainActor
+        func reanalyzeItem(_ itemId: UUID) async {
+            guard let result = currentResult,
+                  let item = result.items.first(where: { $0.id == itemId }),
+                  !item.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { return }
+
+            isAnalyzing = true
+            errorMessage = nil
+            defer { isAnalyzing = false }
+
+            do {
+                let responseText = try await requestFoodAnalysis(
+                    prompt: "Analyze this single ingredient or food item and return exactly one item in the strict JSON object schema. Item: \(item.name). Keep the existing portion if it still makes sense: \(item.portion).",
+                    imageData: nil
+                )
+                let parsed = parseFoodAnalysis(from: responseText)
+                guard let replacement = parsed.items.first else {
+                    errorMessage = String(localized: "No matching nutrition estimate was found.", comment: "FoodFinder no replacement error")
+                    return
+                }
+
+                guard var updatedResult = currentResult,
+                      let idx = updatedResult.items.firstIndex(where: { $0.id == itemId })
+                else { return }
+                updatedResult.items[idx] = FoodItem(
+                    id: itemId,
+                    name: replacement.name,
+                    portion: replacement.portion,
+                    carbs: replacement.carbs,
+                    fat: replacement.fat,
+                    protein: replacement.protein,
+                    fiber: replacement.fiber,
+                    calories: replacement.calories,
+                    portionMultiplier: item.portionMultiplier
+                )
+                currentResult = updatedResult
+            } catch let error as AIServiceAdapter.AIError {
+                errorMessage = error.errorDescription ?? error.localizedDescription
+            } catch {
+                errorMessage = String(localized: "Error: \(error.localizedDescription)", comment: "AI error")
+            }
         }
 
         func updateMacro(for itemId: UUID, macro: FoodMacro, adjustedValue: Double) {
@@ -326,6 +475,11 @@ extension AIInsights {
             guard var result = currentResult else { return }
             result.items.removeAll { $0.id == itemId }
             currentResult = result
+        }
+
+        func deleteRecentResult(_ result: FoodAnalysisResult) {
+            recentResults.removeAll { $0.id == result.id }
+            saveRecentResults()
         }
 
         func discardCapturedImage() {
@@ -386,7 +540,8 @@ extension AIInsights {
                     topP: 0.9,
                     topK: nil,
                     maxTokens: 2048,
-                    imageData: imageData
+                    imageData: imageData,
+                    responseFormat: foodFinderResponseFormat
                 )
 
                 let response = try await AIServiceAdapter.send(
@@ -396,14 +551,33 @@ extension AIInsights {
                     apiKey: apiKey
                 )
 
-                let items = parseFoodItems(from: response.text)
+                var parsed = parseFoodAnalysis(from: response.text)
+                let validationDescription = trimmedDescription.isEmpty ? (parsed.mealName ?? "") : trimmedDescription
+                if shouldRetrySuspiciousResult(parsed, description: validationDescription, hasImage: true) {
+                    let retryResponse = try await requestFoodAnalysis(
+                        prompt: "Re-evaluate this photo and user context carefully. The previous estimate returned zero or near-zero carbs for a likely carb-containing meal. Return the same strict JSON object schema and break the meal into ingredients. User context: \(trimmedDescription)",
+                        imageData: imageData
+                    )
+                    parsed = parseFoodAnalysis(from: retryResponse)
+                }
+
+                guard !parsed.items.isEmpty,
+                      !isSuspiciousZeroCarbResult(parsed, description: validationDescription, hasImage: true)
+                else {
+                    errorMessage = String(localized: "The AI returned an implausible nutrition estimate. Add portion details and try again.", comment: "FoodFinder implausible estimate error")
+                    return
+                }
+
                 let result = FoodAnalysisResult(
-                    items: items,
+                    items: parsed.items,
                     rawResponse: response.text,
                     timestamp: Date(),
                     source: .aiCamera,
                     imageData: imageData,
-                    mealDescription: trimmedDescription.isEmpty ? nil : trimmedDescription
+                    mealDescription: trimmedDescription.isEmpty ? nil : trimmedDescription,
+                    mealName: parsed.mealName ?? trimmedDescription.aiInsightsNilIfEmpty,
+                    mealPortion: parsed.mealPortion,
+                    confidence: parsed.confidence
                 )
                 currentResult = result
                 recentResults.insert(result, at: 0)
@@ -485,7 +659,10 @@ extension AIInsights {
                     timestamp: Date(),
                     source: .barcode,
                     imageData: nil,
-                    mealDescription: name
+                    mealDescription: name,
+                    mealName: name,
+                    mealPortion: serving,
+                    confidence: 0.95
                 )
                 currentResult = result
                 recentResults.insert(result, at: 0)
@@ -570,6 +747,55 @@ extension AIInsights {
         }
 
         // MARK: - Parsing Helpers
+
+        private func requestFoodAnalysis(prompt: String, imageData: Data?) async throws -> String {
+            let request = AIServiceAdapter.AIRequest(
+                model: model,
+                messages: [
+                    AIServiceAdapter.ChatMessagePayload(role: .system, content: foodFinderSystemPrompt),
+                    AIServiceAdapter.ChatMessagePayload(role: .user, content: prompt)
+                ],
+                temperature: 0.15,
+                topP: 0.85,
+                topK: nil,
+                maxTokens: 2048,
+                imageData: imageData,
+                responseFormat: foodFinderResponseFormat
+            )
+
+            let response = try await AIServiceAdapter.send(
+                request: request,
+                provider: providerType,
+                baseURL: baseURL,
+                apiKey: apiKey
+            )
+            return response.text
+        }
+
+        private func shouldRetrySuspiciousResult(_ parsed: ParsedFoodAnalysis, description: String, hasImage: Bool) -> Bool {
+            isSuspiciousZeroCarbResult(parsed, description: description, hasImage: hasImage)
+        }
+
+        private func isSuspiciousZeroCarbResult(_ parsed: ParsedFoodAnalysis, description: String, hasImage: Bool) -> Bool {
+            let totalCarbs = parsed.items.reduce(0) { $0 + $1.adjustedCarbs }
+            guard totalCarbs <= 0.5 else { return false }
+
+            let text = "\(description) \(parsed.mealName ?? "") \(parsed.items.map(\.name).joined(separator: " "))"
+                .lowercased()
+            let likelyCarbWords = [
+                "spaghetti", "pasta", "noodle", "rice", "risotto", "bread", "toast", "bun", "bagel",
+                "pizza", "potato", "fries", "banana", "apple", "fruit", "oat", "cereal", "granola",
+                "cake", "cookie", "dessert", "wrap", "tortilla", "sandwich", "sushi", "dumpling"
+            ]
+
+            if likelyCarbWords.contains(where: { text.contains($0) }) {
+                return true
+            }
+
+            return hasImage &&
+                !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                (parsed.confidence ?? 0) < 0.35
+        }
 
         private func extractJSONFragment(from text: String) -> String? {
             let cleaned = text

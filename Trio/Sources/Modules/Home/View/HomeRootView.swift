@@ -879,11 +879,11 @@ extension Home {
                     }.padding(.horizontal, 10)
                         .padding(.trailing, 8)
                 }
+                .frame(height: geo.size.height * 0.08)
                 .frame(maxWidth: .infinity)
                 .overlay(alignment: .bottom) {
                     BolusProgressBar(progress: progress)
-                        .padding(.horizontal, 8)
-                        .padding(.bottom, 9)
+                        .padding(.horizontal, 10)
                 }.clipShape(RoundedRectangle(cornerRadius: 15))
             }
         }

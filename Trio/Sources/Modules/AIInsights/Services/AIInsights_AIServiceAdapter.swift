@@ -16,6 +16,7 @@ extension AIInsights {
             let topK: Int?
             let maxTokens: Int?
             var imageData: Data? = nil
+            var responseFormat: [String: Any]? = nil
         }
 
         struct ChatMessagePayload {
@@ -179,6 +180,7 @@ extension AIInsights {
             if let topP = request.topP { genConfig["topP"] = topP }
             if let topK = request.topK { genConfig["topK"] = topK }
             if let maxTokens = request.maxTokens { genConfig["maxOutputTokens"] = maxTokens }
+            if request.responseFormat != nil { genConfig["responseMimeType"] = "application/json" }
             if !genConfig.isEmpty {
                 body["generationConfig"] = genConfig
             }
@@ -270,6 +272,7 @@ extension AIInsights {
             if let temp = request.temperature { body["temperature"] = temp }
             if let topP = request.topP { body["top_p"] = topP }
             if let maxTokens = request.maxTokens { body["max_tokens"] = maxTokens }
+            if let responseFormat = request.responseFormat { body["response_format"] = responseFormat }
 
             urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
 

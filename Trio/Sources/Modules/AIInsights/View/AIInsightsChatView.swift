@@ -11,6 +11,7 @@ extension AIInsights {
         @FocusState private var isTextFieldFocused: Bool
         @State private var showConversationHistory = false
         @State private var conversationSearchText = ""
+        @State private var navigationTarget: ChatNavigationTarget?
 
         var body: some View {
             VStack(spacing: 0) {
@@ -23,7 +24,9 @@ extension AIInsights {
                             }
 
                             ForEach(messages) { message in
-                                MessageBubble(message: message, units: state.provider?.units ?? .mgdL)
+                                MessageBubble(message: message, units: state.provider?.units ?? .mgdL) { action in
+                                    navigationTarget = target(for: action.destination)
+                                }
                                     .id(message.id)
                             }
 
@@ -101,6 +104,16 @@ extension AIInsights {
             .sheet(isPresented: $showConversationHistory) {
                 conversationHistorySheet
             }
+            .navigationDestination(item: $navigationTarget) { target in
+                switch target {
+                case .therapyInsights:
+                    AIInsights.TherapyInsightsView(resolver: resolver)
+                case .foodFinder:
+                    AIInsights.FoodFinderView(resolver: resolver)
+                case let .screen(screen):
+                    screen.view(resolver: resolver)
+                }
+            }
             .onAppear(perform: configureView)
         }
 
@@ -108,6 +121,40 @@ extension AIInsights {
 
         private var messages: [ChatMessage] {
             state.messages
+        }
+
+        private func target(for destination: ChatAction.Destination) -> ChatNavigationTarget {
+            switch destination {
+            case .therapyInsights:
+                return .therapyInsights
+            case .foodFinder:
+                return .foodFinder
+            case .aiSettings:
+                return .screen(.aiSettings)
+            case .therapySettings:
+                return .screen(.therapySettings)
+            case .basalSettings:
+                return .screen(.basalProfileEditor)
+            case .isfSettings:
+                return .screen(.isfEditor)
+            case .carbRatioSettings:
+                return .screen(.crEditor)
+            }
+        }
+
+        private func relativeMinutesText(from date: Date) -> String {
+            let minutes = max(0, Int(Date().timeIntervalSince(date) / 60))
+            if minutes < 1 {
+                return String(localized: "< 1 min", comment: "Relative time less than one minute")
+            }
+            if minutes < 60 {
+                return String(localized: "\(minutes) min", comment: "Relative time minutes")
+            }
+            let hours = minutes / 60
+            if hours < 24 {
+                return String(localized: "\(hours) h", comment: "Relative time hours")
+            }
+            return date.formatted(.dateTime.month().day().hour().minute())
         }
 
         private var conversationHistorySheet: some View {
@@ -133,7 +180,7 @@ extension AIInsights {
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                     .lineLimit(2)
-                                Text(conversation.updatedAt, style: .relative)
+                                Text(relativeMinutesText(from: conversation.updatedAt))
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
                             }
@@ -318,6 +365,7 @@ extension AIInsights {
 private struct MessageBubble: View {
     let message: AIInsights.ChatMessage
     let units: GlucoseUnits
+    var onAction: (AIInsights.ChatAction) -> Void = { _ in }
 
     @Environment(\.colorScheme) var colorScheme
 
@@ -338,6 +386,23 @@ private struct MessageBubble: View {
                 Text(message.content)
                     .font(.subheadline)
                     .foregroundStyle(message.isUser ? .white : (colorScheme == .dark ? .white : .primary))
+
+                if let actions = message.actions, !actions.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(actions) { action in
+                            Button {
+                                onAction(action)
+                            } label: {
+                                Label(action.title, systemImage: action.systemImage)
+                                    .font(.caption.weight(.semibold))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
 
                 Text(message.timestamp, style: .time)
                     .font(.caption2)
@@ -369,6 +434,20 @@ private struct MessageBubble: View {
             return AnyShapeStyle(
                 colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.insulin.opacity(0.1)
             )
+        }
+    }
+}
+
+private enum ChatNavigationTarget: Identifiable, Hashable {
+    case therapyInsights
+    case foodFinder
+    case screen(Screen)
+
+    var id: String {
+        switch self {
+        case .therapyInsights: return "therapyInsights"
+        case .foodFinder: return "foodFinder"
+        case let .screen(screen): return "screen-\(screen.id)"
         }
     }
 }

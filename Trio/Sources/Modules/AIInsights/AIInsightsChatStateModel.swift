@@ -327,7 +327,8 @@ extension AIInsights {
                 let assistantMessage = ChatMessage(
                     content: responseText,
                     isUser: false,
-                    timestamp: Date()
+                    timestamp: Date(),
+                    actions: suggestedActions(for: input, response: responseText)
                 )
                 messages.append(assistantMessage)
                 saveMessages()
@@ -337,6 +338,63 @@ extension AIInsights {
             } catch {
                 errorMessage = String(localized: "Error: \(error.localizedDescription)", comment: "AI error")
             }
+        }
+
+        private func suggestedActions(for input: String, response: String) -> [ChatAction] {
+            let text = "\(input) \(response)".lowercased()
+            var actions: [ChatAction] = []
+
+            func append(_ action: ChatAction) {
+                guard !actions.contains(where: { $0.destination == action.destination }) else { return }
+                actions.append(action)
+            }
+
+            if text.contains("basal") || text.contains("basaal") || text.contains("night") || text.contains("nacht") {
+                append(ChatAction(
+                    title: String(localized: "Review in Therapy Insights", comment: "Chat action"),
+                    systemImage: "waveform.path.ecg.rectangle.fill",
+                    destination: .therapyInsights
+                ))
+                append(ChatAction(
+                    title: String(localized: "Open Basal Rates", comment: "Chat action"),
+                    systemImage: "slider.horizontal.3",
+                    destination: .basalSettings
+                ))
+            }
+
+            if text.contains("isf") || text.contains("sensitivity") || text.contains("gevoelig") {
+                append(ChatAction(
+                    title: String(localized: "Open Insulin Sensitivity", comment: "Chat action"),
+                    systemImage: "syringe",
+                    destination: .isfSettings
+                ))
+            }
+
+            if text.contains("carb ratio") || text.contains("cr") || text.contains("koolhydraat") || text.contains("ratio") {
+                append(ChatAction(
+                    title: String(localized: "Open Carb Ratios", comment: "Chat action"),
+                    systemImage: "fork.knife",
+                    destination: .carbRatioSettings
+                ))
+            }
+
+            if text.contains("meal") || text.contains("eten") || text.contains("food") || text.contains("carbs") || text.contains("koolhydraten") {
+                append(ChatAction(
+                    title: String(localized: "Open FoodFinder", comment: "Chat action"),
+                    systemImage: "camera.viewfinder",
+                    destination: .foodFinder
+                ))
+            }
+
+            if actions.isEmpty, text.contains("setting") || text.contains("instelling") || text.contains("aanpassing") {
+                append(ChatAction(
+                    title: String(localized: "Open Therapy Settings", comment: "Chat action"),
+                    systemImage: "gearshape.2",
+                    destination: .therapySettings
+                ))
+            }
+
+            return Array(actions.prefix(3))
         }
 
         // MARK: - Prompt Engineering
@@ -361,6 +419,7 @@ extension AIInsights {
             - Conservative bias: under-adjust rather than over-adjust
             - Mention reasons not to change only when they matter for the user's question
             - If data is insufficient, say so clearly rather than guessing
+            - When a setting review, meal analysis, or therapy edit would help, explicitly mention the next in-app view to open. The app may render those as interactive action cards.
 
             CURRENT DATA (last \(stats.periodDays) days):
             - Average glucose: \(String(format: "%.1f", stats.averageGlucose)) \(unitsStr)

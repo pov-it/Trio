@@ -506,7 +506,7 @@ private struct HistoryRecordRow: View {
                 Text(record.suggestion.settingType.localizedTitle)
                     .font(.caption.bold())
                 Spacer()
-                Text(record.appliedAt, style: .relative)
+                Text(relativeMinutesText(from: record.appliedAt))
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
@@ -577,5 +577,20 @@ private struct HistoryRecordRow: View {
         case .reverted: return .orange
         case .dismissed: return .gray
         }
+    }
+
+    private func relativeMinutesText(from date: Date) -> String {
+        let minutes = max(0, Int(Date().timeIntervalSince(date) / 60))
+        if minutes < 1 {
+            return String(localized: "< 1 min", comment: "Relative time less than one minute")
+        }
+        if minutes < 60 {
+            return String(localized: "\(minutes) min", comment: "Relative time minutes")
+        }
+        let hours = minutes / 60
+        if hours < 24 {
+            return String(localized: "\(hours) h", comment: "Relative time hours")
+        }
+        return date.formatted(.dateTime.month().day().hour().minute())
     }
 }

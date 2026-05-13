@@ -234,7 +234,14 @@ extension AIInsights {
                 settingsScore = computeSettingsScore(from: aggregated)
 
                 // 3. Build the therapy-specific prompt
-                let prompt = buildTherapyPrompt(stats: aggregated, settingType: settingType)
+                let treatmentContext = buildTreatmentContext(from: carbs)
+                let therapyChangeContext = buildTherapyChangeContext()
+                let prompt = buildTherapyPrompt(
+                    stats: aggregated,
+                    settingType: settingType,
+                    treatmentContext: treatmentContext,
+                    therapyChangeContext: therapyChangeContext
+                )
 
                 // 4. Send to AI
                 let request = AIServiceAdapter.AIRequest(
@@ -354,10 +361,16 @@ extension AIInsights {
             - Keep "settingType" values exactly as the allowed English enum values so the app can apply them.
             - Confidence should be 0.0-1.0 based on data quality and pattern strength
             - Include reasoning that references specific data points
+            - Consider recent applied therapy changes as part of the current treatment context. Do not repeat the same setting change direction for the same time block unless newer data clearly supports it.
             """
         }
 
-        private func buildTherapyPrompt(stats: AggregatedStats, settingType: Suggestion.SettingType?) -> String {
+        private func buildTherapyPrompt(
+            stats: AggregatedStats,
+            settingType: Suggestion.SettingType?,
+            treatmentContext: String,
+            therapyChangeContext: String
+        ) -> String {
             let unitsStr = provider.units.rawValue
             let settingFilter = settingType.map { "Focus ONLY on \($0.rawValue) suggestions." } ?? "Analyze all three setting types: Basal Rate, ISF, and Carb Ratio."
 
@@ -389,8 +402,50 @@ extension AIInsights {
             - Carb Ratio: \(stats.currentCR)
             - Target: \(stats.currentTarget)
 
+            RECENT TREATMENT CONTEXT:
+            \(treatmentContext)
+
+            RECENT AI THERAPY CHANGE CONTEXT:
+            \(therapyChangeContext)
+
             Respond ONLY with the JSON object. No markdown, no explanation outside the JSON.
             """
+        }
+
+        private func buildTreatmentContext(from carbs: [CarbsEntry]) -> String {
+            let recent = carbs
+                .sorted { $0.createdAt > $1.createdAt }
+                .prefix(20)
+
+            guard !recent.isEmpty else {
+                return String(localized: "No recent carb or meal entries were available for this period.", comment: "Therapy prompt no treatment context")
+            }
+
+            return recent.map { entry in
+                let note = entry.note?.trimmingCharacters(in: .whitespacesAndNewlines).aiInsightsNilIfEmpty ?? "-"
+                return String(
+                    format: "%@ — %@g carbs, %@g fat, %@g protein, note: %@",
+                    entry.createdAt.formatted(.dateTime.month().day().hour().minute()),
+                    NSDecimalNumber(decimal: entry.carbs).stringValue,
+                    NSDecimalNumber(decimal: entry.fat ?? 0).stringValue,
+                    NSDecimalNumber(decimal: entry.protein ?? 0).stringValue,
+                    note
+                )
+            }.joined(separator: "\n")
+        }
+
+        private func buildTherapyChangeContext() -> String {
+            let records = suggestionHistory
+                .filter { $0.status == .applied }
+                .prefix(12)
+
+            guard !records.isEmpty else {
+                return String(localized: "No recent applied AI therapy changes are recorded.", comment: "Therapy prompt no AI changes")
+            }
+
+            return records.map { record in
+                "\(record.appliedAt.formatted(.dateTime.month().day().hour().minute())) — \(record.suggestion.settingType.rawValue), \(record.suggestion.timeBlock): \(record.suggestion.currentValue) -> \(record.suggestion.proposedValue). \(record.suggestion.reasoning)"
+            }.joined(separator: "\n")
         }
 
         // MARK: - Response Parsing
