@@ -81,6 +81,8 @@
 	<string>Contact is used to create a Apple Watch complication</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>For authorized access to bolus</string>
+	<key>NSCameraUsageDescription</key>
+	<string>The camera is used to analyze food and ingredients with the FoodFinder AI feature.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Health App is used to store blood glucose, carbs and insulin</string>
 	<key>NSHealthUpdateUsageDescription</key>
