@@ -4,6 +4,7 @@ import Swinject
 extension AIInsights {
     struct FoodFinderView: BaseView {
         let resolver: Resolver
+        var onHandoffComplete: (() -> Void)? = nil
         @State var state = FoodFinderStateModel()
 
         @Environment(\.colorScheme) var colorScheme
@@ -30,10 +31,12 @@ extension AIInsights {
                     .padding(.top, 12)
                 }
 
-                // Input Bar
-                foodInputBar
             }
             .background(appState.trioBackgroundColor(for: colorScheme))
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                foodInputBar
+            }
             .navigationTitle(String(localized: "FoodFinder", comment: "Nav title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -49,15 +52,17 @@ extension AIInsights {
                 }
             }
             .onAppear(perform: configureView)
-            .sheet(isPresented: $state.showCamera) {
+            .fullScreenCover(isPresented: $state.showCamera) {
                 AIInsights.CameraCaptureView { imageData in
                     state.attachImage(imageData)
                 }
+                .ignoresSafeArea()
             }
-            .sheet(isPresented: $state.showBarcodeScanner) {
+            .fullScreenCover(isPresented: $state.showBarcodeScanner) {
                 AIInsights.BarcodeScannerView { barcode in
                     Task { await state.lookupBarcode(barcode) }
                 }
+                .ignoresSafeArea()
             }
         }
 
@@ -135,10 +140,10 @@ extension AIInsights {
 
         private var exampleFoods: [String] {
             [
-                "Two slices of pepperoni pizza",
-                "Bowl of oatmeal with banana",
-                "Chicken wrap with rice",
-                "Pasta bolognese"
+                String(localized: "Two slices of pepperoni pizza", comment: "FoodFinder example"),
+                String(localized: "Bowl of oatmeal with banana", comment: "FoodFinder example"),
+                String(localized: "Chicken wrap with rice", comment: "FoodFinder example"),
+                String(localized: "Pasta bolognese", comment: "FoodFinder example")
             ]
         }
 
@@ -146,30 +151,33 @@ extension AIInsights {
 
         private func resultView(_ result: FoodAnalysisResult) -> some View {
             VStack(spacing: 16) {
-                // Total Card
+                if let imageData = result.imageData {
+                    mealImageCard(imageData)
+                }
+
                 totalCarbsCard(result)
 
-                // Individual Items
+                macroSummaryCard(result)
+
+                if let description = result.mealDescription,
+                   !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                {
+                    mealDescriptionCard(description)
+                }
+
                 ForEach(result.items) { item in
                     foodItemCard(item)
                 }
 
                 Button {
-                    state.sendToBolusCalculator()
+                    state.sendToBolusCalculator(openBolusCalculator: onHandoffComplete == nil)
+                    onHandoffComplete?()
                 } label: {
-                    HStack {
-                        Image(systemName: "arrow.forward.circle.fill")
-                        Text(String(localized: "Use in Bolus Calculator", comment: "FoodFinder bolus handoff button"))
-                            .font(.headline)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .foregroundStyle(.white)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(.systemBlue))
-                    )
+                    Label(String(localized: "Use in Bolus Calculator", comment: "FoodFinder bolus handoff button"), systemImage: "arrow.forward.circle.fill")
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .disabled(result.items.isEmpty)
 
                 // Error
@@ -188,13 +196,34 @@ extension AIInsights {
                     )
                 }
 
-                // Disclaimer
-                Text(String(localized: "⚠️ AI estimates may be inaccurate. Always verify carb counts before dosing.", comment: "FoodFinder disclaimer"))
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
+                Label(
+                    String(localized: "AI estimates may be inaccurate. Always verify carb counts before dosing.", comment: "FoodFinder disclaimer"),
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
             }
+        }
+
+        private func mealImageCard(_ imageData: Data) -> some View {
+            Group {
+                if let image = UIImage(data: imageData) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity)
+                        .aspectRatio(1.45, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .clipped()
+                }
+            }
+            .padding(6)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white)
+            )
         }
 
         private func totalCarbsCard(_ result: FoodAnalysisResult) -> some View {
@@ -225,16 +254,6 @@ extension AIInsights {
                         .font(.headline)
                 }
             }
-            .overlay(alignment: .bottomLeading) {
-                HStack(spacing: 14) {
-                    macroTotal(label: String(localized: "Fat", comment: "Fat macro"), value: result.totalFat, color: .yellow)
-                    macroTotal(label: String(localized: "Protein", comment: "Protein macro"), value: result.totalProtein, color: .red)
-                    macroTotal(label: String(localized: "Fiber", comment: "Fiber macro"), value: result.totalFiber, color: .green)
-                }
-                .padding(.leading)
-                .padding(.bottom, 12)
-            }
-            .padding(.bottom, 34)
             .padding()
             .background(
                 RoundedRectangle(cornerRadius: 16)
@@ -257,15 +276,50 @@ extension AIInsights {
             .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
         }
 
-        private func macroTotal(label: String, value: Double, color: Color) -> some View {
-            HStack(spacing: 3) {
-                Text(String(format: "%.0fg", value))
-                    .font(.caption.bold())
-                    .foregroundStyle(color)
+        private func macroSummaryCard(_ result: FoodAnalysisResult) -> some View {
+            VStack(spacing: 0) {
+                macroSummaryRow(label: String(localized: "Carbs", comment: "Carbs macro"), value: result.totalCarbs, unit: "g")
+                Divider()
+                macroSummaryRow(label: String(localized: "Fat", comment: "Fat macro"), value: result.totalFat, unit: "g")
+                Divider()
+                macroSummaryRow(label: String(localized: "Protein", comment: "Protein macro"), value: result.totalProtein, unit: "g")
+                Divider()
+                macroSummaryRow(label: String(localized: "Fiber", comment: "Fiber macro"), value: result.totalFiber, unit: "g")
+                Divider()
+                macroSummaryRow(label: String(localized: "Calories", comment: "Calories label"), value: result.totalCalories, unit: "kcal")
+            }
+            .padding(.horizontal)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white)
+            )
+        }
+
+        private func macroSummaryRow(label: String, value: Double, unit: String) -> some View {
+            HStack {
                 Text(label)
-                    .font(.caption2)
+                Spacer()
+                Text("\(String(format: "%.0f", value)) \(unit)")
                     .foregroundColor(.secondary)
             }
+            .font(.subheadline)
+            .padding(.vertical, 11)
+        }
+
+        private func mealDescriptionCard(_ description: String) -> some View {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(String(localized: "Description", comment: "FoodFinder meal description header"))
+                    .font(.subheadline.weight(.semibold))
+                Text(description)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white)
+            )
         }
 
         private func foodItemCard(_ item: FoodItem) -> some View {
@@ -365,7 +419,7 @@ extension AIInsights {
             VStack(spacing: 2) {
                 HStack(spacing: 2) {
                     TextField(
-                        "",
+                        label,
                         value: Binding(
                             get: { value },
                             set: { state.updateMacro(for: item.id, macro: macro, adjustedValue: $0) }
@@ -377,6 +431,7 @@ extension AIInsights {
                     .font(.caption.bold())
                     .foregroundStyle(color)
                     .frame(minWidth: 24)
+                    .textFieldStyle(.roundedBorder)
 
                     Text(unit)
                         .font(.caption2.bold())

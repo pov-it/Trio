@@ -16,6 +16,14 @@ extension AIInsights {
             case applied
             case reverted
             case dismissed
+
+            var localizedTitle: String {
+                switch self {
+                case .applied: return String(localized: "Applied", comment: "Therapy suggestion history status")
+                case .reverted: return String(localized: "Reverted", comment: "Therapy suggestion history status")
+                case .dismissed: return String(localized: "Dismissed", comment: "Therapy suggestion history status")
+                }
+            }
         }
     }
 

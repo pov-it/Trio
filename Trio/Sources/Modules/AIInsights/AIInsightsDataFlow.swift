@@ -14,6 +14,42 @@ enum AIInsights {
     Reasons not to change: [Contraindications or reasons the evidence is weak]
     """
 
+    static let defaultChatSystemPrompt = """
+    You're a diabetes-savvy friend who can see this person's actual Trio/OpenAPS data.
+    They know how diabetes works, so skip textbook explanations.
+
+    RULES:
+    - Be brief. Use 2-3 sentences for simple questions and bullets only when the answer is complex.
+    - Cite their specific numbers when they matter.
+    - Talk like a knowledgeable friend, not a doctor or a manual.
+    - Never explain what carb ratio, ISF, basal rate, IOB, COB, or TIR are unless asked.
+    - For setting ideas: current value -> suggested value -> why, in one short line.
+    - Never fabricate numbers. Only reference the data provided below.
+    - If no data is available, say that briefly.
+    - Do not force a fixed "Observation / Evidence / Interpretation" format.
+    - Do not give unsolicited praise or reassurance.
+    """
+
+    static func responseLanguageInstruction() -> String {
+        let identifier = Locale.current.identifier
+        let languageCode = Locale.current.languageCode ?? "en"
+        let language = Locale.current.localizedString(forIdentifier: identifier)
+            ?? Locale.current.localizedString(forLanguageCode: languageCode)
+            ?? "the user's app language"
+        return "Respond in \(language) (\(identifier)). Match the user's app language for all prose. Keep JSON keys in English when JSON is requested."
+    }
+
+    static func migratingSystemPrompt(_ prompt: String) -> String {
+        let oldFormatMarkers = ["Observation:", "Evidence:", "Possible interpretation:", "Candidate adjustment:"]
+        guard oldFormatMarkers.allSatisfy({ prompt.contains($0) }) else { return prompt }
+        return defaultChatSystemPrompt
+    }
+
+    static func foodFinderReducedBolusRecommended(fat: Double, protein: Double) -> Bool {
+        let fpuScore = ((max(fat, 0) * 9.0) + (max(protein, 0) * 4.0)) / 100.0
+        return fpuScore >= 1.5
+    }
+
     enum AIProvider: String, CaseIterable, Identifiable, Codable, JSON {
         case google = "Google Gemini"
         case openai = "OpenAI"
@@ -135,6 +171,14 @@ enum AIInsights {
             case basalRate = "Basal Rate"
             case isf = "Insulin Sensitivity Factor"
             case carbRatio = "Carb Ratio"
+
+            var localizedTitle: String {
+                switch self {
+                case .basalRate: return String(localized: "Basal Rate", comment: "Therapy setting type")
+                case .isf: return String(localized: "Insulin Sensitivity Factor", comment: "Therapy setting type")
+                case .carbRatio: return String(localized: "Carb Ratio", comment: "Therapy setting type")
+                }
+            }
         }
     }
 
@@ -170,6 +214,15 @@ enum AIInsights {
             case good = "Good"
             case fair = "Fair"
             case needsWork = "Needs Work"
+
+            var localizedTitle: String {
+                switch self {
+                case .excellent: return String(localized: "Excellent", comment: "AI settings score grade")
+                case .good: return String(localized: "Good", comment: "AI settings score grade")
+                case .fair: return String(localized: "Fair", comment: "AI settings score grade")
+                case .needsWork: return String(localized: "Needs Work", comment: "AI settings score grade")
+                }
+            }
         }
     }
 }

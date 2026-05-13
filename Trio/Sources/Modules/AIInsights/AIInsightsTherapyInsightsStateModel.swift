@@ -150,6 +150,13 @@ extension AIInsights {
             suggestionHistory = []
         }
 
+        func saveAnalysisPeriod() {
+            guard provider != nil else { return }
+            var settings = provider.settings
+            settings.aiAnalysisPeriodDays = analysisPeriodDays
+            provider.settings = settings
+        }
+
         // MARK: - Analysis
 
         @MainActor
@@ -171,15 +178,37 @@ extension AIInsights {
             do {
                 // 1. Fetch and aggregate data
                 let startDate = Date().addingTimeInterval(-Double(analysisPeriodDays) * 24 * 3600)
-                let glucose = await provider.fetchGlucose(since: startDate)
-                let carbs = await provider.fetchCarbs(since: startDate)
-                let basalProfile = await provider.getBasalProfile()
-                let isf = await provider.getISF()
-                let cr = await provider.getCR()
-                let target = await provider.getTarget()
-                let isfDescription = await provider.getISFDescription()
-                let crDescription = await provider.getCRDescription()
-                let targetDescription = await provider.getTargetDescription()
+                async let glucoseTask = provider.fetchGlucose(since: startDate)
+                async let carbsTask = provider.fetchCarbs(since: startDate)
+                async let basalProfileTask = provider.getBasalProfile()
+                async let isfTask = provider.getISF()
+                async let crTask = provider.getCR()
+                async let targetTask = provider.getTarget()
+                async let isfDescriptionTask = provider.getISFDescription()
+                async let crDescriptionTask = provider.getCRDescription()
+                async let targetDescriptionTask = provider.getTargetDescription()
+
+                let (
+                    glucose,
+                    carbs,
+                    basalProfile,
+                    isf,
+                    cr,
+                    target,
+                    isfDescription,
+                    crDescription,
+                    targetDescription
+                ) = await (
+                    glucoseTask,
+                    carbsTask,
+                    basalProfileTask,
+                    isfTask,
+                    crTask,
+                    targetTask,
+                    isfDescriptionTask,
+                    crDescriptionTask,
+                    targetDescriptionTask
+                )
 
                 let aggregated = DataAggregator.aggregate(
                     glucose: glucose,
@@ -296,6 +325,8 @@ extension AIInsights {
 
             ROLE: Provide specific, time-block-level therapy setting adjustment suggestions.
 
+            \(AIInsights.responseLanguageInstruction())
+
             OUTPUT FORMAT - respond ONLY with a valid JSON object:
             {
               "suggestions": [
@@ -313,9 +344,14 @@ extension AIInsights {
 
             SAFETY RULES:
             - Never suggest changes exceeding ±20% from current values
+            - Basal changes must stay within 10% of the current value
+            - ISF and Carb Ratio changes must stay within 20% of the current value
             - Conservative bias: under-adjust rather than over-adjust
             - If data is insufficient (<3 days or sparse CGM coverage), respond with {"suggestions":[],"overallAssessment":"Insufficient data."}
             - Return zero suggestions if the actual data does not justify a therapy setting change
+            - Do not use generic diabetes ranges. Use only the user's actual Trio data and settings.
+            - Generate "reasoning" and "overallAssessment" in the user's app language.
+            - Keep "settingType" values exactly as the allowed English enum values so the app can apply them.
             - Confidence should be 0.0-1.0 based on data quality and pattern strength
             - Include reasoning that references specific data points
             """
@@ -405,7 +441,7 @@ extension AIInsights {
                         guard !current.isEmpty, !proposed.isEmpty else { return nil }
                         return Suggestion(
                             settingType: type,
-                            timeBlock: timeBlockString(from: block, fallback: "General"),
+                            timeBlock: timeBlockString(from: block, fallback: String(localized: "General", comment: "General therapy time block")),
                             currentValue: current,
                             proposedValue: proposed,
                             reasoning: reasoning,
@@ -421,7 +457,8 @@ extension AIInsights {
 
                 return [Suggestion(
                     settingType: type,
-                    timeBlock: stringValue(from: object, keys: ["timeBlock", "time_block", "timeRange", "time_range"]) ?? "General",
+                    timeBlock: stringValue(from: object, keys: ["timeBlock", "time_block", "timeRange", "time_range"])
+                        ?? String(localized: "General", comment: "General therapy time block"),
                     currentValue: current,
                     proposedValue: proposed,
                     reasoning: reasoning,

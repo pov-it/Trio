@@ -121,13 +121,13 @@ extension AIInsights {
             switch suggestion.settingType {
             case .basalRate:
                 let profile = applyBasalRate(proposedValue, to: await getBasalProfile(), range: range)
-                saveBasalProfile(profile)
+                await MainActor.run { self.saveBasalProfile(profile) }
             case .isf:
                 let profile = applyISF(proposedValue, to: await getInsulinSensitivities(), range: range)
-                saveInsulinSensitivities(profile)
+                await MainActor.run { self.saveInsulinSensitivities(profile) }
             case .carbRatio:
                 let profile = applyCarbRatio(proposedValue, to: await getCarbRatios(), range: range)
-                saveCarbRatios(profile)
+                await MainActor.run { self.saveCarbRatios(profile) }
             }
 
             let nightscoutManager = self.nightscoutManager
@@ -139,16 +139,16 @@ extension AIInsights {
         func restoreSnapshot(_ snapshot: TherapySnapshot, for settingType: Suggestion.SettingType) async throws {
             switch settingType {
             case .basalRate:
-                saveBasalProfile(snapshot.basalProfile)
+                await MainActor.run { self.saveBasalProfile(snapshot.basalProfile) }
             case .isf:
                 if let insulinSensitivities = snapshot.insulinSensitivities {
-                    saveInsulinSensitivities(insulinSensitivities)
+                    await MainActor.run { self.saveInsulinSensitivities(insulinSensitivities) }
                 } else {
                     throw TherapySuggestionApplyError.missingSnapshot
                 }
             case .carbRatio:
                 if let carbRatios = snapshot.carbRatios {
-                    saveCarbRatios(carbRatios)
+                    await MainActor.run { self.saveCarbRatios(carbRatios) }
                 } else {
                     throw TherapySuggestionApplyError.missingSnapshot
                 }

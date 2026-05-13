@@ -10,7 +10,7 @@ extension AIInsights {
         var providerType: AIProvider = .google
         var model: String = AIProvider.google.defaultModel
         var baseURL: String = AIProvider.google.defaultEndpoint
-        var systemPrompt: String = AIInsights.defaultSystemPrompt
+        var systemPrompt: String = AIInsights.defaultChatSystemPrompt
         var personality: AIPersonality = .clinicalExpert
         var analysisPeriodDays: Int = 7
         var aiEnabled: Bool = false
@@ -24,7 +24,7 @@ extension AIInsights {
             providerType = provider.settings.aiProvider
             model = provider.settings.aiModel
             baseURL = provider.settings.aiBaseURL
-            systemPrompt = provider.settings.aiSystemPrompt
+            systemPrompt = AIInsights.migratingSystemPrompt(provider.settings.aiSystemPrompt)
             personality = provider.settings.aiPersonality
             analysisPeriodDays = provider.settings.aiAnalysisPeriodDays
             aiEnabled = provider.settings.aiEnabled
@@ -54,6 +54,7 @@ extension AIInsights {
         func resetToDefaults() {
             baseURL = providerType.defaultEndpoint
             model = providerType.defaultModel
+            systemPrompt = AIInsights.defaultChatSystemPrompt
             saveSettings()
         }
 
@@ -65,12 +66,12 @@ extension AIInsights {
         @MainActor
         func generateInsights() async {
             guard provider != nil else {
-                insightsResult = "Error: AI Insights is not ready yet."
+                insightsResult = String(localized: "Error: AI Insights is not ready yet.", comment: "AI error")
                 return
             }
 
             guard !apiKey.isEmpty else {
-                insightsResult = "Error: API Key is missing."
+                insightsResult = String(localized: "Error: API Key is missing.", comment: "AI error")
                 return
             }
 
@@ -88,7 +89,7 @@ extension AIInsights {
                 """
 
                 let personalitySuffix = personality.systemPromptSuffix
-                let fullPrompt = "\(systemPrompt)\n\nPERSONALITY: \(personalitySuffix)\n\nData:\n\(dataContext)"
+                let fullPrompt = "\(systemPrompt)\n\n\(AIInsights.responseLanguageInstruction())\n\nPERSONALITY: \(personalitySuffix)\n\nData:\n\(dataContext)"
 
                 let request = AIServiceAdapter.AIRequest(
                     model: model,
@@ -113,7 +114,7 @@ extension AIInsights {
             } catch let error as AIServiceAdapter.AIError {
                 insightsResult = error.errorDescription ?? error.localizedDescription
             } catch {
-                insightsResult = "Error generating insights: \(error.localizedDescription)"
+                insightsResult = String(localized: "Error generating insights: \(error.localizedDescription)", comment: "AI error")
             }
         }
     }

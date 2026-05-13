@@ -11,7 +11,7 @@ extension AIInsights {
         var providerType: AIProvider = .google
         var model: String = AIProvider.google.defaultModel
         var baseURL: String = AIProvider.google.defaultEndpoint
-        var systemPrompt: String = AIInsights.defaultSystemPrompt
+        var systemPrompt: String = AIInsights.defaultChatSystemPrompt
         var personality: AIPersonality = .clinicalExpert
         var analysisPeriodDays: Int = 7
         var aiEnabled: Bool = false
@@ -30,7 +30,7 @@ extension AIInsights {
             providerType = provider.settings.aiProvider
             model = provider.settings.aiModel
             baseURL = provider.settings.aiBaseURL
-            systemPrompt = provider.settings.aiSystemPrompt
+            systemPrompt = AIInsights.migratingSystemPrompt(provider.settings.aiSystemPrompt)
             personality = provider.settings.aiPersonality
             analysisPeriodDays = provider.settings.aiAnalysisPeriodDays
             aiEnabled = provider.settings.aiEnabled
@@ -65,6 +65,7 @@ extension AIInsights {
         func resetToDefaults() {
             baseURL = providerType.defaultEndpoint
             model = providerType.defaultModel
+            systemPrompt = AIInsights.defaultChatSystemPrompt
             saveSettings()
         }
 
@@ -347,6 +348,8 @@ extension AIInsights {
             var prompt = """
             \(systemPrompt)
 
+            \(AIInsights.responseLanguageInstruction())
+
             PERSONALITY: \(personalitySuffix)
 
             You are analyzing data from a Trio (OpenAPS-based) closed-loop insulin delivery system.
@@ -356,7 +359,7 @@ extension AIInsights {
             SAFETY RULES:
             - Never suggest changes exceeding ±20% from current values
             - Conservative bias: under-adjust rather than over-adjust
-            - Always include "Reasons not to change" section
+            - Mention reasons not to change only when they matter for the user's question
             - If data is insufficient, say so clearly rather than guessing
 
             CURRENT DATA (last \(stats.periodDays) days):

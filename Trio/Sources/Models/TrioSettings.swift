@@ -79,7 +79,7 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var aiProvider: AIInsights.AIProvider = .google
     var aiModel: String = AIInsights.AIProvider.google.defaultModel
     var aiBaseURL: String = AIInsights.AIProvider.google.defaultEndpoint
-    var aiSystemPrompt: String = AIInsights.defaultSystemPrompt
+    var aiSystemPrompt: String = AIInsights.defaultChatSystemPrompt
     var aiEnabled: Bool = false
     var aiAnalysisPeriodDays: Int = 7
     var aiPersonality: AIPersonality = .clinicalExpert

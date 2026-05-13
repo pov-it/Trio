@@ -47,15 +47,17 @@ extension AIInsights {
                     }
                 }
 
-                // Hint chips
-                if !state.isGenerating && state.messages.count < 2 {
-                    hintChipsView
-                }
-
-                // Input bar
-                inputBar
             }
             .background(appState.trioBackgroundColor(for: colorScheme))
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    if !state.isGenerating && state.messages.count < 2 {
+                        hintChipsView
+                    }
+                    inputBar
+                }
+            }
             .navigationTitle(String(localized: "AI Chat", comment: "Navigation title for AI chat"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

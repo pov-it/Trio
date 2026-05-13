@@ -31,6 +31,8 @@ extension AIInsights {
         let rawResponse: String?
         let timestamp: Date
         let source: FoodSource
+        var imageData: Data?
+        var mealDescription: String?
 
         var totalCarbs: Double { items.reduce(0) { $0 + $1.adjustedCarbs } }
         var totalFat: Double { items.reduce(0) { $0 + $1.adjustedFat } }
@@ -64,6 +66,7 @@ extension AIInsights {
         let protein: Double
         let note: String
         let createdAt: Date
+        let useReducedBolus: Bool?
 
         static func store(_ handoff: FoodBolusHandoff) {
             if let data = try? JSONEncoder().encode(handoff) {
@@ -200,7 +203,9 @@ extension AIInsights {
                     items: items,
                     rawResponse: response.text,
                     timestamp: Date(),
-                    source: .aiText
+                    source: .aiText,
+                    imageData: nil,
+                    mealDescription: description
                 )
 
                 currentResult = result
@@ -223,6 +228,7 @@ extension AIInsights {
             return """
             You are a precise nutritional analysis assistant for a person with Type 1 Diabetes using the Trio (OpenAPS) insulin pump system.
             The user's glucose unit preference is \(unitsStr).
+            \(AIInsights.responseLanguageInstruction())
 
             When given a food description, respond ONLY with a valid JSON array of food items:
             [
@@ -243,6 +249,7 @@ extension AIInsights {
             - Use standard serving sizes when portions are not specified
             - Include fiber separately — the user's pump system can use net carbs
             - If you cannot identify the food, respond with: [{"name":"Unknown","portion":"Unknown","carbs":0,"fat":0,"protein":0,"fiber":0,"calories":0}]
+            - Food names and portion descriptions should match the user's app language when possible
             - Respond ONLY with the JSON array. No markdown, no explanation outside the JSON.
             """
         }
@@ -332,7 +339,7 @@ extension AIInsights {
             foodDescription = ""
         }
 
-        func sendToBolusCalculator() {
+        func sendToBolusCalculator(openBolusCalculator: Bool = true) {
             guard let result = currentResult else { return }
             let itemNames = result.items.map(\.name).joined(separator: ", ")
             let handoff = FoodBolusHandoff(
@@ -340,10 +347,13 @@ extension AIInsights {
                 fat: result.totalFat,
                 protein: result.totalProtein,
                 note: itemNames.isEmpty ? "FoodFinder" : itemNames,
-                createdAt: Date()
+                createdAt: Date(),
+                useReducedBolus: AIInsights.foodFinderReducedBolusRecommended(fat: result.totalFat, protein: result.totalProtein)
             )
             FoodBolusHandoff.store(handoff)
-            showModal(for: .treatmentView)
+            if openBolusCalculator {
+                showModal(for: .treatmentView)
+            }
         }
 
         // MARK: - Camera Analysis (Multimodal)
@@ -391,7 +401,9 @@ extension AIInsights {
                     items: items,
                     rawResponse: response.text,
                     timestamp: Date(),
-                    source: .aiCamera
+                    source: .aiCamera,
+                    imageData: imageData,
+                    mealDescription: trimmedDescription.isEmpty ? nil : trimmedDescription
                 )
                 currentResult = result
                 recentResults.insert(result, at: 0)
@@ -428,7 +440,8 @@ extension AIInsights {
                 }
 
                 var request = URLRequest(url: url)
-                request.setValue("Trio AIInsights FoodFinder", forHTTPHeaderField: "User-Agent")
+                let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+                request.setValue("TrioAIInsights/\(appVersion) (https://github.com/pov-it/Trio)", forHTTPHeaderField: "User-Agent")
                 request.setValue("application/json", forHTTPHeaderField: "Accept")
 
                 let (data, response) = try await URLSession.shared.data(for: request)
@@ -446,8 +459,8 @@ extension AIInsights {
                     return
                 }
 
-                let name = stringValue(product["product_name"], fallback: "Unknown Product")
-                let serving = stringValue(product["serving_size"], fallback: "1 serving")
+                let name = stringValue(product["product_name"], fallback: String(localized: "Unknown Product", comment: "Unknown barcode product"))
+                let serving = stringValue(product["serving_size"], fallback: String(localized: "1 serving", comment: "Default food serving"))
                 let nutriments = product["nutriments"] as? [String: Any] ?? [:]
 
                 let carbs = nutrientValue(["carbohydrates_serving", "carbohydrates_100g"], in: nutriments)
@@ -470,7 +483,9 @@ extension AIInsights {
                     items: [item],
                     rawResponse: nil,
                     timestamp: Date(),
-                    source: .barcode
+                    source: .barcode,
+                    imageData: nil,
+                    mealDescription: name
                 )
                 currentResult = result
                 recentResults.insert(result, at: 0)

@@ -25,6 +25,7 @@ extension Treatments {
         @State private var pushed: Bool = false
         @State private var debounce: DispatchWorkItem?
         @State private var showFatProteinOrderBanner = false
+        @State private var showFoodFinder = false
 
         private enum Config {
             static let dividerHeight: CGFloat = 2
@@ -407,16 +408,22 @@ extension Treatments {
                         Text("Close")
                     }
                 }
-                if state.displayPresets {
-                    ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 12) {
                         Button(action: {
-                            showPresetSheet = true
+                            showFoodFinder = true
                         }, label: {
-                            HStack {
-                                Text("Presets")
-                                Image(systemName: "plus")
-                            }
+                            Image(systemName: "fork.knife.circle")
                         })
+                        .accessibilityLabel(String(localized: "FoodFinder", comment: "FoodFinder toolbar button"))
+
+                        if state.displayPresets {
+                            Button(action: {
+                                showPresetSheet = true
+                            }, label: {
+                                Label(String(localized: "Presets", comment: "Meal presets button"), systemImage: "plus")
+                            })
+                        }
                     }
                 }
             })
@@ -446,6 +453,15 @@ extension Treatments {
                 showPresetSheet = false
             }) {
                 MealPresetView(state: state)
+            }
+            .sheet(isPresented: $showFoodFinder, onDismiss: {
+                Task { await state.applyFoodFinderHandoffIfNeeded() }
+            }) {
+                NavigationStack {
+                    AIInsights.FoodFinderView(resolver: resolver, onHandoffComplete: {
+                        showFoodFinder = false
+                    })
+                }
             }
             .alert("Error while processing Treatment", isPresented: $state.showDeterminationFailureAlert) {
                 Button("OK", role: .cancel) {

@@ -309,7 +309,7 @@ extension Treatments {
             glucoseColorScheme = settingsManager.settings.glucoseColorScheme
         }
 
-        @MainActor private func applyFoodFinderHandoffIfNeeded() async {
+        @MainActor func applyFoodFinderHandoffIfNeeded() async {
             guard let handoff = AIInsights.FoodBolusHandoff.consume() else { return }
 
             carbs = min(Decimal(handoff.carbs), maxCarbs)
@@ -320,6 +320,13 @@ extension Treatments {
 
             if fat > 0 || protein > 0 {
                 useFPUconversion = true
+            }
+
+            let shouldUseReducedBolus = handoff.useReducedBolus
+                ?? AIInsights.foodFinderReducedBolusRecommended(fat: handoff.fat, protein: handoff.protein)
+            if fattyMeals && shouldUseReducedBolus {
+                useFattyMealCorrectionFactor = true
+                useSuperBolus = false
             }
 
             insulinCalculated = await calculateInsulin()
