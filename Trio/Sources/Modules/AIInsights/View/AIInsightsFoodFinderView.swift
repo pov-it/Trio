@@ -51,7 +51,7 @@ extension AIInsights {
             .onAppear(perform: configureView)
             .sheet(isPresented: $state.showCamera) {
                 AIInsights.CameraCaptureView { imageData in
-                    Task { await state.analyzeImage(imageData) }
+                    state.attachImage(imageData)
                 }
             }
             .sheet(isPresented: $state.showBarcodeScanner) {
@@ -154,6 +154,24 @@ extension AIInsights {
                     foodItemCard(item)
                 }
 
+                Button {
+                    state.sendToBolusCalculator()
+                } label: {
+                    HStack {
+                        Image(systemName: "arrow.forward.circle.fill")
+                        Text(String(localized: "Use in Bolus Calculator", comment: "FoodFinder bolus handoff button"))
+                            .font(.headline)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .foregroundStyle(.white)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(.systemBlue))
+                    )
+                }
+                .disabled(result.items.isEmpty)
+
                 // Error
                 if let error = state.errorMessage {
                     HStack {
@@ -207,6 +225,16 @@ extension AIInsights {
                         .font(.headline)
                 }
             }
+            .overlay(alignment: .bottomLeading) {
+                HStack(spacing: 14) {
+                    macroTotal(label: String(localized: "Fat", comment: "Fat macro"), value: result.totalFat, color: .yellow)
+                    macroTotal(label: String(localized: "Protein", comment: "Protein macro"), value: result.totalProtein, color: .red)
+                    macroTotal(label: String(localized: "Fiber", comment: "Fiber macro"), value: result.totalFiber, color: .green)
+                }
+                .padding(.leading)
+                .padding(.bottom, 12)
+            }
+            .padding(.bottom, 34)
             .padding()
             .background(
                 RoundedRectangle(cornerRadius: 16)
@@ -227,6 +255,17 @@ extension AIInsights {
                     )
             )
             .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
+        }
+
+        private func macroTotal(label: String, value: Double, color: Color) -> some View {
+            HStack(spacing: 3) {
+                Text(String(format: "%.0fg", value))
+                    .font(.caption.bold())
+                    .foregroundStyle(color)
+                Text(label)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
         }
 
         private func foodItemCard(_ item: FoodItem) -> some View {
@@ -269,12 +308,39 @@ extension AIInsights {
                     }
                 }
 
-                // Macro pills row
-                HStack(spacing: 12) {
-                    macroPill(label: String(localized: "Carbs", comment: "Carbs macro"), value: String(format: "%.0fg", item.adjustedCarbs), color: .blue)
-                    macroPill(label: String(localized: "Fat", comment: "Fat macro"), value: String(format: "%.0fg", item.fat * item.portionMultiplier), color: .yellow)
-                    macroPill(label: String(localized: "Protein", comment: "Protein macro"), value: String(format: "%.0fg", item.protein * item.portionMultiplier), color: .red)
-                    macroPill(label: String(localized: "Fiber", comment: "Fiber macro"), value: String(format: "%.0fg", item.fiber * item.portionMultiplier), color: .green)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+                    macroEditor(
+                        item: item,
+                        macro: .carbs,
+                        label: String(localized: "Carbs", comment: "Carbs macro"),
+                        value: item.adjustedCarbs,
+                        unit: "g",
+                        color: .blue
+                    )
+                    macroEditor(
+                        item: item,
+                        macro: .fat,
+                        label: String(localized: "Fat", comment: "Fat macro"),
+                        value: item.adjustedFat,
+                        unit: "g",
+                        color: .yellow
+                    )
+                    macroEditor(
+                        item: item,
+                        macro: .protein,
+                        label: String(localized: "Protein", comment: "Protein macro"),
+                        value: item.adjustedProtein,
+                        unit: "g",
+                        color: .red
+                    )
+                    macroEditor(
+                        item: item,
+                        macro: .fiber,
+                        label: String(localized: "Fiber", comment: "Fiber macro"),
+                        value: item.adjustedFiber,
+                        unit: "g",
+                        color: .green
+                    )
                 }
             }
             .padding()
@@ -288,15 +354,43 @@ extension AIInsights {
             )
         }
 
-        private func macroPill(label: String, value: String, color: Color) -> some View {
+        private func macroEditor(
+            item: FoodItem,
+            macro: FoodMacro,
+            label: String,
+            value: Double,
+            unit: String,
+            color: Color
+        ) -> some View {
             VStack(spacing: 2) {
-                Text(value)
+                HStack(spacing: 2) {
+                    TextField(
+                        "",
+                        value: Binding(
+                            get: { value },
+                            set: { state.updateMacro(for: item.id, macro: macro, adjustedValue: $0) }
+                        ),
+                        format: .number.precision(.fractionLength(0 ... 1))
+                    )
+                    .multilineTextAlignment(.center)
+                    .keyboardType(.decimalPad)
                     .font(.caption.bold())
                     .foregroundStyle(color)
+                    .frame(minWidth: 24)
+
+                    Text(unit)
+                        .font(.caption2.bold())
+                        .foregroundStyle(color)
+                }
                 Text(label)
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color(.systemGray6))
+            )
         }
 
         // MARK: - Recent Results
@@ -339,85 +433,108 @@ extension AIInsights {
         // MARK: - Input Bar
 
         private var foodInputBar: some View {
-            HStack(spacing: 8) {
-                // Camera button
-                Button {
-                    state.showCamera = true
-                } label: {
-                    Image(systemName: "camera.fill")
-                        .frame(width: 36, height: 36)
-                        .background(
-                            Circle()
-                                .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray5))
-                        )
-                        .foregroundStyle(colorScheme == .dark ? .white : .primary)
-                }
-                .disabled(state.isAnalyzing)
-
-                // Barcode button
-                Button {
-                    state.showBarcodeScanner = true
-                } label: {
-                    Image(systemName: "barcode.viewfinder")
-                        .frame(width: 36, height: 36)
-                        .background(
-                            Circle()
-                                .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray5))
-                        )
-                        .foregroundStyle(colorScheme == .dark ? .white : .primary)
-                }
-                .disabled(state.isAnalyzing)
-
-                TextField(
-                    String(localized: "Describe your meal...", comment: "FoodFinder input placeholder"),
-                    text: $state.foodDescription,
-                    axis: .vertical
-                )
-                .lineLimit(1 ... 3)
-                .focused($isTextFieldFocused)
-                .textFieldStyle(.plain)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 20)
-                        .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray6))
-                )
-
-                Button {
-                    let desc = state.foodDescription
-                    isTextFieldFocused = false
-                    Task { await state.analyzeFood(description: desc) }
-                } label: {
-                    Group {
-                        if state.isAnalyzing {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        } else {
-                            Image(systemName: "sparkle.magnifyingglass")
+            VStack(spacing: 6) {
+                if state.capturedImageData != nil {
+                    HStack(spacing: 8) {
+                        Image(systemName: "photo.fill")
+                            .foregroundStyle(.blue)
+                        Text(String(localized: "Photo attached", comment: "FoodFinder photo attached label"))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Button {
+                            state.discardCapturedImage()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.secondary)
                         }
                     }
+                    .padding(.horizontal, 12)
+                }
+
+                HStack(spacing: 8) {
+                    roundInputButton(systemImage: "camera.fill") {
+                        state.showCamera = true
+                    }
+                    .disabled(state.isAnalyzing)
+
+                    roundInputButton(systemImage: "barcode.viewfinder") {
+                        state.showBarcodeScanner = true
+                    }
+                    .disabled(state.isAnalyzing)
+
+                    roundInputButton(systemImage: state.isDictating ? "mic.fill" : "mic") {
+                        state.toggleDictation()
+                    }
+                    .foregroundStyle(state.isDictating ? .red : (colorScheme == .dark ? .white : .primary))
+                    .disabled(state.isAnalyzing)
+
+                    TextField(
+                        String(localized: "Describe your meal...", comment: "FoodFinder input placeholder"),
+                        text: $state.foodDescription,
+                        axis: .vertical
+                    )
+                    .lineLimit(1 ... 3)
+                    .focused($isTextFieldFocused)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray6))
+                    )
+
+                    Button {
+                        isTextFieldFocused = false
+                        Task { await state.analyzeCurrentInput() }
+                    } label: {
+                        Group {
+                            if state.isAnalyzing {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            } else {
+                                Image(systemName: "sparkle.magnifyingglass")
+                            }
+                        }
+                        .frame(width: 36, height: 36)
+                        .background(
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 0.3411764706, green: 0.6666666667, blue: 0.9254901961),
+                                            Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                        )
+                        .foregroundStyle(.white)
+                    }
+                    .disabled(!hasFoodFinderInput || state.isAnalyzing)
+                    .opacity(!hasFoodFinderInput || state.isAnalyzing ? 0.5 : 1)
+                }
+                .padding(.horizontal, 12)
+            }
+            .padding(.vertical, 8)
+            .background(colorScheme == .dark ? Color.bgDarkBlue : Color.white)
+        }
+
+        private var hasFoodFinderInput: Bool {
+            state.capturedImageData != nil || !state.foodDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+
+        private func roundInputButton(systemImage: String, action: @escaping () -> Void) -> some View {
+            Button(action: action) {
+                Image(systemName: systemImage)
                     .frame(width: 36, height: 36)
                     .background(
                         Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color(red: 0.3411764706, green: 0.6666666667, blue: 0.9254901961),
-                                        Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
+                            .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray5))
                     )
-                    .foregroundStyle(.white)
-                }
-                .disabled(state.foodDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || state.isAnalyzing)
-                .opacity(state.foodDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || state.isAnalyzing ? 0.5 : 1)
+                    .foregroundStyle(colorScheme == .dark ? .white : .primary)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(colorScheme == .dark ? Color.bgDarkBlue : Color.white)
         }
     }
 }

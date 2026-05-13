@@ -5,25 +5,22 @@ extension AIInsights {
     struct TherapyInsightsView: BaseView {
         let resolver: Resolver
         @State var state = TherapyInsightsStateModel()
+        @State private var therapySettingsDestination: Screen?
 
         @Environment(\.colorScheme) var colorScheme
         @Environment(AppState.self) var appState
 
         var body: some View {
-            ScrollView {
-                VStack(spacing: 20) {
-                    // Period Selector
+            Form {
+                Section {
                     periodSelector
 
-                    // Settings Score Card
                     if let score = state.settingsScore {
                         settingsScoreCard(score)
                     }
 
-                    // Analysis Button
                     analyzeButton
 
-                    // Error
                     if let error = state.errorMessage {
                         HStack {
                             Image(systemName: "exclamationmark.triangle.fill")
@@ -39,24 +36,27 @@ extension AIInsights {
                         )
                     }
 
-                    // Suggestions
-                    if !state.suggestions.isEmpty {
-                        suggestionsSection
-                    } else if !state.isAnalyzing && state.settingsScore == nil && state.suggestionHistory.isEmpty {
+                    if state.suggestions.isEmpty && !state.isAnalyzing && state.settingsScore == nil && state.suggestionHistory.isEmpty {
                         emptyStateView
                     }
-
-                    // Suggestion History
-                    if !state.suggestionHistory.isEmpty {
-                        historySection
-                    }
                 }
-                .padding(.horizontal)
-                .padding(.top, 12)
+                .listRowBackground(Color.chart)
+
+                if !state.suggestions.isEmpty {
+                    suggestionsSection
+                }
+
+                if !state.suggestionHistory.isEmpty {
+                    historySection
+                }
             }
+            .scrollContentBackground(.hidden)
             .background(appState.trioBackgroundColor(for: colorScheme))
             .navigationTitle(String(localized: "Therapy Insights", comment: "Nav title"))
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(item: $therapySettingsDestination) { screen in
+                screen.view(resolver: resolver)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     if !state.suggestions.isEmpty {
@@ -246,49 +246,108 @@ extension AIInsights {
         // MARK: - Suggestions Section
 
         private var suggestionsSection: some View {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(String(localized: "Suggestions", comment: "Suggestions section header"))
-                    .font(.headline)
-                    .padding(.top, 4)
-
+            Section(header: Text(String(localized: "Suggestions", comment: "Suggestions section header"))) {
                 ForEach(state.suggestions) { suggestion in
-                    SuggestionCard(
+                    SuggestionRow(
                         suggestion: suggestion,
                         colorScheme: colorScheme,
                         onApply: { state.requestApply(suggestion) },
-                        onDismiss: { state.dismissSuggestion(suggestion) }
+                        onOpenSettings: { therapySettingsDestination = settingsScreen(for: suggestion.settingType) }
                     )
+                    .contextMenu {
+                        Button(String(localized: "Apply", comment: "Apply suggestion"), systemImage: "checkmark.circle") {
+                            state.requestApply(suggestion)
+                        }
+                        Button(String(localized: "Edit Settings", comment: "Open therapy setting editor"), systemImage: "pencil") {
+                            therapySettingsDestination = settingsScreen(for: suggestion.settingType)
+                        }
+                        Button(String(localized: "Delete", comment: "Delete suggestion"), systemImage: "trash", role: .destructive) {
+                            state.dismissSuggestion(suggestion)
+                        }
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button(String(localized: "Delete", comment: "Delete suggestion"), systemImage: "trash", role: .destructive) {
+                            state.dismissSuggestion(suggestion)
+                        }
+                        Button(String(localized: "Edit", comment: "Edit therapy settings"), systemImage: "pencil") {
+                            therapySettingsDestination = settingsScreen(for: suggestion.settingType)
+                        }
+                        .tint(.blue)
+                    }
+                    .swipeActions(edge: .leading) {
+                        Button(String(localized: "Apply", comment: "Apply suggestion"), systemImage: "checkmark.circle") {
+                            state.requestApply(suggestion)
+                        }
+                        .tint(.green)
+                    }
                 }
             }
+            .listRowBackground(Color.chart)
         }
 
         // MARK: - History Section
 
         private var historySection: some View {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text(String(localized: "History", comment: "Suggestion history header"))
-                        .font(.headline)
-                    Spacer()
-                    Button {
-                        state.clearHistory()
-                    } label: {
-                        Text(String(localized: "Clear", comment: "Clear history"))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .padding(.top, 8)
-
+            Section {
                 ForEach(state.suggestionHistory) { record in
-                    HistoryRecordCard(
+                    HistoryRecordRow(
                         record: record,
                         colorScheme: colorScheme,
-                        onRevert: {
-                            state.revertSuggestion(record)
-                        }
+                        onRevert: { Task { await state.revertSuggestion(record) } },
+                        onOpenSettings: { therapySettingsDestination = settingsScreen(for: record.suggestion.settingType) }
                     )
+                    .contextMenu {
+                        Button(String(localized: "Open Settings", comment: "Open therapy setting editor"), systemImage: "pencil") {
+                            therapySettingsDestination = settingsScreen(for: record.suggestion.settingType)
+                        }
+                        if record.status == .applied {
+                            Button(String(localized: "Revert", comment: "Revert suggestion"), systemImage: "arrow.uturn.backward") {
+                                Task { await state.revertSuggestion(record) }
+                            }
+                        }
+                        Button(String(localized: "Delete", comment: "Delete history item"), systemImage: "trash", role: .destructive) {
+                            state.deleteHistoryRecord(record)
+                        }
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button(String(localized: "Delete", comment: "Delete history item"), systemImage: "trash", role: .destructive) {
+                            state.deleteHistoryRecord(record)
+                        }
+                        Button(String(localized: "Edit", comment: "Edit therapy settings"), systemImage: "pencil") {
+                            therapySettingsDestination = settingsScreen(for: record.suggestion.settingType)
+                        }
+                        .tint(.blue)
+                    }
+                    .swipeActions(edge: .leading) {
+                        if record.status == .applied {
+                            Button(String(localized: "Revert", comment: "Revert suggestion"), systemImage: "arrow.uturn.backward") {
+                                Task { await state.revertSuggestion(record) }
+                            }
+                            .tint(.orange)
+                        }
+                    }
                 }
+            } header: {
+                HStack {
+                    Text(String(localized: "History", comment: "Suggestion history header"))
+                    Spacer()
+                    Button(String(localized: "Clear", comment: "Clear history")) {
+                        state.clearHistory()
+                    }
+                    .font(.caption)
+                }
+            }
+            .listRowBackground(Color.chart)
+        }
+
+        private func settingsScreen(for settingType: Suggestion.SettingType) -> Screen {
+            switch settingType {
+            case .basalRate:
+                return .basalProfileEditor
+            case .isf:
+                return .isfEditor
+            case .carbRatio:
+                return .crEditor
             }
         }
 
@@ -339,13 +398,14 @@ extension AIInsights {
     }
 }
 
-// MARK: - Suggestion Card
+// MARK: - Suggestion Row
 
-private struct SuggestionCard: View {
+private struct SuggestionRow: View {
     let suggestion: AIInsights.Suggestion
     let colorScheme: ColorScheme
     var onApply: (() -> Void)? = nil
     var onDismiss: (() -> Void)? = nil
+    var onOpenSettings: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -399,56 +459,35 @@ private struct SuggestionCard: View {
                 .foregroundColor(.secondary)
                 .lineLimit(4)
 
-            // Action Buttons
-            if onApply != nil || onDismiss != nil {
-                HStack(spacing: 12) {
-                    if let onDismiss {
-                        Button {
-                            onDismiss()
-                        } label: {
-                            Text(String(localized: "Dismiss", comment: "Dismiss suggestion"))
-                                .font(.caption.bold())
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color(.systemGray6))
-                                )
-                        }
+            HStack {
+                if let onApply {
+                    Button {
+                        onApply()
+                    } label: {
+                        Label(String(localized: "Apply", comment: "Apply suggestion"), systemImage: "checkmark.circle.fill")
+                            .font(.caption.bold())
                     }
-                    if let onApply {
-                        Button {
-                            onApply()
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.caption)
-                                Text(String(localized: "Apply", comment: "Apply suggestion"))
-                                    .font(.caption.bold())
-                            }
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(settingColor)
-                            )
-                        }
-                    }
+                    .buttonStyle(.borderless)
                 }
+
+                if let onOpenSettings {
+                    Button {
+                        onOpenSettings()
+                    } label: {
+                        Label(String(localized: "Open Settings", comment: "Open therapy settings"), systemImage: "pencil")
+                            .font(.caption.bold())
+                    }
+                    .buttonStyle(.borderless)
+                }
+
+                Spacer()
+
+                Text(String(localized: "Swipe", comment: "Suggestion swipe hint"))
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
         }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.gray.opacity(0.15), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 3)
+        .padding(.vertical, 6)
     }
 
     private var settingIcon: String {
@@ -488,12 +527,13 @@ private struct SuggestionCard: View {
     }
 }
 
-// MARK: - History Record Card
+// MARK: - History Record Row
 
-private struct HistoryRecordCard: View {
+private struct HistoryRecordRow: View {
     let record: AIInsights.SuggestionHistoryRecord
     let colorScheme: ColorScheme
     var onRevert: (() -> Void)? = nil
+    var onOpenSettings: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -505,6 +545,15 @@ private struct HistoryRecordCard: View {
                     .font(.caption.bold())
                 Spacer()
                 Text(record.appliedAt, style: .relative)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            HStack(spacing: 4) {
+                Image(systemName: "clock")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Text(record.suggestion.timeBlock)
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
@@ -546,17 +595,28 @@ private struct HistoryRecordCard: View {
             }
 
             // Revert button
-            if record.status == .applied, let onRevert {
-                Button {
-                    onRevert()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.uturn.backward")
-                            .font(.caption2)
-                        Text(String(localized: "Revert", comment: "Revert suggestion"))
-                            .font(.caption.bold())
+            if record.status == .applied || onOpenSettings != nil {
+                HStack(spacing: 12) {
+                    if record.status == .applied, let onRevert {
+                        Button {
+                            onRevert()
+                        } label: {
+                            Label(String(localized: "Revert", comment: "Revert suggestion"), systemImage: "arrow.uturn.backward")
+                                .font(.caption.bold())
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.orange)
                     }
-                    .foregroundStyle(.orange)
+
+                    if let onOpenSettings {
+                        Button {
+                            onOpenSettings()
+                        } label: {
+                            Label(String(localized: "Open Settings", comment: "Open therapy settings"), systemImage: "pencil")
+                                .font(.caption.bold())
+                        }
+                        .buttonStyle(.borderless)
+                    }
                 }
             }
         }

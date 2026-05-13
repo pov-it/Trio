@@ -1,5 +1,6 @@
 import CoreData
 import Foundation
+import LoopKit
 import Swinject
 
 extension AIInsights {
@@ -10,6 +11,7 @@ extension AIInsights {
         @Injected() var carbsStorage: CarbsStorage!
         @Injected() var settingsManager: SettingsManager!
         @Injected() var iobService: IOBService!
+        @Injected() var broadcaster: Broadcaster!
 
         private let coreDataContext = CoreDataStack.shared.newTaskContext()
 
@@ -28,25 +30,341 @@ extension AIInsights {
                 ?? []
         }
 
-        func getISF() async -> Decimal {
-            let isf = await storage.retrieveAsync(OpenAPS.Settings.insulinSensitivities, as: InsulinSensitivities.self)
+        func getInsulinSensitivities() async -> InsulinSensitivities {
+            await storage.retrieveAsync(OpenAPS.Settings.insulinSensitivities, as: InsulinSensitivities.self)
                 ?? InsulinSensitivities(from: OpenAPS.defaults(for: OpenAPS.Settings.insulinSensitivities))
                 ?? InsulinSensitivities(units: .mgdL, userPreferredUnits: .mgdL, sensitivities: [])
+        }
+
+        func getCarbRatios() async -> CarbRatios {
+            await storage.retrieveAsync(OpenAPS.Settings.carbRatios, as: CarbRatios.self)
+                ?? CarbRatios(from: OpenAPS.defaults(for: OpenAPS.Settings.carbRatios))
+                ?? CarbRatios(units: .grams, schedule: [])
+        }
+
+        func getBGTargets() async -> BGTargets {
+            await storage.retrieveAsync(OpenAPS.Settings.bgTargets, as: BGTargets.self)
+                ?? BGTargets(from: OpenAPS.defaults(for: OpenAPS.Settings.bgTargets))
+                ?? BGTargets(units: .mgdL, userPreferredUnits: .mgdL, targets: [])
+        }
+
+        func getISF() async -> Decimal {
+            let isf = await getInsulinSensitivities()
             return isf.sensitivities.first?.sensitivity ?? settingsManager.settings.high
         }
 
         func getCR() async -> Decimal {
-            let cr = await storage.retrieveAsync(OpenAPS.Settings.carbRatios, as: CarbRatios.self)
-                ?? CarbRatios(from: OpenAPS.defaults(for: OpenAPS.Settings.carbRatios))
-                ?? CarbRatios(units: .grams, schedule: [])
+            let cr = await getCarbRatios()
             return cr.schedule.first?.ratio ?? 10
         }
 
         func getTarget() async -> Decimal {
-            let targets = await storage.retrieveAsync(OpenAPS.Settings.bgTargets, as: BGTargets.self)
-                ?? BGTargets(from: OpenAPS.defaults(for: OpenAPS.Settings.bgTargets))
-                ?? BGTargets(units: .mgdL, userPreferredUnits: .mgdL, targets: [])
+            let targets = await getBGTargets()
             return targets.targets.first?.low ?? 100
+        }
+
+        func getISFDescription() async -> String {
+            let isf = await getInsulinSensitivities()
+            let entries = isf.sensitivities.map { entry in
+                let value = units == .mmolL ? entry.sensitivity.asMmolL : entry.sensitivity
+                return "\(entry.start) - \(value) \(units.rawValue)/U"
+            }
+            return entries.isEmpty ? "\(await getISF()) \(units.rawValue)/U" : entries.joined(separator: "\n")
+        }
+
+        func getCRDescription() async -> String {
+            let cr = await getCarbRatios()
+            let entries = cr.schedule.map { entry in
+                "\(entry.start) - \(entry.ratio) g/U"
+            }
+            return entries.isEmpty ? "\(await getCR()) g/U" : entries.joined(separator: "\n")
+        }
+
+        func getTargetDescription() async -> String {
+            let targets = await getBGTargets()
+            let entries = targets.targets.map { entry in
+                let low = units == .mmolL ? entry.low.asMmolL : entry.low
+                let high = units == .mmolL ? entry.high.asMmolL : entry.high
+                return "\(entry.start) - \(low)-\(high) \(units.rawValue)"
+            }
+            return entries.isEmpty ? "\(await getTarget()) \(units.rawValue)" : entries.joined(separator: "\n")
+        }
+
+        // MARK: - Therapy Writes
+
+        func captureTherapySnapshot() async -> TherapySnapshot {
+            let basalProfile = await getBasalProfile()
+            let isfValues = await getInsulinSensitivities()
+            let carbRatios = await getCarbRatios()
+            let bgTargets = await getBGTargets()
+
+            return TherapySnapshot(
+                basalProfile: basalProfile,
+                isfSensitivity: isfValues.sensitivities.first?.sensitivity ?? settingsManager.settings.high,
+                carbRatio: carbRatios.schedule.first?.ratio ?? 10,
+                target: bgTargets.targets.first?.low ?? 100,
+                capturedAt: Date(),
+                insulinSensitivities: isfValues,
+                carbRatios: carbRatios,
+                bgTargets: bgTargets
+            )
+        }
+
+        func applySuggestion(_ suggestion: Suggestion) async throws {
+            guard let proposedValue = decimalValue(from: suggestion.proposedValue) else {
+                throw TherapySuggestionApplyError.missingProposedValue
+            }
+            guard let range = timeRange(from: suggestion.timeBlock) else {
+                throw TherapySuggestionApplyError.missingTimeRange
+            }
+
+            switch suggestion.settingType {
+            case .basalRate:
+                let profile = applyBasalRate(proposedValue, to: await getBasalProfile(), range: range)
+                saveBasalProfile(profile)
+            case .isf:
+                let profile = applyISF(proposedValue, to: await getInsulinSensitivities(), range: range)
+                saveInsulinSensitivities(profile)
+            case .carbRatio:
+                let profile = applyCarbRatio(proposedValue, to: await getCarbRatios(), range: range)
+                saveCarbRatios(profile)
+            }
+
+            let nightscoutManager = self.nightscoutManager
+            Task.detached(priority: .low) {
+                try? await nightscoutManager.uploadProfiles()
+            }
+        }
+
+        func restoreSnapshot(_ snapshot: TherapySnapshot, for settingType: Suggestion.SettingType) async throws {
+            switch settingType {
+            case .basalRate:
+                saveBasalProfile(snapshot.basalProfile)
+            case .isf:
+                if let insulinSensitivities = snapshot.insulinSensitivities {
+                    saveInsulinSensitivities(insulinSensitivities)
+                } else {
+                    throw TherapySuggestionApplyError.missingSnapshot
+                }
+            case .carbRatio:
+                if let carbRatios = snapshot.carbRatios {
+                    saveCarbRatios(carbRatios)
+                } else {
+                    throw TherapySuggestionApplyError.missingSnapshot
+                }
+            }
+
+            let nightscoutManager = self.nightscoutManager
+            Task.detached(priority: .low) {
+                try? await nightscoutManager.uploadProfiles()
+            }
+        }
+
+        private func saveBasalProfile(_ profile: [BasalProfileEntry]) {
+            storage.save(profile, as: OpenAPS.Settings.basalProfile)
+
+            let syncValues = profile.map {
+                RepeatingScheduleValue(startTime: TimeInterval($0.minutes * 60), value: Double($0.rate))
+            }
+            deviceManager.pumpManager?.syncBasalRateSchedule(items: syncValues) { result in
+                if case let .failure(error) = result {
+                    debug(.default, "AI Insights: basal profile saved locally, pump sync failed: \(error)")
+                }
+            }
+
+            broadcaster.notify(BasalProfileObserver.self, on: .main) {
+                $0.basalProfileDidChange(profile)
+            }
+        }
+
+        private func saveInsulinSensitivities(_ profile: InsulinSensitivities) {
+            storage.save(profile, as: OpenAPS.Settings.insulinSensitivities)
+        }
+
+        private func saveCarbRatios(_ profile: CarbRatios) {
+            storage.save(profile, as: OpenAPS.Settings.carbRatios)
+        }
+
+        private func applyBasalRate(
+            _ value: Decimal,
+            to profile: [BasalProfileEntry],
+            range: TimeRange
+        ) -> [BasalProfileEntry] {
+            let fallback = profile.isEmpty ? [BasalProfileEntry(start: formatTime(0), minutes: 0, rate: value)] : profile
+            let updated = applyRanges(to: fallback.map { (minute: $0.minutes, value: $0.rate) }, range: range, value: value)
+            return updated.map { BasalProfileEntry(start: formatTime($0.minute), minutes: $0.minute, rate: $0.value) }
+        }
+
+        private func applyISF(
+            _ displayValue: Decimal,
+            to profile: InsulinSensitivities,
+            range: TimeRange
+        ) -> InsulinSensitivities {
+            let storedValue = units == .mmolL ? displayValue * Decimal(18.0182) : displayValue
+            let fallback = profile.sensitivities.isEmpty
+                ? [(minute: 0, value: storedValue)]
+                : profile.sensitivities.map { (minute: $0.offset, value: $0.sensitivity) }
+            let updated = applyRanges(to: fallback, range: range, value: storedValue)
+            return InsulinSensitivities(
+                units: .mgdL,
+                userPreferredUnits: .mgdL,
+                sensitivities: updated.map {
+                    InsulinSensitivityEntry(sensitivity: $0.value, offset: $0.minute, start: formatTime($0.minute))
+                }
+            )
+        }
+
+        private func applyCarbRatio(
+            _ value: Decimal,
+            to profile: CarbRatios,
+            range: TimeRange
+        ) -> CarbRatios {
+            let fallback = profile.schedule.isEmpty
+                ? [(minute: 0, value: value)]
+                : profile.schedule.map { (minute: $0.offset, value: $0.ratio) }
+            let updated = applyRanges(to: fallback, range: range, value: value)
+            return CarbRatios(
+                units: .grams,
+                schedule: updated.map {
+                    CarbRatioEntry(start: formatTime($0.minute), offset: $0.minute, ratio: $0.value)
+                }
+            )
+        }
+
+        private typealias SchedulePoint = (minute: Int, value: Decimal)
+
+        private struct TimeRange {
+            let start: Int
+            let end: Int
+        }
+
+        private func applyRanges(
+            to schedule: [SchedulePoint],
+            range: TimeRange,
+            value: Decimal
+        ) -> [SchedulePoint] {
+            let ranges: [TimeRange]
+            if range.end <= range.start {
+                ranges = [TimeRange(start: range.start, end: 24 * 60), TimeRange(start: 0, end: range.end)]
+            } else {
+                ranges = [range]
+            }
+
+            var points = normalize(schedule)
+            for range in ranges where range.start != range.end {
+                let restoreValue = valueAt(minute: range.end % (24 * 60), in: points)
+                points = points.map { point in
+                    guard point.minute >= range.start, point.minute < range.end else { return point }
+                    return (minute: point.minute, value: value)
+                }
+                points = upsert(points, minute: range.start, value: value)
+                if range.end < 24 * 60 {
+                    points = upsert(points, minute: range.end, value: restoreValue)
+                }
+                points = normalize(points)
+            }
+
+            return points
+        }
+
+        private func normalize(_ schedule: [SchedulePoint]) -> [SchedulePoint] {
+            var byMinute: [Int: Decimal] = [:]
+            for point in schedule {
+                byMinute[max(0, min(24 * 60 - 1, point.minute))] = point.value
+            }
+
+            if byMinute[0] == nil {
+                byMinute[0] = schedule.sorted { $0.minute < $1.minute }.first?.value ?? 0
+            }
+
+            let sorted = byMinute
+                .map { (minute: $0.key, value: $0.value) }
+                .sorted { $0.minute < $1.minute }
+
+            return sorted.reduce(into: [SchedulePoint]()) { result, point in
+                if let last = result.last, last.value == point.value, point.minute != 0 {
+                    return
+                }
+                result.append(point)
+            }
+        }
+
+        private func upsert(_ schedule: [SchedulePoint], minute: Int, value: Decimal) -> [SchedulePoint] {
+            var points = schedule.filter { $0.minute != minute }
+            points.append((minute: minute, value: value))
+            return points.sorted { $0.minute < $1.minute }
+        }
+
+        private func valueAt(minute: Int, in schedule: [SchedulePoint]) -> Decimal {
+            let sorted = normalize(schedule)
+            return sorted.last(where: { $0.minute <= minute })?.value ?? sorted.last?.value ?? 0
+        }
+
+        private func decimalValue(from text: String) -> Decimal? {
+            let normalized = text.replacingOccurrences(of: ",", with: ".")
+            var token = ""
+
+            for character in normalized {
+                if character.isNumber || character == "." || character == "-" {
+                    token.append(character)
+                } else if !token.isEmpty {
+                    break
+                }
+            }
+
+            return Decimal(string: token, locale: Locale(identifier: "en_US_POSIX"))
+        }
+
+        private func timeRange(from text: String) -> TimeRange? {
+            let normalized = text
+                .replacingOccurrences(of: "—", with: "-")
+                .replacingOccurrences(of: "–", with: "-")
+                .replacingOccurrences(of: "to", with: "-", options: .caseInsensitive)
+
+            let parts = normalized
+                .split(separator: "-", maxSplits: 1)
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+
+            guard parts.count == 2,
+                  let start = minutes(from: parts[0]),
+                  let end = minutes(from: parts[1])
+            else {
+                return nil
+            }
+
+            return TimeRange(start: start, end: end)
+        }
+
+        private func minutes(from timeString: String) -> Int? {
+            var value = timeString
+                .uppercased()
+                .replacingOccurrences(of: ".", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let isPM = value.contains("PM")
+            let isAM = value.contains("AM")
+            value = value
+                .replacingOccurrences(of: "AM", with: "")
+                .replacingOccurrences(of: "PM", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let components = value.split(separator: ":")
+            guard let hour = Int(components.first ?? "") else { return nil }
+            let minute = components.count > 1 ? Int(components[1]) ?? 0 : 0
+
+            var normalizedHour = hour
+            if isPM, normalizedHour < 12 {
+                normalizedHour += 12
+            } else if isAM, normalizedHour == 12 {
+                normalizedHour = 0
+            }
+
+            guard (0 ... 24).contains(normalizedHour), (0 ..< 60).contains(minute) else { return nil }
+            return (normalizedHour % 24) * 60 + minute
+        }
+
+        private func formatTime(_ minutes: Int) -> String {
+            String(format: "%02d:%02d:00", minutes / 60, minutes % 60)
         }
 
         // MARK: - Live Status
@@ -106,9 +424,9 @@ extension AIInsights {
         }
 
         /// Fetches carbs from CoreData first, falls back to Nightscout.
-        func fetchCarbs() async -> [CarbsEntry] {
+        func fetchCarbs(since date: Date? = nil) async -> [CarbsEntry] {
             // Try CoreData first
-            let coreDataCarbs = await fetchCarbsFromCoreData()
+            let coreDataCarbs = await fetchCarbsFromCoreData(since: date)
             if !coreDataCarbs.isEmpty {
                 return coreDataCarbs
             }
@@ -117,9 +435,9 @@ extension AIInsights {
         }
 
         /// Reads carbs directly from CoreData (`CarbEntryStored` entity).
-        private func fetchCarbsFromCoreData() async -> [CarbsEntry] {
+        private func fetchCarbsFromCoreData(since date: Date?) async -> [CarbsEntry] {
             do {
-                let since = Date().addingTimeInterval(-30 * 24 * 3600) // last 30 days
+                let since = date ?? Date().addingTimeInterval(-30 * 24 * 3600)
                 let predicate = NSPredicate(format: "date >= %@", since as NSDate)
                 let results = try await CoreDataStack.shared.fetchEntitiesAsync(
                     ofType: CarbEntryStored.self,

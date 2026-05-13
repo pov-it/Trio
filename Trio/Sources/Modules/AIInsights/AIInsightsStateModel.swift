@@ -14,6 +14,7 @@ extension AIInsights {
         var personality: AIPersonality = .clinicalExpert
         var analysisPeriodDays: Int = 7
         var aiEnabled: Bool = false
+        var openFoodFactsBaseURL: String = AIInsights.defaultOpenFoodFactsBaseURL
 
         override func subscribe() {
             if let savedKey = provider.keychain.getValue(String.self, forKey: "ai_insights_api_key") {
@@ -27,6 +28,7 @@ extension AIInsights {
             personality = provider.settings.aiPersonality
             analysisPeriodDays = provider.settings.aiAnalysisPeriodDays
             aiEnabled = provider.settings.aiEnabled
+            openFoodFactsBaseURL = provider.settings.openFoodFactsBaseURL
         }
 
         func saveAPIKey() {
@@ -45,12 +47,18 @@ extension AIInsights {
             settings.aiPersonality = personality
             settings.aiAnalysisPeriodDays = analysisPeriodDays
             settings.aiEnabled = aiEnabled
+            settings.openFoodFactsBaseURL = openFoodFactsBaseURL
             provider.settings = settings
         }
 
         func resetToDefaults() {
             baseURL = providerType.defaultEndpoint
             model = providerType.defaultModel
+            saveSettings()
+        }
+
+        func resetOpenFoodFactsURL() {
+            openFoodFactsBaseURL = AIInsights.defaultOpenFoodFactsBaseURL
             saveSettings()
         }
 
@@ -70,8 +78,9 @@ extension AIInsights {
             defer { isGenerating = false }
 
             do {
-                let glucose = await provider.fetchGlucose(since: Date().addingTimeInterval(-24 * 3600))
-                let carbs = await provider.fetchCarbs()
+                let startDate = Date().addingTimeInterval(-24 * 3600)
+                let glucose = await provider.fetchGlucose(since: startDate)
+                let carbs = await provider.fetchCarbs(since: startDate)
 
                 let dataContext = """
                 Glucose (last 24h): \(glucose.map { "\($0.dateString): \($0.glucose ?? $0.sgv ?? 0) \($0.direction?.rawValue ?? "")" }.joined(separator: "\n"))

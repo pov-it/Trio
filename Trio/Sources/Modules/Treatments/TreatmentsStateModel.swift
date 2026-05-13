@@ -207,6 +207,7 @@ extension Treatments {
                         // Wait for all tasks to complete
                         try await group.waitForAll()
                     }
+                    await self.applyFoodFinderHandoffIfNeeded()
                 } catch let error as NSError {
                     debug(.default, "Failed to setup bolus state concurrently: \(error)")
                 }
@@ -306,6 +307,23 @@ extension Treatments {
             useFPUconversion = settingsManager.settings.useFPUconversion
             isSmoothingEnabled = settingsManager.settings.smoothGlucose
             glucoseColorScheme = settingsManager.settings.glucoseColorScheme
+        }
+
+        @MainActor private func applyFoodFinderHandoffIfNeeded() async {
+            guard let handoff = AIInsights.FoodBolusHandoff.consume() else { return }
+
+            carbs = min(Decimal(handoff.carbs), maxCarbs)
+            fat = min(Decimal(handoff.fat), maxFat)
+            protein = min(Decimal(handoff.protein), maxProtein)
+            note = String(handoff.note.prefix(25))
+            date = handoff.createdAt
+
+            if fat > 0 || protein > 0 {
+                useFPUconversion = true
+            }
+
+            insulinCalculated = await calculateInsulin()
+            await updateForecasts()
         }
 
         private func getCurrentSettingValue(for type: SettingType) async {

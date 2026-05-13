@@ -26,6 +26,9 @@ extension AIInsights {
         let carbRatio: Decimal
         let target: Decimal
         let capturedAt: Date
+        let insulinSensitivities: InsulinSensitivities?
+        let carbRatios: CarbRatios?
+        let bgTargets: BGTargets?
     }
 
     /// Persists and retrieves suggestion history records.
@@ -66,6 +69,12 @@ extension AIInsights {
                 )
                 save(records)
             }
+        }
+
+        static func delete(_ recordId: UUID) {
+            var records = load()
+            records.removeAll { $0.id == recordId }
+            save(records)
         }
 
         static func clear() {

@@ -1,6 +1,8 @@
 import Foundation
 
 enum AIInsights {
+    static let defaultOpenFoodFactsBaseURL = "https://world.openfoodfacts.org/api/v2"
+
     static let defaultSystemPrompt = """
     Analyze the following glucose and treatment data for a person with Type 1 Diabetes using an OpenAPS-based algorithm (oref0/oref1).
     Format your response strictly using this structure:
@@ -97,12 +99,24 @@ enum AIInsights {
 
     // MARK: - Chat Message
 
-    struct ChatMessage: Identifiable, Codable {
+    struct ChatMessage: Identifiable, Codable, Equatable {
         var id: UUID = UUID()
         let content: String
         let isUser: Bool
         let timestamp: Date
         var hintChip: HintChip?
+    }
+
+    struct ChatConversation: Identifiable, Codable, Equatable {
+        var id: UUID = UUID()
+        var title: String
+        var messages: [ChatMessage]
+        var createdAt: Date
+        var updatedAt: Date
+
+        var preview: String {
+            messages.last?.content ?? String(localized: "New conversation", comment: "Empty AI chat conversation")
+        }
     }
 
     // MARK: - Suggestion
@@ -121,6 +135,23 @@ enum AIInsights {
             case basalRate = "Basal Rate"
             case isf = "Insulin Sensitivity Factor"
             case carbRatio = "Carb Ratio"
+        }
+    }
+
+    enum TherapySuggestionApplyError: LocalizedError {
+        case missingProposedValue
+        case missingTimeRange
+        case missingSnapshot
+
+        var errorDescription: String? {
+            switch self {
+            case .missingProposedValue:
+                return String(localized: "The suggestion does not include a usable proposed value.", comment: "Therapy apply error")
+            case .missingTimeRange:
+                return String(localized: "The suggestion does not include a usable time range.", comment: "Therapy apply error")
+            case .missingSnapshot:
+                return String(localized: "The saved history record cannot be reverted because its original settings snapshot is incomplete.", comment: "Therapy apply error")
+            }
         }
     }
 

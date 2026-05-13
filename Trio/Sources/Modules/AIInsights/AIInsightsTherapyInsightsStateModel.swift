@@ -31,6 +31,7 @@ extension AIInsights {
             model = provider.settings.aiModel
             baseURL = provider.settings.aiBaseURL
             aiEnabled = provider.settings.aiEnabled
+            analysisPeriodDays = provider.settings.aiAnalysisPeriodDays
 
             // Load cached suggestions
             loadSuggestions()
@@ -75,49 +76,26 @@ extension AIInsights {
             showApplyDisclaimer = false
             pendingApplySuggestion = nil
 
-            // 1. Capture BEFORE snapshot
-            let basalProfile = await provider.getBasalProfile()
-            let isf = await provider.getISF()
-            let cr = await provider.getCR()
-            let target = await provider.getTarget()
+            do {
+                let beforeSnapshot = await provider.captureTherapySnapshot()
+                try await provider.applySuggestion(suggestion)
+                let afterSnapshot = await provider.captureTherapySnapshot()
 
-            let beforeSnapshot = TherapySnapshot(
-                basalProfile: basalProfile,
-                isfSensitivity: isf,
-                carbRatio: cr,
-                target: target,
-                capturedAt: Date()
-            )
+                let record = SuggestionHistoryRecord(
+                    suggestion: suggestion,
+                    appliedAt: Date(),
+                    status: .applied,
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: afterSnapshot
+                )
+                SuggestionHistoryStore.append(record)
+                suggestionHistory = SuggestionHistoryStore.load()
 
-            // 2. Write the new value (only the specific setting type)
-            // NOTE: This is a simplified write. Real implementation should parse
-            // the proposed value and write per time-block.
-            // For safety, we log the suggestion as applied without auto-writing.
-            // The user can use the "proposed value" to manually tune in Trio settings.
-
-            // 3. Capture AFTER snapshot (same as before since we log-only for now)
-            let afterSnapshot = TherapySnapshot(
-                basalProfile: basalProfile,
-                isfSensitivity: isf,
-                carbRatio: cr,
-                target: target,
-                capturedAt: Date()
-            )
-
-            // 4. Record in history
-            let record = SuggestionHistoryRecord(
-                suggestion: suggestion,
-                appliedAt: Date(),
-                status: .applied,
-                beforeSnapshot: beforeSnapshot,
-                afterSnapshot: afterSnapshot
-            )
-            SuggestionHistoryStore.append(record)
-            suggestionHistory = SuggestionHistoryStore.load()
-
-            // 5. Remove from active suggestions
-            suggestions.removeAll { $0.id == suggestion.id }
-            saveSuggestions()
+                suggestions.removeAll { $0.id == suggestion.id }
+                saveSuggestions()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
 
         func cancelApply() {
@@ -127,13 +105,15 @@ extension AIInsights {
 
         /// Dismiss a suggestion without applying
         func dismissSuggestion(_ suggestion: Suggestion) {
-            let basalProfile: [BasalProfileEntry] = []
             let snapshot = TherapySnapshot(
-                basalProfile: basalProfile,
+                basalProfile: [],
                 isfSensitivity: 0,
                 carbRatio: 0,
                 target: 0,
-                capturedAt: Date()
+                capturedAt: Date(),
+                insulinSensitivities: nil,
+                carbRatios: nil,
+                bgTargets: nil
             )
             let record = SuggestionHistoryRecord(
                 suggestion: suggestion,
@@ -149,12 +129,20 @@ extension AIInsights {
         }
 
         /// Revert a previously applied suggestion
-        func revertSuggestion(_ record: SuggestionHistoryRecord) {
-            // Mark the record as reverted
-            SuggestionHistoryStore.updateStatus(for: record.id, to: .reverted)
+        @MainActor
+        func revertSuggestion(_ record: SuggestionHistoryRecord) async {
+            do {
+                try await provider.restoreSnapshot(record.beforeSnapshot, for: record.suggestion.settingType)
+                SuggestionHistoryStore.updateStatus(for: record.id, to: .reverted)
+                suggestionHistory = SuggestionHistoryStore.load()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+
+        func deleteHistoryRecord(_ record: SuggestionHistoryRecord) {
+            SuggestionHistoryStore.delete(record.id)
             suggestionHistory = SuggestionHistoryStore.load()
-            // NOTE: Actual settings revert (writing beforeSnapshot back to storage)
-            // should be done here once direct therapy writes are enabled.
         }
 
         func clearHistory() {
@@ -182,12 +170,16 @@ extension AIInsights {
 
             do {
                 // 1. Fetch and aggregate data
-                let glucose = await provider.fetchGlucose(since: Date().addingTimeInterval(-Double(analysisPeriodDays) * 24 * 3600))
-                let carbs = await provider.fetchCarbs()
+                let startDate = Date().addingTimeInterval(-Double(analysisPeriodDays) * 24 * 3600)
+                let glucose = await provider.fetchGlucose(since: startDate)
+                let carbs = await provider.fetchCarbs(since: startDate)
                 let basalProfile = await provider.getBasalProfile()
                 let isf = await provider.getISF()
                 let cr = await provider.getCR()
                 let target = await provider.getTarget()
+                let isfDescription = await provider.getISFDescription()
+                let crDescription = await provider.getCRDescription()
+                let targetDescription = await provider.getTargetDescription()
 
                 let aggregated = DataAggregator.aggregate(
                     glucose: glucose,
@@ -196,6 +188,9 @@ extension AIInsights {
                     isf: isf,
                     cr: cr,
                     target: target,
+                    isfDescription: isfDescription,
+                    crDescription: crDescription,
+                    targetDescription: targetDescription,
                     units: provider.units,
                     iob: provider.currentIOB,
                     cob: nil,
@@ -301,23 +296,27 @@ extension AIInsights {
 
             ROLE: Provide specific, time-block-level therapy setting adjustment suggestions.
 
-            OUTPUT FORMAT — respond ONLY with a valid JSON array of suggestion objects:
-            [
-              {
-                "settingType": "Basal Rate" | "Insulin Sensitivity Factor" | "Carb Ratio",
-                "timeBlock": "03:00 AM - 07:00 AM",
-                "currentValue": "0.85 U/hr",
-                "proposedValue": "0.95 U/hr",
-                "reasoning": "Dawn phenomenon detected: average glucose 3-7 AM is 180 mg/dL vs 130 mg/dL overnight. Increasing basal by 12% should reduce morning highs.",
-                "confidence": 0.75
-              }
-            ]
+            OUTPUT FORMAT - respond ONLY with a valid JSON object:
+            {
+              "suggestions": [
+                {
+                  "settingType": "Basal Rate" | "Insulin Sensitivity Factor" | "Carb Ratio",
+                  "timeBlock": "03:00 - 07:00",
+                  "currentValue": "0.85 U/hr",
+                  "proposedValue": "0.95 U/hr",
+                  "reasoning": "Dawn phenomenon detected: average glucose 3-7 AM is 180 mg/dL vs 130 mg/dL overnight. Increasing basal by 12% should reduce morning highs.",
+                  "confidence": 0.75
+                }
+              ],
+              "overallAssessment": "Short summary of the data quality and main pattern."
+            }
 
             SAFETY RULES:
             - Never suggest changes exceeding ±20% from current values
             - Conservative bias: under-adjust rather than over-adjust
-            - If data is insufficient (<3 days), respond with an empty array []
-            - Confidence should be 0.0–1.0 based on data quality and pattern strength
+            - If data is insufficient (<3 days or sparse CGM coverage), respond with {"suggestions":[],"overallAssessment":"Insufficient data."}
+            - Return zero suggestions if the actual data does not justify a therapy setting change
+            - Confidence should be 0.0-1.0 based on data quality and pattern strength
             - Include reasoning that references specific data points
             """
         }
@@ -332,12 +331,15 @@ extension AIInsights {
             DATA PERIOD: \(stats.periodDays) days (from \(stats.startDate.formatted(.dateTime.month().day())) to \(stats.endDate.formatted(.dateTime.month().day())))
 
             GLUCOSE STATISTICS:
+            - CGM readings: \(stats.glucoseReadings.count)
             - Average: \(String(format: "%.1f", stats.averageGlucose)) \(unitsStr)
             - Std Dev: \(String(format: "%.1f", stats.glucoseStdDev)) \(unitsStr)
             - TIR: \(String(format: "%.1f", stats.tir.timeInRange))%
             - Time Below Low: \(String(format: "%.1f", stats.tir.timeBelowLow))%
             - Time Above High: \(String(format: "%.1f", stats.tir.timeAboveHigh))%
             - GMI: \(String(format: "%.1f", stats.gmi))%
+            - Carb entries: \(stats.carbEntries)
+            - Average daily carbs: \(String(format: "%.0f", stats.averageDailyCarbs)) g
 
             DETECTED PATTERNS: \(stats.detectedPatterns.map(\.rawValue).joined(separator: ", "))
 
@@ -351,62 +353,210 @@ extension AIInsights {
             - Carb Ratio: \(stats.currentCR)
             - Target: \(stats.currentTarget)
 
-            Respond ONLY with the JSON array. No markdown, no explanation outside the JSON.
+            Respond ONLY with the JSON object. No markdown, no explanation outside the JSON.
             """
         }
 
         // MARK: - Response Parsing
 
-        private func parseSuggestions(from text: String, settingType _: Suggestion.SettingType?) -> [Suggestion] {
-            // Try to extract JSON from AI response
-            let cleanedText = text
-                .replacingOccurrences(of: "```json", with: "")
-                .replacingOccurrences(of: "```", with: "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            guard let data = cleanedText.data(using: .utf8) else { return [] }
-
-            struct RawSuggestion: Codable {
-                let settingType: String
-                let timeBlock: String
-                let currentValue: String
-                let proposedValue: String
-                let reasoning: String
-                let confidence: Double
+        private func parseSuggestions(from text: String, settingType focusedSettingType: Suggestion.SettingType?) -> [Suggestion] {
+            guard let jsonText = extractJSONFragment(from: text),
+                  let data = jsonText.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data)
+            else {
+                return []
             }
 
-            guard let raw = try? JSONDecoder().decode([RawSuggestion].self, from: data) else {
-                // If we can't parse JSON, create a single catch-all suggestion with the AI text
+            let rawSuggestions: [Any]
+            if let array = json as? [Any] {
+                rawSuggestions = array
+            } else if let object = json as? [String: Any],
+                      let suggestions = object["suggestions"] as? [Any]
+            {
+                rawSuggestions = suggestions
+            } else {
+                return []
+            }
+
+            return rawSuggestions.flatMap { raw -> [Suggestion] in
+                guard let object = raw as? [String: Any] else { return [] }
+
+                let type = parseSettingType(
+                    stringValue(from: object, keys: ["settingType", "setting_type", "type", "category"]),
+                    fallback: focusedSettingType
+                )
+                let reasoning = stringValue(from: object, keys: ["reasoning", "reason", "rationale", "explanation"])
+                    ?? String(localized: "No reasoning provided.", comment: "Therapy suggestion missing reasoning")
+                let confidence = confidenceValue(object["confidence"])
+                let unit = valueUnit(for: type)
+
+                if let blocks = object["time_blocks"] as? [[String: Any]]
+                    ?? object["timeBlocks"] as? [[String: Any]]
+                {
+                    return blocks.compactMap { block in
+                        let current = valueString(
+                            block["current_value"] ?? block["currentValue"] ?? object["currentValue"] ?? object["current_value"],
+                            unit: unit
+                        )
+                        let proposed = valueString(
+                            block["proposed_value"] ?? block["proposedValue"] ?? object["proposedValue"] ?? object["proposed_value"],
+                            unit: unit
+                        )
+                        guard !current.isEmpty, !proposed.isEmpty else { return nil }
+                        return Suggestion(
+                            settingType: type,
+                            timeBlock: timeBlockString(from: block, fallback: "General"),
+                            currentValue: current,
+                            proposedValue: proposed,
+                            reasoning: reasoning,
+                            confidence: confidence,
+                            createdAt: Date()
+                        )
+                    }
+                }
+
+                let current = valueString(object["currentValue"] ?? object["current_value"], unit: unit)
+                let proposed = valueString(object["proposedValue"] ?? object["proposed_value"], unit: unit)
+                guard !current.isEmpty, !proposed.isEmpty else { return [] }
+
                 return [Suggestion(
-                    settingType: .basalRate,
-                    timeBlock: "General",
-                    currentValue: "—",
-                    proposedValue: "—",
-                    reasoning: text,
-                    confidence: 0.0,
+                    settingType: type,
+                    timeBlock: stringValue(from: object, keys: ["timeBlock", "time_block", "timeRange", "time_range"]) ?? "General",
+                    currentValue: current,
+                    proposedValue: proposed,
+                    reasoning: reasoning,
+                    confidence: confidence,
                     createdAt: Date()
                 )]
             }
+        }
 
-            return raw.map { r in
-                let type: Suggestion.SettingType
-                switch r.settingType.lowercased() {
-                case let s where s.contains("basal"): type = .basalRate
-                case let s where s.contains("sensitivity") || s.contains("isf"): type = .isf
-                case let s where s.contains("carb") || s.contains("cr"): type = .carbRatio
-                default: type = .basalRate
-                }
+        private func extractJSONFragment(from text: String) -> String? {
+            let cleaned = text
+                .replacingOccurrences(of: "```json", with: "")
+                .replacingOccurrences(of: "```JSON", with: "")
+                .replacingOccurrences(of: "```", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
 
-                return Suggestion(
-                    settingType: type,
-                    timeBlock: r.timeBlock,
-                    currentValue: r.currentValue,
-                    proposedValue: r.proposedValue,
-                    reasoning: r.reasoning,
-                    confidence: min(max(r.confidence, 0), 1),
-                    createdAt: Date()
-                )
+            if cleaned.first == "{" || cleaned.first == "[" {
+                return cleaned
             }
+
+            if let objectStart = cleaned.firstIndex(of: "{"),
+               let objectEnd = cleaned.lastIndex(of: "}"),
+               objectStart < objectEnd
+            {
+                let object = String(cleaned[objectStart ... objectEnd])
+                if object.contains("\"suggestions\"") {
+                    return object
+                }
+            }
+
+            if let arrayStart = cleaned.firstIndex(of: "["),
+               let arrayEnd = cleaned.lastIndex(of: "]"),
+               arrayStart < arrayEnd
+            {
+                return String(cleaned[arrayStart ... arrayEnd])
+            }
+
+            return nil
+        }
+
+        private func parseSettingType(_ value: String?, fallback: Suggestion.SettingType?) -> Suggestion.SettingType {
+            let normalized = (value ?? "").lowercased().replacingOccurrences(of: "_", with: " ")
+            switch normalized {
+            case let s where s.contains("basal"):
+                return .basalRate
+            case let s where s.contains("sensitivity") || s.contains("isf"):
+                return .isf
+            case let s where s.contains("carb") || s.contains("ratio") || s == "cr":
+                return .carbRatio
+            default:
+                return fallback ?? .basalRate
+            }
+        }
+
+        private func stringValue(from object: [String: Any], keys: [String]) -> String? {
+            for key in keys {
+                if let string = object[key] as? String, !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return string
+                }
+            }
+            return nil
+        }
+
+        private func valueString(_ value: Any?, unit: String) -> String {
+            if let string = value as? String {
+                return string.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if let number = value as? NSNumber {
+                return "\(formatNumber(number.doubleValue)) \(unit)"
+            }
+            if let double = value as? Double {
+                return "\(formatNumber(double)) \(unit)"
+            }
+            return ""
+        }
+
+        private func confidenceValue(_ value: Any?) -> Double {
+            if let number = value as? NSNumber {
+                return min(max(number.doubleValue, 0), 1)
+            }
+            if let string = value as? String {
+                switch string.lowercased() {
+                case "high": return 0.85
+                case "medium": return 0.65
+                case "low": return 0.35
+                default:
+                    return min(max(Double(string) ?? 0.5, 0), 1)
+                }
+            }
+            return 0.5
+        }
+
+        private func valueUnit(for type: Suggestion.SettingType) -> String {
+            switch type {
+            case .basalRate:
+                return "U/hr"
+            case .isf:
+                return "\(provider.units.rawValue)/U"
+            case .carbRatio:
+                return "g/U"
+            }
+        }
+
+        private func timeBlockString(from block: [String: Any], fallback: String) -> String {
+            if let timeBlock = stringValue(from: block, keys: ["timeBlock", "time_block", "timeRange", "time_range"]) {
+                return timeBlock
+            }
+
+            let startSeconds = doubleValue(block["start_seconds"] ?? block["startSeconds"])
+            let endSeconds = doubleValue(block["end_seconds"] ?? block["endSeconds"])
+
+            if let startSeconds, let endSeconds {
+                return "\(formatSeconds(startSeconds)) - \(formatSeconds(endSeconds))"
+            }
+
+            return fallback
+        }
+
+        private func doubleValue(_ value: Any?) -> Double? {
+            if let number = value as? NSNumber {
+                return number.doubleValue
+            }
+            if let string = value as? String {
+                return Double(string.replacingOccurrences(of: ",", with: "."))
+            }
+            return nil
+        }
+
+        private func formatSeconds(_ seconds: Double) -> String {
+            let totalMinutes = Int(seconds / 60) % (24 * 60)
+            return String(format: "%02d:%02d", totalMinutes / 60, totalMinutes % 60)
+        }
+
+        private func formatNumber(_ value: Double) -> String {
+            value.rounded() == value ? String(format: "%.0f", value) : String(format: "%.2f", value)
         }
     }
 }

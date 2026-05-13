@@ -90,6 +90,9 @@ extension AIInsights {
             isf: Decimal,
             cr: Decimal,
             target: Decimal,
+            isfDescription: String? = nil,
+            crDescription: String? = nil,
+            targetDescription: String? = nil,
             units: GlucoseUnits,
             iob: Double?,
             cob: Double?,
@@ -143,17 +146,27 @@ extension AIInsights {
             let hourlyGlucose = computeHourlyAverages(points: glucosePoints)
 
             // Pattern detection
-            let patterns = detectPatterns(hourlyGlucose: hourlyGlucose, tir: tir, stdDev: glucoseStdDev)
+            let patterns = detectPatterns(
+                hourlyGlucose: hourlyGlucose,
+                tir: tir,
+                stdDev: glucoseStdDev,
+                dawnDelta: units == .mmolL ? 1.1 : 20,
+                lowThreshold: lowThresholdDouble,
+                variabilityThreshold: units == .mmolL ? 2.8 : 50
+            )
 
             // Carb stats
-            let totalCarbs = carbs.reduce(0.0) { sum, entry in sum + Double(entry.carbs) }
+            let filteredCarbs = carbs.filter { entry in
+                entry.createdAt >= startDate && entry.createdAt <= endDate
+            }
+            let totalCarbs = filteredCarbs.reduce(0.0) { sum, entry in sum + Double(entry.carbs) }
             let averageDailyCarbs = periodDays > 0 ? totalCarbs / Double(periodDays) : 0
 
             // Format current settings
             let currentBasalProfile = formatBasalProfile(basalProfile)
-            let currentISF = formatISF(isf, units: units)
-            let currentCR = "\(cr)"
-            let currentTarget = formatTarget(target, units: units)
+            let currentISF = isfDescription ?? formatISF(isf, units: units)
+            let currentCR = crDescription ?? "\(cr) g/U"
+            let currentTarget = targetDescription ?? formatTarget(target, units: units)
 
             // Current glucose
             let currentGlucose = glucosePoints.last?.glucose
@@ -175,7 +188,7 @@ extension AIInsights {
                 tdd: 0,
                 totalCarbs: totalCarbs,
                 averageDailyCarbs: averageDailyCarbs,
-                carbEntries: carbs.count,
+                carbEntries: filteredCarbs.count,
                 hourlyGlucoseAverage: hourlyGlucose,
                 detectedPatterns: patterns,
                 currentBasalProfile: currentBasalProfile,
@@ -213,9 +226,8 @@ extension AIInsights {
 
         private static func computeGMI(averageGlucose: Double, units: GlucoseUnits) -> Double {
             // GMI formula: GMI (%) = 3.31 + 0.02392 × mean glucose (mg/dL)
-            // For mmol/L: GMI (%) = 12.71 + 4.70587 × mean glucose (mmol/L)
             if units == .mmolL {
-                return 12.71 + 4.70587 * averageGlucose
+                return 3.31 + 0.02392 * (averageGlucose * 18.0182)
             } else {
                 return 3.31 + 0.02392 * averageGlucose
             }
@@ -243,7 +255,10 @@ extension AIInsights {
         private static func detectPatterns(
             hourlyGlucose: [HourlyGlucose],
             tir: TIRStats,
-            stdDev: Double
+            stdDev: Double,
+            dawnDelta: Double,
+            lowThreshold: Double,
+            variabilityThreshold: Double
         ) -> [DetectedPattern] {
             var patterns: [DetectedPattern] = []
 
@@ -258,7 +273,7 @@ extension AIInsights {
             
             if let earlyAvg = earlyAvg,
                let nightAvg = nightAvg,
-               earlyAvg > nightAvg + 20
+               earlyAvg > nightAvg + dawnDelta
             {
                 patterns.append(.dawnPhenomenon)
             }
@@ -269,12 +284,12 @@ extension AIInsights {
             
             let lateNightAvg = lateNightAvgArray.isEmpty ? nil : lateNightAvgArray.reduce(0, +) / Double(lateNightAvgArray.count)
             
-            if let nightAvg = lateNightAvg, nightAvg < 70 {
+            if let nightAvg = lateNightAvg, nightAvg < lowThreshold {
                 patterns.append(.overnightLow)
             }
 
             // High variability
-            if stdDev > 50 {
+            if stdDev > variabilityThreshold {
                 patterns.append(.highVariability)
             }
 

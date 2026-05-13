@@ -83,6 +83,10 @@
 	<string>For authorized access to bolus</string>
 	<key>NSCameraUsageDescription</key>
 	<string>The camera is used to analyze food and ingredients with the FoodFinder AI feature.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>The microphone is used to dictate meal descriptions in FoodFinder.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Speech recognition is used to turn dictated meal descriptions into text for FoodFinder.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Health App is used to store blood glucose, carbs and insulin</string>
 	<key>NSHealthUpdateUsageDescription</key>

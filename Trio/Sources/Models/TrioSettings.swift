@@ -83,6 +83,7 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var aiEnabled: Bool = false
     var aiAnalysisPeriodDays: Int = 7
     var aiPersonality: AIPersonality = .clinicalExpert
+    var openFoodFactsBaseURL: String = AIInsights.defaultOpenFoodFactsBaseURL
 
     /// Selected Garmin watchface (Trio or SwissAlpine)
     var garminWatchface: GarminWatchface = .trio
@@ -421,6 +422,10 @@ extension TrioSettings: Decodable {
 
         if let aiPersonality = try? container.decode(AIPersonality.self, forKey: .aiPersonality) {
             settings.aiPersonality = aiPersonality
+        }
+
+        if let openFoodFactsBaseURL = try? container.decode(String.self, forKey: .openFoodFactsBaseURL) {
+            settings.openFoodFactsBaseURL = openFoodFactsBaseURL
         }
 
         self = settings

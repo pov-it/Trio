@@ -9,7 +9,8 @@ extension AIInsights {
         @Environment(\.colorScheme) var colorScheme
         @Environment(AppState.self) var appState
         @FocusState private var isTextFieldFocused: Bool
-        @State private var searchText = ""
+        @State private var showConversationHistory = false
+        @State private var conversationSearchText = ""
 
         var body: some View {
             VStack(spacing: 0) {
@@ -58,12 +59,31 @@ extension AIInsights {
             .navigationTitle(String(localized: "AI Chat", comment: "Navigation title for AI chat"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showConversationHistory = true
+                    } label: {
+                        Image(systemName: "sidebar.left")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button {
+                            state.startNewConversation()
+                        } label: {
+                            Label(String(localized: "New Chat", comment: "Menu item"), systemImage: "square.and.pencil")
+                        }
+
+                        Button {
+                            showConversationHistory = true
+                        } label: {
+                            Label(String(localized: "Chat History", comment: "Menu item"), systemImage: "clock.arrow.circlepath")
+                        }
+
+                        Button {
                             state.clearChat()
                         } label: {
-                            Label(String(localized: "Clear Chat", comment: "Menu item"), systemImage: "trash")
+                            Label(String(localized: "Delete Current Chat", comment: "Menu item"), systemImage: "trash")
                         }
 
                         NavigationLink {
@@ -76,17 +96,64 @@ extension AIInsights {
                     }
                 }
             }
-            .searchable(text: $searchText, prompt: String(localized: "Search chats...", comment: "Chat search prompt"))
+            .sheet(isPresented: $showConversationHistory) {
+                conversationHistorySheet
+            }
             .onAppear(perform: configureView)
         }
 
         // MARK: - Subviews
 
         private var messages: [ChatMessage] {
-            if searchText.isEmpty {
-                return state.messages
-            } else {
-                return state.messages.filter { $0.content.localizedCaseInsensitiveContains(searchText) }
+            state.messages
+        }
+
+        private var conversationHistorySheet: some View {
+            NavigationStack {
+                List {
+                    Button {
+                        state.startNewConversation()
+                        showConversationHistory = false
+                    } label: {
+                        Label(String(localized: "New Chat", comment: "New chat button"), systemImage: "square.and.pencil")
+                    }
+
+                    ForEach(state.filteredConversations(searchText: conversationSearchText)) { conversation in
+                        Button {
+                            state.selectConversation(conversation)
+                            showConversationHistory = false
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(conversation.title)
+                                    .font(.subheadline.bold())
+                                    .lineLimit(1)
+                                Text(conversation.preview)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(2)
+                                Text(conversation.updatedAt, style: .relative)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .swipeActions {
+                            Button(String(localized: "Delete", comment: "Delete conversation"), systemImage: "trash", role: .destructive) {
+                                state.deleteConversation(conversation)
+                            }
+                        }
+                    }
+                }
+                .searchable(text: $conversationSearchText, prompt: String(localized: "Search chats...", comment: "Chat search prompt"))
+                .navigationTitle(String(localized: "Chats", comment: "AI chat history title"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(String(localized: "Close", comment: "Close button")) {
+                            showConversationHistory = false
+                        }
+                    }
+                }
             }
         }
 

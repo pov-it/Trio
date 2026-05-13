@@ -772,7 +772,8 @@ extension Home {
                     } message: {
                         Text("Select Adjustment")
                     }
-            }.padding(.horizontal, 10).padding(.bottom, UIDevice.adjustPadding(min: nil, max: 10))
+            }
+            .frame(maxWidth: .infinity)
         }
 
         // MARK: - AI Chat Button
@@ -817,9 +818,9 @@ extension Home {
                             )
                         )
                 }
-                .frame(width: 44, height: 44)
-                .padding(.trailing, 10)
+                .frame(width: 52, height: 52)
             }
+            .accessibilityLabel(String(localized: "AI Hub", comment: "AI Hub accessibility label"))
         }
 
         @ViewBuilder func bolusView(geo: GeometryProxy, _ progress: Decimal) -> some View {
@@ -878,14 +879,30 @@ extension Home {
                     }.padding(.horizontal, 10)
                         .padding(.trailing, 8)
                 }
-                .padding(.horizontal, 10)
-                .padding(.bottom, UIDevice.adjustPadding(min: nil, max: 10))
+                .frame(maxWidth: .infinity)
                 .overlay(alignment: .bottom) {
                     BolusProgressBar(progress: progress)
-                        .padding(.horizontal, 18)
+                        .padding(.horizontal, 8)
                         .padding(.bottom, 9)
                 }.clipShape(RoundedRectangle(cornerRadius: 15))
             }
+        }
+
+        @ViewBuilder func bottomStatusRow(geo: GeometryProxy, bolusProgress: Decimal?) -> some View {
+            let aiButtonSlotWidth: CGFloat = 74
+
+            HStack(alignment: .center, spacing: 0) {
+                if let bolusProgress = bolusProgress {
+                    bolusView(geo: geo, bolusProgress)
+                } else {
+                    adjustmentView(geo: geo)
+                }
+
+                aiChatButton
+                    .frame(width: aiButtonSlotWidth, alignment: .center)
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
         }
 
         @ViewBuilder func alertSafetyNotificationsView(geo: GeometryProxy) -> some View {
@@ -997,16 +1014,7 @@ extension Home {
                     )
                 }.padding([.horizontal, .bottom])
 
-                if let progress = state.bolusProgress {
-                    bolusView(geo: geo, progress)
-                        .padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
-                } else {
-                    HStack(alignment: .center, spacing: 10) {
-                        adjustmentView(geo: geo)
-                        aiChatButton
-                    }
-                    .padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
-                }
+                bottomStatusRow(geo: geo, bolusProgress: state.bolusProgress)
             }
             .background(appState.trioBackgroundColor(for: colorScheme))
             .onReceive(

@@ -16,6 +16,8 @@ extension AIInsights {
         var analysisPeriodDays: Int = 7
         var aiEnabled: Bool = false
         var knowledgeBase: String = ""
+        var conversations: [ChatConversation] = []
+        var activeConversationID: UUID = UUID()
 
         // Live status from Trio
         var currentIOB: Double?
@@ -36,7 +38,8 @@ extension AIInsights {
             // Load live status
             currentIOB = provider.currentIOB
             
-            loadMessages()
+            loadConversations()
+            startNewConversation()
             loadKnowledgeBase()
         }
 
@@ -67,18 +70,39 @@ extension AIInsights {
 
         // MARK: - Persistence
 
-        func saveMessages() {
-            if let data = try? JSONEncoder().encode(messages) {
-                UserDefaults.standard.set(data, forKey: "ai_insights_chat_history")
+        func saveConversations() {
+            if let data = try? JSONEncoder().encode(conversations) {
+                UserDefaults.standard.set(data, forKey: "ai_insights_conversations")
             }
         }
 
-        func loadMessages() {
-            if let data = UserDefaults.standard.data(forKey: "ai_insights_chat_history"),
-               let savedMessages = try? JSONDecoder().decode([ChatMessage].self, from: data)
+        func loadConversations() {
+            if let data = UserDefaults.standard.data(forKey: "ai_insights_conversations"),
+               let savedConversations = try? JSONDecoder().decode([ChatConversation].self, from: data)
             {
-                messages = savedMessages
+                conversations = savedConversations.sorted { $0.updatedAt > $1.updatedAt }
+                return
             }
+
+            if let legacyData = UserDefaults.standard.data(forKey: "ai_insights_chat_history"),
+               let legacyMessages = try? JSONDecoder().decode([ChatMessage].self, from: legacyData),
+               !legacyMessages.isEmpty
+            {
+                conversations = [
+                    ChatConversation(
+                        title: title(for: legacyMessages),
+                        messages: legacyMessages,
+                        createdAt: legacyMessages.first?.timestamp ?? Date(),
+                        updatedAt: legacyMessages.last?.timestamp ?? Date()
+                    )
+                ]
+                saveConversations()
+                UserDefaults.standard.removeObject(forKey: "ai_insights_chat_history")
+            }
+        }
+
+        func saveMessages() {
+            persistActiveConversation()
         }
 
         func saveKnowledgeBase() {
@@ -90,6 +114,35 @@ extension AIInsights {
         }
 
         // MARK: - Chat Actions
+
+        func startNewConversation() {
+            activeConversationID = UUID()
+            messages = []
+            errorMessage = nil
+        }
+
+        func selectConversation(_ conversation: ChatConversation) {
+            activeConversationID = conversation.id
+            messages = conversation.messages
+            errorMessage = nil
+        }
+
+        func deleteConversation(_ conversation: ChatConversation) {
+            conversations.removeAll { $0.id == conversation.id }
+            saveConversations()
+            if activeConversationID == conversation.id {
+                startNewConversation()
+            }
+        }
+
+        func filteredConversations(searchText: String) -> [ChatConversation] {
+            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !query.isEmpty else { return conversations }
+            return conversations.filter { conversation in
+                conversation.title.localizedCaseInsensitiveContains(query) ||
+                    conversation.messages.contains { $0.content.localizedCaseInsensitiveContains(query) }
+            }
+        }
 
         func sendHintChip(_ chip: HintChip) {
             let userMessage = ChatMessage(
@@ -121,9 +174,43 @@ extension AIInsights {
         }
 
         func clearChat() {
-            messages = []
-            errorMessage = nil
-            saveMessages()
+            conversations.removeAll { $0.id == activeConversationID }
+            saveConversations()
+            startNewConversation()
+        }
+
+        private func persistActiveConversation() {
+            guard !messages.isEmpty else { return }
+
+            let now = Date()
+            if let idx = conversations.firstIndex(where: { $0.id == activeConversationID }) {
+                conversations[idx].messages = messages
+                conversations[idx].title = title(for: messages)
+                conversations[idx].updatedAt = now
+            } else {
+                conversations.insert(
+                    ChatConversation(
+                        id: activeConversationID,
+                        title: title(for: messages),
+                        messages: messages,
+                        createdAt: messages.first?.timestamp ?? now,
+                        updatedAt: now
+                    ),
+                    at: 0
+                )
+            }
+
+            conversations.sort { $0.updatedAt > $1.updatedAt }
+            saveConversations()
+        }
+
+        private func title(for messages: [ChatMessage]) -> String {
+            let firstUserMessage = messages.first(where: { $0.isUser })?.content ?? String(localized: "New conversation", comment: "AI chat title")
+            let trimmed = firstUserMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                return String(localized: "New conversation", comment: "AI chat title")
+            }
+            return String(trimmed.prefix(48))
         }
 
         // MARK: - AI Response Generation
@@ -146,14 +233,18 @@ extension AIInsights {
 
             do {
                 // Fetch data
-                let glucose = await provider.fetchGlucose(since: Date().addingTimeInterval(-Double(analysisPeriodDays) * 24 * 3600))
-                let carbs = await provider.fetchCarbs()
+                let startDate = Date().addingTimeInterval(-Double(analysisPeriodDays) * 24 * 3600)
+                let glucose = await provider.fetchGlucose(since: startDate)
+                let carbs = await provider.fetchCarbs(since: startDate)
 
                 // Aggregate stats
                 let basalProfile = await provider.getBasalProfile()
                 let isf = await provider.getISF()
                 let cr = await provider.getCR()
                 let target = await provider.getTarget()
+                let isfDescription = await provider.getISFDescription()
+                let crDescription = await provider.getCRDescription()
+                let targetDescription = await provider.getTargetDescription()
 
                 let stats = DataAggregator.aggregate(
                     glucose: glucose,
@@ -162,6 +253,9 @@ extension AIInsights {
                     isf: isf,
                     cr: cr,
                     target: target,
+                    isfDescription: isfDescription,
+                    crDescription: crDescription,
+                    targetDescription: targetDescription,
                     units: provider.units,
                     iob: currentIOB,
                     cob: nil,
@@ -277,7 +371,7 @@ extension AIInsights {
             DETECTED PATTERNS: \(stats.detectedPatterns.map(\.rawValue).joined(separator: ", "))
 
             HOURLY GLUCOSE AVERAGES:
-            \(stats.hourlyGlucoseAverage.map { h in String(format: "%02d:00 — %.1f %s", h.hour, h.average, unitsStr) }.joined(separator: "\n"))
+            \(stats.hourlyGlucoseAverage.map { h in "\(String(format: "%02d:00", h.hour)) - \(String(format: "%.1f", h.average)) \(unitsStr)" }.joined(separator: "\n"))
 
             CURRENT SETTINGS:
             - Basal Profile: \(stats.currentBasalProfile)

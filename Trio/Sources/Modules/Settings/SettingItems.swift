@@ -271,7 +271,11 @@ enum SettingItems {
                 "AI Personality",
                 "Analysis Period",
                 "System Prompt",
-                "Enable AI Insights"
+                "Enable AI Insights",
+                "FoodFinder",
+                "OpenFoodFacts",
+                "Open Food Facts API",
+                "Barcode"
             ],
             path: ["AI", "AI Insights"]
         ),
@@ -291,7 +295,11 @@ enum SettingItems {
                 "AI Personality",
                 "Clinical Expert",
                 "Supportive Coach",
-                "System Prompt"
+                "System Prompt",
+                "FoodFinder",
+                "OpenFoodFacts",
+                "Open Food Facts API",
+                "Barcode Lookup"
             ],
             path: ["AI", "AI Settings"]
         )

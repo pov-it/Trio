@@ -106,6 +106,31 @@ extension AIInsights {
                 }
                 .listRowBackground(Color.chart)
 
+                // MARK: - FoodFinder
+                Section(
+                    header: Text("FoodFinder", comment: "FoodFinder AI settings section header"),
+                    footer: Text("OpenFoodFacts is used for barcode lookup. Keep the default endpoint unless your region or mirror needs a different API host.", comment: "OpenFoodFacts settings footer")
+                ) {
+                    TextField(
+                        String(localized: "OpenFoodFacts API URL", comment: "OpenFoodFacts API URL field"),
+                        text: $state.openFoodFactsBaseURL,
+                        axis: .vertical
+                    )
+                    .lineLimit(1...3)
+                    .onChange(of: state.openFoodFactsBaseURL) {
+                        state.saveSettings()
+                    }
+                    .font(.system(.caption, design: .monospaced))
+                    .autocorrectionDisabled()
+                    .autocapitalization(.none)
+
+                    Button(String(localized: "Reset OpenFoodFacts URL", comment: "Reset OpenFoodFacts URL button")) {
+                        state.resetOpenFoodFactsURL()
+                    }
+                    .font(.caption)
+                }
+                .listRowBackground(Color.chart)
+
                 // MARK: - System Prompt
                 Section(
                     header: Text("System Prompt", comment: "System prompt section header"),
