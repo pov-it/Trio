@@ -220,11 +220,8 @@ extension AIInsights {
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     
                     if !newKnowledge.isEmpty {
-                        if knowledgeBase.isEmpty {
-                            knowledgeBase = newKnowledge
-                        } else {
-                            knowledgeBase += "\n" + newKnowledge
-                        }
+                        // The AI outputs the ENTIRE updated knowledge base, so we overwrite it completely
+                        knowledgeBase = newKnowledge
                         saveKnowledgeBase()
                     }
                     // Remove the block so the user doesn't see the internal RAG working
@@ -318,15 +315,16 @@ extension AIInsights {
             prompt += """
 
             KNOWLEDGE BASE INSTRUCTION (RAG):
-            You maintain a living Knowledge Base about the user's demographic, lifestyle, diet, and habits.
-            If the USER QUESTION implies any new, updated, or confirmed facts (e.g., "I always exercise on Tuesdays", "I'm vegan", "I work night shifts"), you MUST append a KNOWLEDGE BLOCK at the very end of your response, formatted exactly like this:
+            You maintain a living, concise Knowledge Base about the user's demographic, lifestyle, diet, and habits.
+            If the USER QUESTION implies new facts or changes to existing facts, you must REWRITE the ENTIRE Knowledge Base to include the new information, resolve any conflicting old information, and keep it compact (maximum 10 bullet points). 
+            Output the newly updated complete knowledge base at the very end of your response, formatted exactly like this:
             
             <KNOWLEDGE>
-            - [New fact 1]
-            - [New fact 2]
+            - [Fact 1]
+            - [Fact 2]
             </KNOWLEDGE>
             
-            Only include the block if there are new facts to add. DO NOT include it if there is nothing new to learn.
+            Only output this block if the knowledge base needs to be updated. Do NOT output it if nothing has changed.
 
             USER QUESTION: \(input)
             """
