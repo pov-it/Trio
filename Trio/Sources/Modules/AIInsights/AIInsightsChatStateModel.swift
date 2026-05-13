@@ -15,6 +15,7 @@ extension AIInsights {
         var personality: AIPersonality = .clinicalExpert
         var analysisPeriodDays: Int = 7
         var aiEnabled: Bool = false
+        var knowledgeBase: String = ""
 
         // Live status from Trio
         var currentIOB: Double?
@@ -36,6 +37,7 @@ extension AIInsights {
             currentIOB = provider.currentIOB
             
             loadMessages()
+            loadKnowledgeBase()
         }
 
         func saveAPIKey() {
@@ -77,6 +79,14 @@ extension AIInsights {
             {
                 messages = savedMessages
             }
+        }
+
+        func saveKnowledgeBase() {
+            UserDefaults.standard.set(knowledgeBase, forKey: "ai_insights_knowledge_base")
+        }
+
+        func loadKnowledgeBase() {
+            knowledgeBase = UserDefaults.standard.string(forKey: "ai_insights_knowledge_base") ?? ""
         }
 
         // MARK: - Chat Actions
@@ -164,10 +174,18 @@ extension AIInsights {
                 let contextPrompt = buildContextPrompt(stats: stats, input: input)
 
                 // Build messages payload — limit to last 10 messages to avoid exceeding
-                // the model's context window. The system prompt already contains the full
-                // data context, so older chat messages are less critical.
+                // the model's context window. 
+                var chatHistory: [AIServiceAdapter.ChatMessagePayload] = []
+                
+                if messages.count > 10 {
+                    chatHistory.append(AIServiceAdapter.ChatMessagePayload(
+                        role: .assistant,
+                        content: "[System note: Older conversation history has been compacted/omitted to save context window]"
+                    ))
+                }
+                
                 let recentMessages = messages.suffix(10)
-                let chatHistory = recentMessages.map { msg -> AIServiceAdapter.ChatMessagePayload in
+                chatHistory += recentMessages.map { msg -> AIServiceAdapter.ChatMessagePayload in
                     AIServiceAdapter.ChatMessagePayload(
                         role: msg.isUser ? .user : .assistant,
                         content: msg.content
@@ -192,8 +210,30 @@ extension AIInsights {
                     apiKey: apiKey
                 )
 
+                var responseText = response.text
+
+                // Extract and process any <KNOWLEDGE> blocks updated by the AI
+                if let knowledgeRange = responseText.range(of: "(?s)<KNOWLEDGE>(.*?)</KNOWLEDGE>", options: .regularExpression) {
+                    let newKnowledge = String(responseText[knowledgeRange])
+                        .replacingOccurrences(of: "<KNOWLEDGE>", with: "")
+                        .replacingOccurrences(of: "</KNOWLEDGE>", with: "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    
+                    if !newKnowledge.isEmpty {
+                        if knowledgeBase.isEmpty {
+                            knowledgeBase = newKnowledge
+                        } else {
+                            knowledgeBase += "\n" + newKnowledge
+                        }
+                        saveKnowledgeBase()
+                    }
+                    // Remove the block so the user doesn't see the internal RAG working
+                    responseText.removeSubrange(knowledgeRange)
+                    responseText = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+
                 let assistantMessage = ChatMessage(
-                    content: response.text,
+                    content: responseText,
                     isUser: false,
                     timestamp: Date()
                 )
@@ -247,6 +287,17 @@ extension AIInsights {
             - ISF: \(stats.currentISF)
             - Carb Ratio: \(stats.currentCR)
             - Target: \(stats.currentTarget)
+            """
+
+            if !knowledgeBase.isEmpty {
+                prompt += """
+
+                USER PROFILE & KNOWLEDGE BASE (Continuously Updated):
+                \(knowledgeBase)
+                """
+            }
+
+            prompt += """
 
             LIVE STATUS:
             """
@@ -264,7 +315,21 @@ extension AIInsights {
                 prompt += "- COB: \(String(format: "%.0f", cob)) g\n"
             }
 
-            prompt += "\nUSER QUESTION: \(input)"
+            prompt += """
+
+            KNOWLEDGE BASE INSTRUCTION (RAG):
+            You maintain a living Knowledge Base about the user's demographic, lifestyle, diet, and habits.
+            If the USER QUESTION implies any new, updated, or confirmed facts (e.g., "I always exercise on Tuesdays", "I'm vegan", "I work night shifts"), you MUST append a KNOWLEDGE BLOCK at the very end of your response, formatted exactly like this:
+            
+            <KNOWLEDGE>
+            - [New fact 1]
+            - [New fact 2]
+            </KNOWLEDGE>
+            
+            Only include the block if there are new facts to add. DO NOT include it if there is nothing new to learn.
+
+            USER QUESTION: \(input)
+            """
 
             return prompt
         }
