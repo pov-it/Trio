@@ -163,8 +163,11 @@ extension AIInsights {
                 // Build context-aware prompt
                 let contextPrompt = buildContextPrompt(stats: stats, input: input)
 
-                // Build messages payload
-                let chatHistory = messages.map { msg -> AIServiceAdapter.ChatMessagePayload in
+                // Build messages payload — limit to last 10 messages to avoid exceeding
+                // the model's context window. The system prompt already contains the full
+                // data context, so older chat messages are less critical.
+                let recentMessages = messages.suffix(10)
+                let chatHistory = recentMessages.map { msg -> AIServiceAdapter.ChatMessagePayload in
                     AIServiceAdapter.ChatMessagePayload(
                         role: msg.isUser ? .user : .assistant,
                         content: msg.content
