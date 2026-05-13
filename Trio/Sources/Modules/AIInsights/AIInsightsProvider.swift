@@ -132,7 +132,7 @@ extension AIInsights {
 
             let nightscoutManager = self.nightscoutManager
             Task.detached(priority: .low) {
-                try? await nightscoutManager.uploadProfiles()
+                try? await nightscoutManager?.uploadProfiles()
             }
         }
 
@@ -156,7 +156,7 @@ extension AIInsights {
 
             let nightscoutManager = self.nightscoutManager
             Task.detached(priority: .low) {
-                try? await nightscoutManager.uploadProfiles()
+                try? await nightscoutManager?.uploadProfiles()
             }
         }
 
