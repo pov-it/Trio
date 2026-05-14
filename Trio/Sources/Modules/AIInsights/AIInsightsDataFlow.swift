@@ -144,6 +144,8 @@ enum AIInsights {
             case basalSettings
             case isfSettings
             case carbRatioSettings
+            case risingPattern
+            case fallingPattern
         }
     }
 

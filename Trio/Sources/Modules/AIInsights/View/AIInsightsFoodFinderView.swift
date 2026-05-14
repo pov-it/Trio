@@ -10,28 +10,30 @@ extension AIInsights {
         @Environment(\.colorScheme) var colorScheme
         @Environment(AppState.self) var appState
         @FocusState private var isTextFieldFocused: Bool
+        @State private var ingredientPromptText = ""
+        @State private var ingredientPromptItemID: UUID?
+        @State private var showIngredientPrompt = false
 
         var body: some View {
-            VStack(spacing: 0) {
-                ScrollView {
-                    VStack(spacing: 20) {
-                        // Result View or Empty State
-                        if let result = state.currentResult {
-                            resultView(result)
-                        } else {
+            List {
+                if let result = state.currentResult {
+                    resultSections(result)
+                } else {
+                    Section {
+                        VStack {
                             emptyStateView
                         }
-
-                        // Recent Results
-                        if state.currentResult == nil && !state.recentResults.isEmpty {
-                            recentResultsSection
-                        }
+                        .frame(maxWidth: .infinity)
+                        .listRowBackground(Color.clear)
                     }
-                    .padding(.horizontal)
-                    .padding(.top, 12)
-                }
 
+                    if !state.recentResults.isEmpty {
+                        recentResultsSection
+                    }
+                }
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
             .background(appState.trioBackgroundColor(for: colorScheme))
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -63,6 +65,33 @@ extension AIInsights {
                     Task { await state.lookupBarcode(barcode) }
                 }
                 .ignoresSafeArea()
+            }
+            .alert(
+                ingredientPromptItemID == nil
+                    ? String(localized: "Add Ingredient", comment: "FoodFinder add ingredient alert")
+                    : String(localized: "Edit Ingredient", comment: "FoodFinder edit ingredient alert"),
+                isPresented: $showIngredientPrompt
+            ) {
+                TextField(String(localized: "Ingredient", comment: "FoodFinder ingredient text field"), text: $ingredientPromptText)
+                Button(String(localized: "Search", comment: "Search ingredient button")) {
+                    let query = ingredientPromptText
+                    let itemID = ingredientPromptItemID
+                    ingredientPromptText = ""
+                    ingredientPromptItemID = nil
+                    Task {
+                        if let itemID {
+                            await state.reanalyzeItem(itemID, query: query)
+                        } else {
+                            await state.addIngredient(named: query)
+                        }
+                    }
+                }
+                Button(String(localized: "Cancel", comment: "Cancel button"), role: .cancel) {
+                    ingredientPromptText = ""
+                    ingredientPromptItemID = nil
+                }
+            } message: {
+                Text(String(localized: "Search OpenFoodFacts first. If no match is found, AI will estimate it.", comment: "FoodFinder add ingredient help"))
             }
         }
 
@@ -113,8 +142,8 @@ extension AIInsights {
 
         // MARK: - Result View
 
-        private func resultView(_ result: FoodAnalysisResult) -> some View {
-            VStack(spacing: 16) {
+        @ViewBuilder private func resultSections(_ result: FoodAnalysisResult) -> some View {
+            Section {
                 if let imageData = result.imageData {
                     mealImageCard(imageData, result: result)
                 } else {
@@ -122,7 +151,9 @@ extension AIInsights {
                 }
 
                 macroSummaryCard(result)
+            }
 
+            Section {
                 ForEach(result.items) { item in
                     foodItemRow(item)
                         .swipeActions(edge: .trailing) {
@@ -130,8 +161,26 @@ extension AIInsights {
                                 withAnimation { state.removeItem(item.id) }
                             }
                         }
+                        .swipeActions(edge: .leading) {
+                            Button(String(localized: "Edit", comment: "Edit food item"), systemImage: "pencil") {
+                                beginIngredientEdit(item)
+                            }
+                            .tint(.blue)
+                        }
                 }
 
+                Button {
+                    beginAddIngredient()
+                } label: {
+                    Label(String(localized: "Add Ingredient", comment: "FoodFinder add ingredient button"), systemImage: "magnifyingglass.circle.fill")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+                .disabled(state.isAnalyzing)
+            } header: {
+                Text(String(localized: "Ingredients", comment: "FoodFinder ingredients section"))
+            }
+
+            Section {
                 Button {
                     state.sendToBolusCalculator(openBolusCalculator: onHandoffComplete == nil)
                     onHandoffComplete?()
@@ -143,7 +192,6 @@ extension AIInsights {
                 .controlSize(.large)
                 .disabled(result.items.isEmpty)
 
-                // Error
                 if let error = state.errorMessage {
                     HStack {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -281,18 +329,14 @@ extension AIInsights {
         private func foodItemRow(_ item: FoodItem) -> some View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    TextField(
-                        String(localized: "Ingredient", comment: "FoodFinder ingredient text field"),
-                        text: Binding(
-                            get: { item.name },
-                            set: { state.updateItemName(for: item.id, name: $0) }
-                        )
-                    )
-                    .textFieldStyle(.roundedBorder)
-                    .font(.subheadline.weight(.semibold))
-                    .submitLabel(.search)
-                    .onSubmit {
-                        Task { await state.reanalyzeItem(item.id) }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.name)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(2)
+                        Text(item.portion)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
                     }
 
                     Spacer()
@@ -314,18 +358,7 @@ extension AIInsights {
                                 .foregroundColor(.secondary)
                         }
                     }
-
-                    Button {
-                        Task { await state.reanalyzeItem(item.id) }
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.secondary)
-                    }
                 }
-
-                Text(item.portion)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
 
                 HStack(spacing: 14) {
                     ingredientMetric(String(localized: "Carbs", comment: "Carbs macro"), value: item.adjustedCarbs, unit: "g", color: .blue)
@@ -335,15 +368,7 @@ extension AIInsights {
                     ingredientMetric(String(localized: "Calories", comment: "Calories label"), value: item.adjustedCalories, unit: "kcal", color: .secondary)
                 }
             }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.gray.opacity(0.15), lineWidth: 1)
-            )
+            .padding(.vertical, 6)
         }
 
         private func ingredientMetric(_ label: String, value: Double, unit: String, color: Color) -> some View {
@@ -415,11 +440,7 @@ extension AIInsights {
         // MARK: - Recent Results
 
         private var recentResultsSection: some View {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(String(localized: "Recent Meals", comment: "Recent results section header"))
-                    .font(.headline)
-                    .padding(.top, 8)
-
+            Section {
                 ForEach(state.recentResults.prefix(5)) { result in
                     Button {
                         state.currentResult = result
@@ -439,11 +460,7 @@ extension AIInsights {
                                 .font(.subheadline.bold())
                                 .foregroundStyle(.blue)
                         }
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.6) : Color(.systemGray6))
-                        )
+                        .padding(.vertical, 6)
                     }
                     .swipeActions(edge: .trailing) {
                         Button(String(localized: "Delete", comment: "Delete recent meal"), systemImage: "trash", role: .destructive) {
@@ -451,6 +468,8 @@ extension AIInsights {
                         }
                     }
                 }
+            } header: {
+                Text(String(localized: "Recent Meals", comment: "Recent results section header"))
             }
         }
 
@@ -571,6 +590,18 @@ extension AIInsights {
                     )
                     .foregroundStyle(colorScheme == .dark ? .white : .primary)
             }
+        }
+
+        private func beginAddIngredient() {
+            ingredientPromptText = ""
+            ingredientPromptItemID = nil
+            showIngredientPrompt = true
+        }
+
+        private func beginIngredientEdit(_ item: FoodItem) {
+            ingredientPromptText = item.name
+            ingredientPromptItemID = item.id
+            showIngredientPrompt = true
         }
 
         private func relativeMinutesText(from date: Date) -> String {

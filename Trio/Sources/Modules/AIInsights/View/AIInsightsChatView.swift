@@ -139,6 +139,8 @@ extension AIInsights {
                 return .screen(.isfEditor)
             case .carbRatioSettings:
                 return .screen(.crEditor)
+            case .risingPattern, .fallingPattern:
+                return .therapyInsights
             }
         }
 
@@ -383,7 +385,7 @@ private struct MessageBubble: View {
                     .padding(.bottom, 2)
                 }
 
-                Text(message.content)
+                Text(formattedContent)
                     .font(.subheadline)
                     .foregroundStyle(message.isUser ? .white : (colorScheme == .dark ? .white : .primary))
 
@@ -416,6 +418,11 @@ private struct MessageBubble: View {
             )
             if !message.isUser { Spacer(minLength: 60) }
         }
+    }
+
+    private var formattedContent: AttributedString {
+        (try? AttributedString(markdown: message.content))
+            ?? AttributedString(message.content)
     }
 
     private var bubbleBackground: some ShapeStyle {

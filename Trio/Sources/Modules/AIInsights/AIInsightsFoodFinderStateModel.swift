@@ -392,7 +392,7 @@ extension AIInsights {
                   let idx = result.items.firstIndex(where: { $0.id == itemId })
             else { return }
             result.items[idx].portionMultiplier = max(0.25, multiplier)
-            currentResult = result
+            storeUpdatedResult(result)
         }
 
         func updateItemName(for itemId: UUID, name: String) {
@@ -400,14 +400,14 @@ extension AIInsights {
                   let idx = result.items.firstIndex(where: { $0.id == itemId })
             else { return }
             result.items[idx].name = name
-            currentResult = result
+            storeUpdatedResult(result)
         }
 
         @MainActor
-        func reanalyzeItem(_ itemId: UUID) async {
+        func reanalyzeItem(_ itemId: UUID, query: String? = nil) async {
             guard let result = currentResult,
                   let item = result.items.first(where: { $0.id == itemId }),
-                  !item.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                  !(query ?? item.name).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             else { return }
 
             isAnalyzing = true
@@ -415,12 +415,10 @@ extension AIInsights {
             defer { isAnalyzing = false }
 
             do {
-                let responseText = try await requestFoodAnalysis(
-                    prompt: "Analyze this single ingredient or food item and return exactly one item in the strict JSON object schema. Item: \(item.name). Keep the existing portion if it still makes sense: \(item.portion).",
-                    imageData: nil
-                )
-                let parsed = parseFoodAnalysis(from: responseText)
-                guard let replacement = parsed.items.first else {
+                guard let replacement = try await searchIngredient(
+                    named: query ?? item.name,
+                    existingPortion: item.portion
+                ) else {
                     errorMessage = String(localized: "No matching nutrition estimate was found.", comment: "FoodFinder no replacement error")
                     return
                 }
@@ -439,7 +437,31 @@ extension AIInsights {
                     calories: replacement.calories,
                     portionMultiplier: item.portionMultiplier
                 )
-                currentResult = updatedResult
+                storeUpdatedResult(updatedResult)
+            } catch let error as AIServiceAdapter.AIError {
+                errorMessage = error.errorDescription ?? error.localizedDescription
+            } catch {
+                errorMessage = String(localized: "Error: \(error.localizedDescription)", comment: "AI error")
+            }
+        }
+
+        @MainActor
+        func addIngredient(named name: String) async {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, var result = currentResult else { return }
+
+            isAnalyzing = true
+            errorMessage = nil
+            defer { isAnalyzing = false }
+
+            do {
+                guard let item = try await searchIngredient(named: trimmed, existingPortion: nil) else {
+                    errorMessage = String(localized: "No matching nutrition estimate was found.", comment: "FoodFinder no replacement error")
+                    return
+                }
+
+                result.items.append(item)
+                storeUpdatedResult(result)
             } catch let error as AIServiceAdapter.AIError {
                 errorMessage = error.errorDescription ?? error.localizedDescription
             } catch {
@@ -468,18 +490,26 @@ extension AIInsights {
                 result.items[idx].calories = baseValue
             }
 
-            currentResult = result
+            storeUpdatedResult(result)
         }
 
         func removeItem(_ itemId: UUID) {
             guard var result = currentResult else { return }
             result.items.removeAll { $0.id == itemId }
-            currentResult = result
+            storeUpdatedResult(result)
         }
 
         func deleteRecentResult(_ result: FoodAnalysisResult) {
             recentResults.removeAll { $0.id == result.id }
             saveRecentResults()
+        }
+
+        private func storeUpdatedResult(_ result: FoodAnalysisResult) {
+            currentResult = result
+            if let idx = recentResults.firstIndex(where: { $0.id == result.id }) {
+                recentResults[idx] = result
+                saveRecentResults()
+            }
         }
 
         func discardCapturedImage() {
@@ -772,6 +802,65 @@ extension AIInsights {
             return response.text
         }
 
+        private func searchIngredient(named name: String, existingPortion: String?) async throws -> FoodItem? {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+
+            if let item = try await lookupOpenFoodFactsIngredient(trimmed) {
+                return item
+            }
+
+            let portionHint = existingPortion.map { " Keep this portion if it still makes sense: \($0)." } ?? ""
+            let responseText = try await requestFoodAnalysis(
+                prompt: "Analyze this single ingredient or food item and return exactly one item in the strict JSON object schema. Item: \(trimmed).\(portionHint)",
+                imageData: nil
+            )
+            return parseFoodAnalysis(from: responseText).items.first
+        }
+
+        private func lookupOpenFoodFactsIngredient(_ query: String) async throws -> FoodItem? {
+            guard var components = URLComponents(url: openFoodFactsSearchURL(), resolvingAgainstBaseURL: false) else {
+                return nil
+            }
+            components.queryItems = [
+                URLQueryItem(name: "search_terms", value: query),
+                URLQueryItem(name: "fields", value: "product_name,nutriments,serving_size"),
+                URLQueryItem(name: "page_size", value: "1"),
+                URLQueryItem(name: "json", value: "1")
+            ]
+            guard let url = components.url else { return nil }
+
+            var request = URLRequest(url: url)
+            let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+            request.setValue("TrioAIInsights/\(appVersion) (https://github.com/pov-it/Trio)", forHTTPHeaderField: "User-Agent")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let products = json["products"] as? [[String: Any]],
+                  let product = products.first
+            else {
+                return nil
+            }
+
+            let name = stringValue(product["product_name"], fallback: query)
+            guard name != query || product["nutriments"] != nil else { return nil }
+
+            let serving = stringValue(product["serving_size"], fallback: String(localized: "1 serving", comment: "Default food serving"))
+            let nutriments = product["nutriments"] as? [String: Any] ?? [:]
+
+            return FoodItem(
+                name: name,
+                portion: serving,
+                carbs: nutrientValue(["carbohydrates_serving", "carbohydrates_100g"], in: nutriments),
+                fat: nutrientValue(["fat_serving", "fat_100g"], in: nutriments),
+                protein: nutrientValue(["proteins_serving", "proteins_100g"], in: nutriments),
+                fiber: nutrientValue(["fiber_serving", "fiber_100g"], in: nutriments),
+                calories: nutrientValue(["energy-kcal_serving", "energy-kcal_100g"], in: nutriments)
+            )
+        }
+
         private func shouldRetrySuspiciousResult(_ parsed: ParsedFoodAnalysis, description: String, hasImage: Bool) -> Bool {
             isSuspiciousZeroCarbResult(parsed, description: description, hasImage: hasImage)
         }
@@ -834,6 +923,17 @@ extension AIInsights {
             let normalizedBase = base.hasSuffix("/api/v2") ? base : "\(base)/api/v2"
             return URL(string: "\(normalizedBase)/product/\(barcode).json")
                 ?? URL(string: "\(AIInsights.defaultOpenFoodFactsBaseURL)/product/\(barcode).json")!
+        }
+
+        private func openFoodFactsSearchURL() -> URL {
+            var trimmed = openFoodFactsBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            while trimmed.hasSuffix("/") {
+                trimmed.removeLast()
+            }
+            let base = trimmed.isEmpty ? AIInsights.defaultOpenFoodFactsBaseURL : trimmed
+            let normalizedBase = base.hasSuffix("/api/v2") ? base : "\(base)/api/v2"
+            return URL(string: "\(normalizedBase)/search")
+                ?? URL(string: "\(AIInsights.defaultOpenFoodFactsBaseURL)/search")!
         }
 
         private func nutrientValue(_ keys: [String], in nutriments: [String: Any]) -> Double {

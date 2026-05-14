@@ -362,6 +362,22 @@ extension AIInsights {
                 ))
             }
 
+            if text.contains("rise") || text.contains("rising") || text.contains("up") || text.contains("stijg") || text.contains("omhoog") || text.contains("hoger") || text.contains("high") || text.contains("hyper") {
+                append(ChatAction(
+                    title: String(localized: "Rising pattern", comment: "Chat action trend up"),
+                    systemImage: "arrow.up.right.circle.fill",
+                    destination: .risingPattern
+                ))
+            }
+
+            if text.contains("drop") || text.contains("fall") || text.contains("falling") || text.contains("down") || text.contains("daal") || text.contains("omlaag") || text.contains("lager") || text.contains("low") || text.contains("hypo") {
+                append(ChatAction(
+                    title: String(localized: "Falling pattern", comment: "Chat action trend down"),
+                    systemImage: "arrow.down.right.circle.fill",
+                    destination: .fallingPattern
+                ))
+            }
+
             if text.contains("isf") || text.contains("sensitivity") || text.contains("gevoelig") {
                 append(ChatAction(
                     title: String(localized: "Open Insulin Sensitivity", comment: "Chat action"),
@@ -420,6 +436,7 @@ extension AIInsights {
             - Mention reasons not to change only when they matter for the user's question
             - If data is insufficient, say so clearly rather than guessing
             - When a setting review, meal analysis, or therapy edit would help, explicitly mention the next in-app view to open. The app may render those as interactive action cards.
+            - Use lightweight Markdown for emphasis and lists when helpful: **bold** key findings, and use short bullet lists for multiple points.
 
             CURRENT DATA (last \(stats.periodDays) days):
             - Average glucose: \(String(format: "%.1f", stats.averageGlucose)) \(unitsStr)
