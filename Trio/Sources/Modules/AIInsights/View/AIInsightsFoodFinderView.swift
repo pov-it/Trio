@@ -137,6 +137,23 @@ extension AIInsights {
                             .fill(Color.chart.opacity(0.5))
                     )
                 }
+
+                if let error = state.errorMessage {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.leading)
+                    }
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.orange.opacity(0.1))
+                    )
+                    .padding(.horizontal, 24)
+                }
             }
         }
 
@@ -348,15 +365,21 @@ extension AIInsights {
                             Image(systemName: "minus.circle")
                                 .foregroundColor(.secondary)
                         }
+                        .buttonStyle(.borderless)
+                        .contentShape(Rectangle())
+
                         Text(String(format: "%.2fx", item.portionMultiplier))
                             .font(.caption.monospacedDigit())
                             .frame(width: 42)
+
                         Button {
                             state.updatePortion(for: item.id, multiplier: item.portionMultiplier + 0.25)
                         } label: {
                             Image(systemName: "plus.circle")
                                 .foregroundColor(.secondary)
                         }
+                        .buttonStyle(.borderless)
+                        .contentShape(Rectangle())
                     }
                 }
 

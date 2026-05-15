@@ -594,7 +594,9 @@ extension AIInsights {
                 guard !parsed.items.isEmpty,
                       !isSuspiciousZeroCarbResult(parsed, description: validationDescription, hasImage: true)
                 else {
-                    errorMessage = String(localized: "The AI returned an implausible nutrition estimate. Add portion details and try again.", comment: "FoodFinder implausible estimate error")
+                    errorMessage = parsed.items.isEmpty
+                        ? String(localized: "The photo could not be analyzed. Try a clearer photo, add a short meal description, or check whether your AI provider supports image input.", comment: "FoodFinder image analysis empty result error")
+                        : String(localized: "The AI returned an implausible nutrition estimate. Add portion details and try again.", comment: "FoodFinder implausible estimate error")
                     return
                 }
 

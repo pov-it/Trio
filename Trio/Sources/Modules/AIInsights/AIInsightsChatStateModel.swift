@@ -242,6 +242,27 @@ extension AIInsights {
         }
 
         @MainActor
+        func revertLatestMatchingSuggestion(_ suggestion: Suggestion) async {
+            guard let record = SuggestionHistoryStore.load().first(where: { record in
+                record.status == .applied &&
+                    (record.suggestion.id == suggestion.id ||
+                        (record.suggestion.settingType == suggestion.settingType &&
+                            record.suggestion.timeBlock == suggestion.timeBlock &&
+                            record.suggestion.proposedValue == suggestion.proposedValue))
+            }) else {
+                errorMessage = String(localized: "No applied matching suggestion was found to revert.", comment: "AI chat revert error")
+                return
+            }
+
+            do {
+                try await provider.restoreSnapshot(record.beforeSnapshot, for: record.suggestion.settingType)
+                SuggestionHistoryStore.updateStatus(for: record.id, to: .reverted)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+
+        @MainActor
         func addAdjustmentSuggestionToPresets(_ suggestion: AdjustmentSuggestion) async {
             do {
                 try await provider.addAdjustmentSuggestionToPresets(suggestion)
@@ -779,7 +800,10 @@ extension AIInsights {
             - When a setting review, meal analysis, or therapy edit would help, explicitly mention the next in-app view to open. The app may render those as interactive action cards.
             - Use inline trend tokens in prose when helpful: (arrowUp), (arrowDown), (arrowFlat), (arrowDoubleUp), (arrowDoubleDown), (arrowUpRight), (arrowDownRight).
             - Mention Trio setting names naturally, for example basal rates, ISF, carb ratios, overrides, and temporary targets. The app turns those words into inline links.
+            - In Dutch answers, prefer "basaalwaarden" over "basal rates" and "koolhydraatratio's" over "carb ratios". "override" and "overrides" may stay as-is.
+            - For value changes, write current value -> proposed value, then explain in words. Do not add another arrow after the proposed value.
             - Use lightweight Markdown for emphasis and lists when helpful: **bold** key findings, and use short bullet lists for multiple points.
+            - Do not output markdown horizontal separators such as "-----".
             - Finish the visible answer in complete sentences before any hidden XML-style blocks. Never start <KNOWLEDGE> or <TRIO_SUGGESTIONS> until the user-facing answer is fully complete.
 
             CURRENT DATA (last \(stats.periodDays) days):

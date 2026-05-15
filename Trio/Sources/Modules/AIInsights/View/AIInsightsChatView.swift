@@ -33,6 +33,9 @@ extension AIInsights {
                                     onApplyTherapySuggestion: { suggestion in
                                         state.requestApply(suggestion)
                                     },
+                                    onRevertTherapySuggestion: { suggestion in
+                                        Task { await state.revertLatestMatchingSuggestion(suggestion) }
+                                    },
                                     onEditTherapySuggestion: { suggestion in
                                         navigationTarget = target(for: settingsDestination(for: suggestion.settingType))
                                     },
@@ -361,19 +364,21 @@ extension AIInsights {
         }
 
         private var generatingBubble: some View {
-            HStack(spacing: 8) {
-                ProgressView()
-                    .progressViewStyle(CircularProgressViewStyle(tint: colorScheme == .dark ? .white : .primary))
-                Text(String(localized: "Analyzing...", comment: "AI generating state"))
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+            HStack {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: colorScheme == .dark ? .white : .primary))
+                    Text(String(localized: "Analyzing...", comment: "AI generating state"))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.insulin.opacity(0.1))
+                )
+                Spacer(minLength: 60)
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.insulin.opacity(0.1))
-            )
         }
 
         private var inputBar: some View {
@@ -431,6 +436,7 @@ private struct MessageBubble: View {
     let units: GlucoseUnits
     var onNavigate: (AIInsights.ChatAction.Destination) -> Void = { _ in }
     var onApplyTherapySuggestion: (AIInsights.Suggestion) -> Void = { _ in }
+    var onRevertTherapySuggestion: (AIInsights.Suggestion) -> Void = { _ in }
     var onEditTherapySuggestion: (AIInsights.Suggestion) -> Void = { _ in }
     var onDismissTherapySuggestion: (AIInsights.Suggestion) -> Void = { _ in }
     var onAddAdjustmentPreset: (AIInsights.AdjustmentSuggestion) -> Void = { _ in }
@@ -469,6 +475,7 @@ private struct MessageBubble: View {
                                 ChatTherapySuggestionCard(
                                     suggestion: suggestion,
                                     onApply: { onApplyTherapySuggestion(suggestion) },
+                                    onRevert: { onRevertTherapySuggestion(suggestion) },
                                     onEdit: { onEditTherapySuggestion(suggestion) },
                                     onDismiss: { onDismissTherapySuggestion(suggestion) }
                                 )
@@ -569,7 +576,7 @@ private struct InlineMessageText: View {
     }
 
     private var segments: [InlineSegment] {
-        InlineSegment.parse(content)
+        InlineSegment.parse(AIChatTextNormalizer.normalize(content))
     }
 
     private func text(for segment: InlineSegment) -> Text {
@@ -582,7 +589,7 @@ private struct InlineMessageText: View {
         case let .trend(token):
             return Text(" ") + Text(Image(systemName: token.systemImage)) + Text(" ")
         case let .link(title, destination):
-            var attributed = AttributedString(title)
+            var attributed = AttributedString(localizedLinkTitle(for: title, destination: destination))
             attributed.link = URL(string: "trio-ai://\(destination.deepLinkID)")
             attributed.font = .subheadline.bold()
             attributed.foregroundColor = .accentColor
@@ -593,6 +600,20 @@ private struct InlineMessageText: View {
 
     private func destination(for id: String) -> AIInsights.ChatAction.Destination? {
         AIInsights.ChatAction.Destination(inlineLinkID: id)
+    }
+
+    private func localizedLinkTitle(for title: String, destination: AIInsights.ChatAction.Destination) -> String {
+        let normalized = title.lowercased()
+        switch destination {
+        case .basalSettings:
+            return String(localized: "basal rates", comment: "Inline AI chat link to basal settings")
+        case .carbRatioSettings:
+            return String(localized: "carb ratios", comment: "Inline AI chat link to carb ratio settings")
+        case .adjustmentSettings where normalized.contains("temporary") || normalized.contains("target") || normalized.contains("streef"):
+            return String(localized: "temporary targets", comment: "Inline AI chat link to temporary target settings")
+        default:
+            return title
+        }
     }
 }
 
@@ -648,6 +669,46 @@ private enum InlineSegment {
     }
 }
 
+private enum AIChatTextNormalizer {
+    static func normalize(_ content: String) -> String {
+        var text = content
+            .replacingOccurrences(of: "\\r\\n", with: "\n")
+            .replacingOccurrences(of: "\\n", with: "\n")
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: "-----", with: "\n\n")
+            .replacingOccurrences(of: "_____", with: "\n\n")
+
+        text = regexReplace(text, pattern: #"(?m)^\s*[-_—]{3,}\s*$"#, template: "\n")
+        text = regexReplace(text, pattern: #"\s+[*•]\s+"#, template: "\n• ")
+        text = regexReplace(text, pattern: #"(?m)^\s*[-*]\s+"#, template: "• ")
+        text = regexReplace(text, pattern: #"\*\*([^*\n]+)\*\*"#, template: "$1")
+        text = regexReplace(text, pattern: #"__([^_\n]+)__"#, template: "$1")
+        text = regexReplace(text, pattern: #"\*\*"#, template: "")
+        text = regexReplace(text, pattern: #"([.!?])([A-ZÀ-ÖØ-Þ])"#, template: "$1 $2")
+
+        let rightArrow = NSRegularExpression.escapedPattern(for: String(UnicodeScalar(0x2192)!))
+        let arrow = "(?:->|\(rightArrow))"
+        let value = #"\d+(?:[,.]\d+)?\s*(?:mmol/L|%|U/hr|g/U|U|g)?"#
+        text = regexReplace(
+            text,
+            pattern: "(\(value)\\s*\(arrow)\\s*\(value))\\s*\(arrow)\\s+(?=\\p{Ll})",
+            template: "$1, "
+        )
+
+        text = regexReplace(text, pattern: #"[ \t]{2,}"#, template: " ")
+        text = regexReplace(text, pattern: #"[ \t]+\n"#, template: "\n")
+        text = regexReplace(text, pattern: #"\n{3,}"#, template: "\n\n")
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func regexReplace(_ text: String, pattern: String, template: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        let range = NSRange(text.startIndex ..< text.endIndex, in: text)
+        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: template)
+    }
+}
+
 private enum TrendToken: String {
     case arrowUp
     case arrowDown
@@ -689,6 +750,7 @@ private enum TrendToken: String {
 private struct ChatTherapySuggestionCard: View {
     let suggestion: AIInsights.Suggestion
     var onApply: () -> Void
+    var onRevert: () -> Void
     var onEdit: () -> Void
     var onDismiss: () -> Void
 
@@ -710,6 +772,12 @@ private struct ChatTherapySuggestionCard: View {
                     systemImage: "pencil",
                     tint: .blue,
                     action: onEdit
+                ),
+                ChatSwipeAction(
+                    title: String(localized: "Revert", comment: "Revert suggestion"),
+                    systemImage: "arrow.uturn.backward",
+                    tint: .orange,
+                    action: onRevert
                 ),
                 ChatSwipeAction(
                     title: String(localized: "Dismiss", comment: "Dismiss suggestion"),
@@ -957,6 +1025,7 @@ private struct ChatSwipeActionContainer<Content: View>: View {
             }
 
             content
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .offset(x: offset)
                 .gesture(dragGesture)
         }
@@ -1007,7 +1076,7 @@ private struct ChatSwipeActionContainer<Content: View>: View {
                     .multilineTextAlignment(.center)
             }
             .foregroundStyle(.white)
-            .frame(width: 74)
+            .frame(width: 74, maxHeight: .infinity)
             .padding(.vertical, 10)
             .background(action.tint)
         }

@@ -158,7 +158,7 @@ extension AIInsights {
                 if let errorMsg = testErrorMessage {
                     Text(String(localized: "Connection failed:\n", comment: "Test failure prefix") + errorMsg)
                 } else {
-                    Text("Connection successful! ✅", comment: "Test success")
+                    Text("Connection successful!", comment: "Test success")
                 }
             }
             .onAppear(perform: configureView)
