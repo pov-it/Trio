@@ -763,7 +763,7 @@ private struct ChatAdjustmentSuggestionCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Image(systemName: suggestion.kind.icon)
-                        .foregroundStyle(.accentColor)
+                        .foregroundStyle(Color.accentColor)
                     Text(suggestion.name)
                         .font(.caption.bold())
                         .foregroundColor(.primary)
