@@ -9,7 +9,7 @@ extension AIInsights {
         @Environment(\.colorScheme) var colorScheme
         @Environment(AppState.self) var appState
         @FocusState private var isTextFieldFocused: Bool
-        @State private var showConversationHistory = false
+        @State private var showConversationPicker = false
         @State private var conversationSearchText = ""
         @State private var navigationTarget: ChatNavigationTarget?
 
@@ -89,45 +89,31 @@ extension AIInsights {
             .navigationTitle(String(localized: "AI Chat", comment: "Navigation title for AI chat"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .principal) {
                     Button {
-                        showConversationHistory = true
+                        showConversationPicker = true
                     } label: {
-                        Image(systemName: "sidebar.left")
+                        HStack(spacing: 4) {
+                            Text(currentConversationTitle)
+                                .font(.headline)
+                                .lineLimit(1)
+                            Image(systemName: "chevron.down")
+                                .font(.caption.bold())
+                        }
+                        .foregroundStyle(.primary)
                     }
+                    .buttonStyle(.plain)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button {
-                            state.startNewConversation()
-                        } label: {
-                            Label(String(localized: "New Chat", comment: "Menu item"), systemImage: "square.and.pencil")
-                        }
-
-                        Button {
-                            showConversationHistory = true
-                        } label: {
-                            Label(String(localized: "Chat History", comment: "Menu item"), systemImage: "clock.arrow.circlepath")
-                        }
-
-                        Button {
-                            state.clearChat()
-                        } label: {
-                            Label(String(localized: "Delete Current Chat", comment: "Menu item"), systemImage: "trash")
-                        }
-
-                        NavigationLink {
-                            AISettingsView(resolver: resolver)
-                        } label: {
-                            Label(String(localized: "AI Settings", comment: "Menu item"), systemImage: "gearshape")
-                        }
+                    NavigationLink {
+                        AISettingsView(resolver: resolver)
                     } label: {
-                        Image(systemName: "ellipsis.circle")
+                        Image(systemName: "gearshape")
                     }
                 }
             }
-            .sheet(isPresented: $showConversationHistory) {
-                conversationHistorySheet
+            .popover(isPresented: $showConversationPicker, arrowEdge: .top) {
+                conversationPicker
             }
             .navigationDestination(item: $navigationTarget) { target in
                 switch target {
@@ -159,6 +145,11 @@ extension AIInsights {
 
         private var messages: [ChatMessage] {
             state.messages
+        }
+
+        private var currentConversationTitle: String {
+            state.conversations.first(where: { $0.id == state.activeConversationID })?.title
+                ?? String(localized: "AI Chat", comment: "Navigation title for AI chat")
         }
 
         private func target(for destination: ChatAction.Destination) -> ChatNavigationTarget {
@@ -210,53 +201,73 @@ extension AIInsights {
             return date.formatted(.dateTime.month().day().hour().minute())
         }
 
-        private var conversationHistorySheet: some View {
+        private var conversationPicker: some View {
             NavigationStack {
                 List {
                     Button {
                         state.startNewConversation()
-                        showConversationHistory = false
+                        showConversationPicker = false
                     } label: {
                         Label(String(localized: "New Chat", comment: "New chat button"), systemImage: "square.and.pencil")
                     }
 
-                    ForEach(state.filteredConversations(searchText: conversationSearchText)) { conversation in
-                        Button {
-                            state.selectConversation(conversation)
-                            showConversationHistory = false
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(conversation.title)
-                                    .font(.subheadline.bold())
-                                    .lineLimit(1)
-                                Text(conversation.preview)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(2)
-                                Text(relativeMinutesText(from: conversation.updatedAt))
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
+                    Section(header: Text(String(localized: "Chat History", comment: "Chat history section header"))) {
+                        ForEach(state.filteredConversations(searchText: conversationSearchText)) { conversation in
+                            Button {
+                                state.selectConversation(conversation)
+                                showConversationPicker = false
+                            } label: {
+                                HStack(spacing: 10) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(conversation.title)
+                                            .font(.subheadline.bold())
+                                            .lineLimit(1)
+                                        Text(conversation.preview)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(2)
+                                        Text(relativeMinutesText(from: conversation.updatedAt))
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer(minLength: 8)
+                                    if conversation.id == state.activeConversationID {
+                                        Image(systemName: "checkmark")
+                                            .font(.caption.bold())
+                                            .foregroundStyle(Color.accentColor)
+                                    }
+                                }
+                                .padding(.vertical, 4)
                             }
-                            .padding(.vertical, 4)
-                        }
-                        .swipeActions {
-                            Button(String(localized: "Delete", comment: "Delete conversation"), systemImage: "trash", role: .destructive) {
-                                state.deleteConversation(conversation)
+                            .swipeActions {
+                                Button(String(localized: "Delete", comment: "Delete conversation"), systemImage: "trash", role: .destructive) {
+                                    state.deleteConversation(conversation)
+                                }
                             }
                         }
                     }
+
+                    Button(role: .destructive) {
+                        state.clearChat()
+                        showConversationPicker = false
+                    } label: {
+                        Label(String(localized: "Delete Current Chat", comment: "Menu item"), systemImage: "trash")
+                    }
+                    .disabled(state.messages.isEmpty)
                 }
                 .searchable(text: $conversationSearchText, prompt: String(localized: "Search chats...", comment: "Chat search prompt"))
-                .navigationTitle(String(localized: "Chats", comment: "AI chat history title"))
+                .navigationTitle(String(localized: "AI Chat", comment: "Navigation title for AI chat"))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button(String(localized: "Close", comment: "Close button")) {
-                            showConversationHistory = false
+                            showConversationPicker = false
                         }
                     }
                 }
             }
+            .presentationDetents([.medium, .large])
+            .frame(minWidth: 320, idealWidth: 380, minHeight: 420)
         }
 
         private var welcomeView: some View {
@@ -432,86 +443,100 @@ private struct MessageBubble: View {
     var body: some View {
         HStack {
             if message.isUser { Spacer(minLength: 60) }
-            VStack(alignment: message.isUser ? .trailing : .leading, spacing: 8) {
-                if let chip = message.hintChip {
-                    HStack(spacing: 4) {
-                        Image(systemName: chip.icon)
-                            .font(.caption2)
-                        Text(chip.localizedTitle)
-                            .font(.caption2)
-                    }
-                    .padding(.bottom, 2)
-                }
-
-                InlineMessageText(
-                    content: message.content,
-                    isUser: message.isUser,
-                    onNavigate: onNavigate
-                )
-                .fixedSize(horizontal: false, vertical: true)
-
-                if let suggestions = message.therapySuggestions, !suggestions.isEmpty {
-                    VStack(spacing: 8) {
-                        ForEach(suggestions) { suggestion in
-                            ChatTherapySuggestionCard(
-                                suggestion: suggestion,
-                                onApply: { onApplyTherapySuggestion(suggestion) },
-                                onEdit: { onEditTherapySuggestion(suggestion) },
-                                onDismiss: { onDismissTherapySuggestion(suggestion) }
-                            )
+            ZStack(alignment: .bottomTrailing) {
+                VStack(alignment: message.isUser ? .trailing : .leading, spacing: 8) {
+                    if let chip = message.hintChip {
+                        HStack(spacing: 4) {
+                            Image(systemName: chip.icon)
+                                .font(.caption2)
+                            Text(chip.localizedTitle)
+                                .font(.caption2)
                         }
+                        .padding(.bottom, 2)
                     }
-                    .padding(.top, 2)
-                }
 
-                if let suggestions = message.adjustmentSuggestions, !suggestions.isEmpty {
-                    VStack(spacing: 8) {
-                        ForEach(suggestions) { suggestion in
-                            ChatAdjustmentSuggestionCard(
-                                suggestion: suggestion,
-                                units: units,
-                                onAddPreset: { onAddAdjustmentPreset(suggestion) },
-                                onStart: { onStartAdjustment(suggestion) },
-                                onEdit: { onEditAdjustment(suggestion) },
-                                onDismiss: { onDismissAdjustment(suggestion) }
-                            )
+                    InlineMessageText(
+                        content: message.content,
+                        isUser: message.isUser,
+                        onNavigate: onNavigate
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+
+                    if let suggestions = message.therapySuggestions, !suggestions.isEmpty {
+                        VStack(spacing: 8) {
+                            ForEach(suggestions) { suggestion in
+                                ChatTherapySuggestionCard(
+                                    suggestion: suggestion,
+                                    onApply: { onApplyTherapySuggestion(suggestion) },
+                                    onEdit: { onEditTherapySuggestion(suggestion) },
+                                    onDismiss: { onDismissTherapySuggestion(suggestion) }
+                                )
+                            }
                         }
+                        .padding(.top, 2)
                     }
-                    .padding(.top, 2)
+
+                    if let suggestions = message.adjustmentSuggestions, !suggestions.isEmpty {
+                        VStack(spacing: 8) {
+                            ForEach(suggestions) { suggestion in
+                                ChatAdjustmentSuggestionCard(
+                                    suggestion: suggestion,
+                                    units: units,
+                                    onAddPreset: { onAddAdjustmentPreset(suggestion) },
+                                    onStart: { onStartAdjustment(suggestion) },
+                                    onEdit: { onEditAdjustment(suggestion) },
+                                    onDismiss: { onDismissAdjustment(suggestion) }
+                                )
+                            }
+                        }
+                        .padding(.top, 2)
+                    }
                 }
+                .padding(.horizontal, 14)
+                .padding(.top, 10)
+                .padding(.bottom, 24)
 
                 Text(message.timestamp, style: .time)
                     .font(.caption2)
                     .foregroundColor(.secondary)
+                    .padding(.trailing, 12)
+                    .padding(.bottom, 7)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 16)
                     .fill(bubbleBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(message.isUser ? AIChatStyle.gradient : AIChatStyle.clearGradient, lineWidth: message.isUser ? 1.5 : 0)
             )
             if !message.isUser { Spacer(minLength: 60) }
         }
     }
 
     private var bubbleBackground: some ShapeStyle {
-        if message.isUser {
-            return AnyShapeStyle(
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.7215686275, green: 0.3411764706, blue: 1),
-                        Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-        } else {
-            return AnyShapeStyle(
-                colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.insulin.opacity(0.1)
-            )
-        }
+        AnyShapeStyle(
+            colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.insulin.opacity(0.1)
+        )
     }
+}
+
+private enum AIChatStyle {
+    static let gradient = LinearGradient(
+        colors: [
+            Color(red: 0.7215686275, green: 0.3411764706, blue: 1),
+            Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    static let clearGradient = LinearGradient(
+        colors: [.clear, .clear],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
 }
 
 private struct InlineMessageText: View {
@@ -524,7 +549,8 @@ private struct InlineMessageText: View {
     var body: some View {
         renderedText
             .font(.subheadline)
-            .foregroundStyle(isUser ? .white : (colorScheme == .dark ? .white : .primary))
+            .foregroundStyle(colorScheme == .dark ? .white : .primary)
+            .lineLimit(nil)
             .environment(\.openURL, OpenURLAction { url in
                 guard url.scheme == "trio-ai",
                       let destination = destination(for: url.host ?? url.absoluteString.replacingOccurrences(of: "trio-ai://", with: ""))
@@ -554,14 +580,14 @@ private struct InlineMessageText: View {
             }
             return Text(text)
         case let .trend(token):
-            return Text(Image(systemName: token.systemImage))
+            return Text(" ") + Text(Image(systemName: token.systemImage)) + Text(" ")
         case let .link(title, destination):
             var attributed = AttributedString(title)
             attributed.link = URL(string: "trio-ai://\(destination.deepLinkID)")
             attributed.font = .subheadline.bold()
             attributed.foregroundColor = .accentColor
             attributed.underlineStyle = .single
-            return Text(attributed)
+            return Text(" ") + Text(attributed) + Text(" ")
         }
     }
 
@@ -576,7 +602,11 @@ private enum InlineSegment {
     case link(String, AIInsights.ChatAction.Destination)
 
     static func parse(_ content: String) -> [InlineSegment] {
-        let pattern = #"\((arrowUp|arrowDown|arrowFlat|arrowDoubleUp|arrowDoubleDown|arrowUpRight|arrowDownRight)\)|\b(basal rates|basal rate|basaalwaarden|basaalwaarde|ISF|insulin sensitivity|insulinegevoeligheid|carb ratios|carb ratio|koolhydraatratio'?s?|overrides?|temporary targets?|temp targets?|tijdelijke streefdoelen|tijdelijk streefdoel)\b"#
+        let trendPattern = #"\((arrowUp|arrowDown|arrowFlat|arrowDoubleUp|arrowDoubleDown|arrowUpRight|arrowDownRight)\)"#
+        let rightArrow = NSRegularExpression.escapedPattern(for: String(UnicodeScalar(0x2192)!))
+        let arrowPattern = "(->|\(rightArrow))"
+        let termPattern = #"\b(basal rates|basal rate|basaalwaarden|basaalwaarde|ISF|insulin sensitivity|insulinegevoeligheid|carb ratios|carb ratio|koolhydraatratio'?s?|overrides?|temporary targets?|temp targets?|tijdelijke streefdoelen|tijdelijk streefdoel)\b"#
+        let pattern = "\(trendPattern)|\(arrowPattern)|\(termPattern)"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
             return [.plain(content)]
         }
@@ -599,6 +629,8 @@ private enum InlineSegment {
                let token = TrendToken(named: String(content[trendRange]))
             {
                 result.append(.trend(token))
+            } else if Range(match.range(at: 2), in: content) != nil {
+                result.append(.trend(.arrowRight))
             } else if let destination = AIInsights.ChatAction.Destination(inlineTerm: matchedText) {
                 result.append(.link(matchedText, destination))
             } else {
@@ -624,6 +656,7 @@ private enum TrendToken: String {
     case arrowDoubleDown
     case arrowUpRight
     case arrowDownRight
+    case arrowRight
 
     init?(named value: String) {
         switch value.lowercased() {
@@ -634,19 +667,21 @@ private enum TrendToken: String {
         case "arrowdoubledown": self = .arrowDoubleDown
         case "arrowupright": self = .arrowUpRight
         case "arrowdownright": self = .arrowDownRight
+        case "arrowright": self = .arrowRight
         default: return nil
         }
     }
 
     var systemImage: String {
         switch self {
-        case .arrowUp: return "arrow.up.circle.fill"
-        case .arrowDown: return "arrow.down.circle.fill"
-        case .arrowFlat: return "arrow.right.circle.fill"
-        case .arrowDoubleUp: return "arrow.up.to.line.circle.fill"
-        case .arrowDoubleDown: return "arrow.down.to.line.circle.fill"
-        case .arrowUpRight: return "arrow.up.right.circle.fill"
-        case .arrowDownRight: return "arrow.down.right.circle.fill"
+        case .arrowUp: return "arrow.up"
+        case .arrowDown: return "arrow.down"
+        case .arrowFlat: return "arrow.right"
+        case .arrowDoubleUp: return "arrow.up.to.line"
+        case .arrowDoubleDown: return "arrow.down.to.line"
+        case .arrowUpRight: return "arrow.up.right"
+        case .arrowDownRight: return "arrow.down.right"
+        case .arrowRight: return "arrow.right"
         }
     }
 }
@@ -657,7 +692,38 @@ private struct ChatTherapySuggestionCard: View {
     var onEdit: () -> Void
     var onDismiss: () -> Void
 
+    @Environment(\.colorScheme) var colorScheme
+
     var body: some View {
+        ChatSwipeActionContainer(
+            leadingActions: [
+                ChatSwipeAction(
+                    title: String(localized: "Apply", comment: "Apply suggestion"),
+                    systemImage: "checkmark.circle",
+                    tint: .green,
+                    action: onApply
+                )
+            ],
+            trailingActions: [
+                ChatSwipeAction(
+                    title: String(localized: "Edit", comment: "Edit therapy settings"),
+                    systemImage: "pencil",
+                    tint: .blue,
+                    action: onEdit
+                ),
+                ChatSwipeAction(
+                    title: String(localized: "Dismiss", comment: "Dismiss suggestion"),
+                    systemImage: "xmark.circle",
+                    tint: .red,
+                    action: onDismiss
+                )
+            ]
+        ) {
+            cardContent
+        }
+    }
+
+    private var cardContent: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: settingIcon)
@@ -683,26 +749,12 @@ private struct ChatTherapySuggestionCard: View {
             Text(suggestion.reasoning)
                 .font(.caption)
                 .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(nil)
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 12).fill(settingColor.opacity(0.12)))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(settingColor.opacity(0.25), lineWidth: 1))
-        .swipeActions(edge: .leading) {
-            Button(String(localized: "Apply", comment: "Apply suggestion"), systemImage: "checkmark.circle") {
-                onApply()
-            }
-            .tint(.green)
-        }
-        .swipeActions(edge: .trailing) {
-            Button(String(localized: "Dismiss", comment: "Dismiss suggestion"), systemImage: "xmark.circle", role: .destructive) {
-                onDismiss()
-            }
-            Button(String(localized: "Edit", comment: "Edit therapy settings"), systemImage: "pencil") {
-                onEdit()
-            }
-            .tint(.blue)
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(cardBackground))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(AIChatStyle.gradient, lineWidth: 1))
     }
 
     private func valueColumn(title: String, value: String) -> some View {
@@ -712,8 +764,12 @@ private struct ChatTherapySuggestionCard: View {
                 .foregroundColor(.secondary)
             Text(value)
                 .font(.caption.bold())
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(nil)
         }
+    }
+
+    private var cardBackground: Color {
+        colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.85) : Color.chart
     }
 
     private var settingIcon: String {
@@ -758,59 +814,81 @@ private struct ChatAdjustmentSuggestionCard: View {
     var onEdit: () -> Void
     var onDismiss: () -> Void
 
+    @Environment(\.colorScheme) var colorScheme
+
     var body: some View {
-        Button(action: onStart) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Image(systemName: suggestion.kind.icon)
-                        .foregroundStyle(Color.accentColor)
-                    Text(suggestion.name)
-                        .font(.caption.bold())
-                        .foregroundColor(.primary)
-                    Spacer()
-                    Image(systemName: "line.3.horizontal")
-                        .imageScale(.small)
-                        .foregroundStyle(.secondary)
-                }
+        ChatSwipeActionContainer(
+            leadingActions: [
+                ChatSwipeAction(
+                    title: String(localized: "Add Preset", comment: "Add adjustment suggestion to presets"),
+                    systemImage: "plus.circle",
+                    tint: .green,
+                    action: onAddPreset
+                )
+            ],
+            trailingActions: [
+                ChatSwipeAction(
+                    title: String(localized: "Edit", comment: "Edit adjustment suggestion"),
+                    systemImage: "pencil",
+                    tint: .blue,
+                    action: onEdit
+                ),
+                ChatSwipeAction(
+                    title: String(localized: "Dismiss", comment: "Dismiss suggestion"),
+                    systemImage: "xmark.circle",
+                    tint: .red,
+                    action: onDismiss
+                )
+            ]
+        ) {
+            cardContent
+        }
+    }
 
-                HStack(spacing: 5) {
-                    ForEach(labels, id: \.self) { label in
-                        Text(label)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        if label != labels.last {
-                            Divider()
-                                .frame(width: 1, height: 14)
-                        }
+    private var cardContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: suggestion.kind.icon)
+                    .foregroundStyle(Color.accentColor)
+                Text(suggestion.name)
+                    .font(.caption.bold())
+                    .foregroundColor(.primary)
+                Spacer()
+                Image(systemName: "line.3.horizontal")
+                    .imageScale(.small)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 5) {
+                ForEach(labels, id: \.self) { label in
+                    Text(label)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    if label != labels.last {
+                        Divider()
+                            .frame(width: 1, height: 14)
                     }
-                    Spacer(minLength: 0)
                 }
+                Spacer(minLength: 0)
+            }
 
-                Text(suggestion.reasoning)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.chart.opacity(0.75)))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.insulin.opacity(0.25), lineWidth: 1))
+            Text(suggestion.reasoning)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(nil)
         }
-        .buttonStyle(.plain)
-        .swipeActions(edge: .leading) {
-            Button(String(localized: "Add Preset", comment: "Add adjustment suggestion to presets"), systemImage: "plus.circle") {
-                onAddPreset()
-            }
-            .tint(.green)
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(cardBackground))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(AIChatStyle.gradient, lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .onTapGesture {
+            onStart()
         }
-        .swipeActions(edge: .trailing) {
-            Button(String(localized: "Dismiss", comment: "Dismiss suggestion"), systemImage: "xmark.circle", role: .destructive) {
-                onDismiss()
-            }
-            Button(String(localized: "Edit", comment: "Edit adjustment suggestion"), systemImage: "pencil") {
-                onEdit()
-            }
-            .tint(.blue)
-        }
+    }
+
+    private var cardBackground: Color {
+        colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.85) : Color.chart
     }
 
     private var labels: [String] {
@@ -837,6 +915,103 @@ private struct ChatAdjustmentSuggestionCard: View {
         case (false, true): return " CR"
         default: return ""
         }
+    }
+}
+
+private struct ChatSwipeAction: Identifiable {
+    var id = UUID()
+    let title: String
+    let systemImage: String
+    let tint: Color
+    let action: () -> Void
+}
+
+private struct ChatSwipeActionContainer<Content: View>: View {
+    let leadingActions: [ChatSwipeAction]
+    let trailingActions: [ChatSwipeAction]
+    let content: Content
+
+    @State private var offset: CGFloat = 0
+    @State private var settledOffset: CGFloat = 0
+
+    init(
+        leadingActions: [ChatSwipeAction] = [],
+        trailingActions: [ChatSwipeAction] = [],
+        @ViewBuilder content: () -> Content
+    ) {
+        self.leadingActions = leadingActions
+        self.trailingActions = trailingActions
+        self.content = content()
+    }
+
+    var body: some View {
+        ZStack {
+            HStack(spacing: 0) {
+                ForEach(leadingActions) { action in
+                    actionButton(action)
+                }
+                Spacer(minLength: 0)
+                ForEach(trailingActions) { action in
+                    actionButton(action)
+                }
+            }
+
+            content
+                .offset(x: offset)
+                .gesture(dragGesture)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: offset)
+    }
+
+    private var leadingWidth: CGFloat {
+        CGFloat(leadingActions.count) * 74
+    }
+
+    private var trailingWidth: CGFloat {
+        CGFloat(trailingActions.count) * 74
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                let proposed = settledOffset + value.translation.width
+                offset = min(max(proposed, -trailingWidth), leadingWidth)
+            }
+            .onEnded { value in
+                let proposed = settledOffset + value.translation.width
+                let threshold: CGFloat = 38
+                if proposed > threshold, leadingWidth > 0 {
+                    settledOffset = leadingWidth
+                } else if proposed < -threshold, trailingWidth > 0 {
+                    settledOffset = -trailingWidth
+                } else {
+                    settledOffset = 0
+                }
+                offset = settledOffset
+            }
+    }
+
+    private func actionButton(_ action: ChatSwipeAction) -> some View {
+        Button {
+            action.action()
+            settledOffset = 0
+            offset = 0
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: action.systemImage)
+                    .font(.caption.bold())
+                Text(action.title)
+                    .font(.caption2.bold())
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            }
+            .foregroundStyle(.white)
+            .frame(width: 74)
+            .padding(.vertical, 10)
+            .background(action.tint)
+        }
+        .buttonStyle(.plain)
     }
 }
 

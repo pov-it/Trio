@@ -406,7 +406,7 @@ extension AIInsights {
                     temperature: 0.7,
                     topP: 0.95,
                     topK: nil,
-                    maxTokens: 2048
+                    maxTokens: 4096
                 )
 
                 let response = try await AIServiceAdapter.send(
@@ -780,6 +780,7 @@ extension AIInsights {
             - Use inline trend tokens in prose when helpful: (arrowUp), (arrowDown), (arrowFlat), (arrowDoubleUp), (arrowDoubleDown), (arrowUpRight), (arrowDownRight).
             - Mention Trio setting names naturally, for example basal rates, ISF, carb ratios, overrides, and temporary targets. The app turns those words into inline links.
             - Use lightweight Markdown for emphasis and lists when helpful: **bold** key findings, and use short bullet lists for multiple points.
+            - Finish the visible answer in complete sentences before any hidden XML-style blocks. Never start <KNOWLEDGE> or <TRIO_SUGGESTIONS> until the user-facing answer is fully complete.
 
             CURRENT DATA (last \(stats.periodDays) days):
             - Average glucose: \(String(format: "%.1f", stats.averageGlucose)) \(unitsStr)
@@ -874,7 +875,7 @@ extension AIInsights {
 
             return """
             \(sections.joined(separator: "\n"))
-            Output the structured block only at the very end, and only in this exact wrapper:
+            First write the complete visible answer. Then, if needed, output the structured block only at the very end, and only in this exact wrapper:
             <TRIO_SUGGESTIONS>
             {"therapySuggestions":[],"adjustmentSuggestions":[]}
             </TRIO_SUGGESTIONS>
