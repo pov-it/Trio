@@ -1076,7 +1076,8 @@ private struct ChatSwipeActionContainer<Content: View>: View {
                     .multilineTextAlignment(.center)
             }
             .foregroundStyle(.white)
-            .frame(width: 74, maxHeight: .infinity)
+            .frame(width: 74)
+            .frame(maxHeight: .infinity)
             .padding(.vertical, 10)
             .background(action.tint)
         }
