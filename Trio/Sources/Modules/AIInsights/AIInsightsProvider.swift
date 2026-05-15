@@ -12,6 +12,9 @@ extension AIInsights {
         @Injected() var settingsManager: SettingsManager!
         @Injected() var iobService: IOBService!
         @Injected() var broadcaster: Broadcaster!
+        @Injected() var overrideStorage: OverrideStorage!
+        @Injected() var tempTargetsStorage: TempTargetsStorage!
+        @Injected() var apsManager: APSManager!
 
         private let coreDataContext = CoreDataStack.shared.newTaskContext()
 
@@ -158,6 +161,93 @@ extension AIInsights {
             Task.detached(priority: .low) {
                 try? await nightscoutManager?.uploadProfiles()
             }
+        }
+
+        // MARK: - Adjustment Suggestions
+
+        func addAdjustmentSuggestionToPresets(_ suggestion: AdjustmentSuggestion) async throws {
+            switch suggestion.kind {
+            case .override:
+                try await overrideStorage.storeOverride(override: override(from: suggestion, enabled: false, isPreset: true))
+                try? await nightscoutManager.uploadProfiles()
+            case .tempTarget:
+                try await tempTargetsStorage.storeTempTarget(tempTarget: tempTarget(from: suggestion, enabled: false, isPreset: true))
+            }
+        }
+
+        func startAdjustmentSuggestion(_ suggestion: AdjustmentSuggestion) async throws {
+            switch suggestion.kind {
+            case .override:
+                try await overrideStorage.storeOverride(override: override(from: suggestion, enabled: true, isPreset: false))
+            case .tempTarget:
+                let tempTarget = try tempTarget(from: suggestion, enabled: true, isPreset: false)
+                try await tempTargetsStorage.storeTempTarget(tempTarget: tempTarget)
+                tempTargetsStorage.saveTempTargetsToStorage([tempTarget])
+            }
+
+            try? await apsManager.determineBasalSync()
+        }
+
+        private func override(from suggestion: AdjustmentSuggestion, enabled: Bool, isPreset: Bool) -> Override {
+            let target = storedGlucoseValue(suggestion.targetValue ?? 0)
+            let shouldOverrideTarget = target > 0
+            let adjustsISFOrCR = suggestion.isf || suggestion.cr
+
+            return Override(
+                name: suggestion.name,
+                enabled: enabled,
+                date: Date(),
+                duration: Decimal(suggestion.durationMinutes),
+                indefinite: suggestion.durationMinutes <= 0,
+                percentage: suggestion.percentage ?? 100,
+                smbIsOff: suggestion.smbIsOff,
+                isPreset: isPreset,
+                id: UUID().uuidString,
+                overrideTarget: shouldOverrideTarget,
+                target: target,
+                advancedSettings: suggestion.smbIsOff || adjustsISFOrCR,
+                isfAndCr: suggestion.isf && suggestion.cr,
+                isf: suggestion.isf,
+                cr: suggestion.cr,
+                smbIsScheduledOff: false,
+                start: 0,
+                end: 0,
+                smbMinutes: 0,
+                uamMinutes: 0
+            )
+        }
+
+        private func tempTarget(from suggestion: AdjustmentSuggestion, enabled: Bool, isPreset: Bool) throws -> TempTarget {
+            guard let targetValue = suggestion.targetValue else {
+                throw NSError(
+                    domain: "AIInsightsAdjustmentSuggestion",
+                    code: 1,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: String(
+                            localized: "The suggested temporary target does not include a target value.",
+                            comment: "AI adjustment apply error"
+                        )
+                    ]
+                )
+            }
+
+            let target = storedGlucoseValue(targetValue)
+            return TempTarget(
+                name: suggestion.name,
+                createdAt: Date(),
+                targetTop: target,
+                targetBottom: target,
+                duration: Decimal(suggestion.durationMinutes),
+                enteredBy: TempTarget.local,
+                reason: TempTarget.custom,
+                isPreset: isPreset,
+                enabled: enabled,
+                halfBasalTarget: nil
+            )
+        }
+
+        private func storedGlucoseValue(_ displayValue: Decimal) -> Decimal {
+            units == .mmolL ? displayValue.asMgdL : displayValue
         }
 
         private func saveBasalProfile(_ profile: [BasalProfileEntry]) {

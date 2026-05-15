@@ -18,6 +18,8 @@ extension AIInsights {
         var knowledgeBase: String = ""
         var conversations: [ChatConversation] = []
         var activeConversationID: UUID = UUID()
+        var showApplyDisclaimer: Bool = false
+        var pendingApplySuggestion: Suggestion?
 
         // Live status from Trio
         var currentIOB: Double?
@@ -180,6 +182,107 @@ extension AIInsights {
             startNewConversation()
         }
 
+        func requestApply(_ suggestion: Suggestion) {
+            pendingApplySuggestion = suggestion
+            showApplyDisclaimer = true
+        }
+
+        @MainActor
+        func confirmApply() async {
+            guard let suggestion = pendingApplySuggestion else { return }
+            showApplyDisclaimer = false
+            pendingApplySuggestion = nil
+
+            do {
+                let beforeSnapshot = await provider.captureTherapySnapshot()
+                try await provider.applySuggestion(suggestion)
+                let afterSnapshot = await provider.captureTherapySnapshot()
+
+                SuggestionHistoryStore.append(
+                    SuggestionHistoryRecord(
+                        suggestion: suggestion,
+                        appliedAt: Date(),
+                        status: .applied,
+                        beforeSnapshot: beforeSnapshot,
+                        afterSnapshot: afterSnapshot
+                    )
+                )
+                removeTherapySuggestion(suggestion)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+
+        func cancelApply() {
+            showApplyDisclaimer = false
+            pendingApplySuggestion = nil
+        }
+
+        func dismissTherapySuggestion(_ suggestion: Suggestion) {
+            let snapshot = TherapySnapshot(
+                basalProfile: [],
+                isfSensitivity: 0,
+                carbRatio: 0,
+                target: 0,
+                capturedAt: Date(),
+                insulinSensitivities: nil,
+                carbRatios: nil,
+                bgTargets: nil
+            )
+            SuggestionHistoryStore.append(
+                SuggestionHistoryRecord(
+                    suggestion: suggestion,
+                    appliedAt: Date(),
+                    status: .dismissed,
+                    beforeSnapshot: snapshot,
+                    afterSnapshot: snapshot
+                )
+            )
+            removeTherapySuggestion(suggestion)
+        }
+
+        @MainActor
+        func addAdjustmentSuggestionToPresets(_ suggestion: AdjustmentSuggestion) async {
+            do {
+                try await provider.addAdjustmentSuggestionToPresets(suggestion)
+                removeAdjustmentSuggestion(suggestion)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+
+        @MainActor
+        func startAdjustmentSuggestion(_ suggestion: AdjustmentSuggestion) async {
+            do {
+                try await provider.startAdjustmentSuggestion(suggestion)
+                removeAdjustmentSuggestion(suggestion)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+
+        func dismissAdjustmentSuggestion(_ suggestion: AdjustmentSuggestion) {
+            removeAdjustmentSuggestion(suggestion)
+        }
+
+        private func removeTherapySuggestion(_ suggestion: Suggestion) {
+            for idx in messages.indices {
+                guard var suggestions = messages[idx].therapySuggestions else { continue }
+                suggestions.removeAll { $0.id == suggestion.id }
+                messages[idx].therapySuggestions = suggestions.isEmpty ? nil : suggestions
+            }
+            saveMessages()
+        }
+
+        private func removeAdjustmentSuggestion(_ suggestion: AdjustmentSuggestion) {
+            for idx in messages.indices {
+                guard var suggestions = messages[idx].adjustmentSuggestions else { continue }
+                suggestions.removeAll { $0.id == suggestion.id }
+                messages[idx].adjustmentSuggestions = suggestions.isEmpty ? nil : suggestions
+            }
+            saveMessages()
+        }
+
         private func persistActiveConversation() {
             guard !messages.isEmpty else { return }
 
@@ -265,8 +368,16 @@ extension AIInsights {
                     highThreshold: provider.settings.high
                 )
 
+                let allowTherapySuggestions = shouldOfferTherapySuggestions(for: input)
+                let allowAdjustmentSuggestions = shouldOfferAdjustmentSuggestions(for: input)
+
                 // Build context-aware prompt
-                let contextPrompt = buildContextPrompt(stats: stats, input: input)
+                let contextPrompt = buildContextPrompt(
+                    stats: stats,
+                    input: input,
+                    allowTherapySuggestions: allowTherapySuggestions,
+                    allowAdjustmentSuggestions: allowAdjustmentSuggestions
+                )
 
                 // Build messages payload — limit to last 10 messages to avoid exceeding
                 // the model's context window. 
@@ -324,11 +435,19 @@ extension AIInsights {
                     responseText = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
                 }
 
+                let structuredSuggestions = extractStructuredSuggestions(
+                    from: &responseText,
+                    allowTherapy: allowTherapySuggestions,
+                    allowAdjustments: allowAdjustmentSuggestions
+                )
+
                 let assistantMessage = ChatMessage(
                     content: responseText,
                     isUser: false,
                     timestamp: Date(),
-                    actions: suggestedActions(for: input, response: responseText)
+                    actions: nil,
+                    therapySuggestions: structuredSuggestions.therapy.isEmpty ? nil : structuredSuggestions.therapy,
+                    adjustmentSuggestions: structuredSuggestions.adjustments.isEmpty ? nil : structuredSuggestions.adjustments
                 )
                 messages.append(assistantMessage)
                 saveMessages()
@@ -413,9 +532,231 @@ extension AIInsights {
             return Array(actions.prefix(3))
         }
 
+        // MARK: - Structured Suggestions
+
+        private func shouldOfferTherapySuggestions(for input: String) -> Bool {
+            let text = input.lowercased()
+            let settingWords = [
+                "setting", "settings", "instelling", "instellingen", "basal", "basaal",
+                "isf", "sensitivity", "gevoelig", "carb ratio", "koolhydraat", "ratio"
+            ]
+            let changeWords = [
+                "aanpassing", "aanpassingen", "verander", "veranderen", "wijzig", "wijzigen",
+                "change", "adjust", "review", "suggest", "recommend", "advies", "voorstel"
+            ]
+            let patternWords = [
+                "hypo", "low", "laag", "ochtend", "morning", "nacht", "night", "continu", "steeds", "waarom", "why"
+            ]
+            let mentionsSetting = settingWords.contains { text.contains($0) }
+            let asksForChange = changeWords.contains { text.contains($0) }
+            let asksAboutLowPattern = patternWords.contains { text.contains($0) } &&
+                (text.contains("hypo") || text.contains("low") || text.contains("laag"))
+            return (mentionsSetting && asksForChange) || asksAboutLowPattern
+        }
+
+        private func shouldOfferAdjustmentSuggestions(for input: String) -> Bool {
+            let text = input.lowercased()
+            let adjustmentWords = [
+                "override", "overrides", "temporary target", "temp target", "tijdelijk streefdoel",
+                "tijdelijke streefdoelen", "preset"
+            ]
+            let intentWords = [
+                "aanpassing", "aanpassingen", "verander", "wijzig", "change", "adjust", "suggest",
+                "recommend", "advies", "voorstel", "kan ik doen", "voorkom", "prevent", "prepare", "bereid"
+            ]
+            let contextWords = ["sport", "exercise", "training", "workout", "ziek", "sick", "hypo", "hyper", "ochtend", "morning"]
+            let asksForPattern = ["waarom", "why", "continu", "steeds", "altijd", "often"].contains { text.contains($0) }
+            let mentionsAdjustment = adjustmentWords.contains { text.contains($0) }
+            let asksForAdjustment = intentWords.contains { text.contains($0) }
+            let hasAdjustmentContext = contextWords.contains { text.contains($0) }
+            let asksAboutLowPattern = asksForPattern && (text.contains("hypo") || text.contains("low") || text.contains("laag"))
+
+            return mentionsAdjustment || (asksForAdjustment && hasAdjustmentContext) || asksAboutLowPattern
+        }
+
+        private func extractStructuredSuggestions(
+            from responseText: inout String,
+            allowTherapy: Bool,
+            allowAdjustments: Bool
+        ) -> (therapy: [Suggestion], adjustments: [AdjustmentSuggestion]) {
+            guard let blockRange = responseText.range(
+                of: "(?s)<TRIO_SUGGESTIONS>(.*?)</TRIO_SUGGESTIONS>",
+                options: .regularExpression
+            ) else {
+                return ([], [])
+            }
+
+            let jsonText = String(responseText[blockRange])
+                .replacingOccurrences(of: "<TRIO_SUGGESTIONS>", with: "")
+                .replacingOccurrences(of: "</TRIO_SUGGESTIONS>", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            responseText.removeSubrange(blockRange)
+            responseText = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard let data = jsonText.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                return ([], [])
+            }
+
+            let therapy = allowTherapy ? parseTherapySuggestions(object["therapySuggestions"]) : []
+            let adjustments = allowAdjustments ? parseAdjustmentSuggestions(object["adjustmentSuggestions"]) : []
+            return (therapy, adjustments)
+        }
+
+        private func parseTherapySuggestions(_ rawValue: Any?) -> [Suggestion] {
+            guard let rawSuggestions = rawValue as? [[String: Any]] else { return [] }
+
+            return rawSuggestions.compactMap { object in
+                let type = parseSettingType(stringValue(from: object, keys: ["settingType", "setting_type", "type"]))
+                let current = stringValue(from: object, keys: ["currentValue", "current_value"]) ?? ""
+                let proposed = stringValue(from: object, keys: ["proposedValue", "proposed_value"]) ?? ""
+                guard !current.isEmpty, !proposed.isEmpty else { return nil }
+
+                return Suggestion(
+                    settingType: type,
+                    timeBlock: stringValue(from: object, keys: ["timeBlock", "time_block", "timeRange", "time_range"])
+                        ?? String(localized: "General", comment: "General therapy time block"),
+                    currentValue: current,
+                    proposedValue: proposed,
+                    reasoning: stringValue(from: object, keys: ["reasoning", "reason", "rationale"])
+                        ?? String(localized: "No reasoning provided.", comment: "Therapy suggestion missing reasoning"),
+                    confidence: confidenceValue(object["confidence"]),
+                    createdAt: Date()
+                )
+            }
+        }
+
+        private func parseAdjustmentSuggestions(_ rawValue: Any?) -> [AdjustmentSuggestion] {
+            guard let rawSuggestions = rawValue as? [[String: Any]] else { return [] }
+
+            return rawSuggestions.compactMap { object in
+                guard let kind = parseAdjustmentKind(stringValue(from: object, keys: ["kind", "type"])) else { return nil }
+                let duration = intValue(object["durationMinutes"] ?? object["duration_minutes"]) ?? 0
+                guard duration > 0 else { return nil }
+
+                return AdjustmentSuggestion(
+                    kind: kind,
+                    name: stringValue(from: object, keys: ["name", "title"])
+                        ?? kind.localizedTitle,
+                    durationMinutes: duration,
+                    targetValue: decimalValue(object["targetValue"] ?? object["target_value"] ?? object["target"]),
+                    percentage: doubleValue(object["percentage"]),
+                    smbIsOff: boolValue(object["smbIsOff"] ?? object["smb_is_off"]) ?? false,
+                    isf: boolValue(object["isf"]) ?? false,
+                    cr: boolValue(object["cr"]) ?? false,
+                    reasoning: stringValue(from: object, keys: ["reasoning", "reason", "rationale"])
+                        ?? String(localized: "No reasoning provided.", comment: "Adjustment suggestion missing reasoning"),
+                    confidence: confidenceValue(object["confidence"]),
+                    createdAt: Date()
+                )
+            }
+        }
+
+        private func parseSettingType(_ value: String?) -> Suggestion.SettingType {
+            let normalized = (value ?? "").lowercased().replacingOccurrences(of: "_", with: " ")
+            switch normalized {
+            case let s where s.contains("basal"):
+                return .basalRate
+            case let s where s.contains("sensitivity") || s.contains("isf"):
+                return .isf
+            case let s where s.contains("carb") || s.contains("ratio") || s == "cr":
+                return .carbRatio
+            default:
+                return .basalRate
+            }
+        }
+
+        private func parseAdjustmentKind(_ value: String?) -> AdjustmentSuggestion.Kind? {
+            let normalized = (value ?? "").lowercased().replacingOccurrences(of: "_", with: " ")
+            if normalized.contains("override") { return .override }
+            if normalized.contains("temp") || normalized.contains("target") || normalized.contains("streef") { return .tempTarget }
+            return nil
+        }
+
+        private func stringValue(from object: [String: Any], keys: [String]) -> String? {
+            for key in keys {
+                if let string = object[key] as? String,
+                   !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                {
+                    return string.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+            return nil
+        }
+
+        private func decimalValue(_ value: Any?) -> Decimal? {
+            if let number = value as? NSNumber {
+                return number.decimalValue
+            }
+            if let string = value as? String {
+                return Decimal(string: string.replacingOccurrences(of: ",", with: "."), locale: Locale(identifier: "en_US_POSIX"))
+            }
+            return nil
+        }
+
+        private func doubleValue(_ value: Any?) -> Double? {
+            if let number = value as? NSNumber {
+                return number.doubleValue
+            }
+            if let string = value as? String {
+                return Double(string.replacingOccurrences(of: ",", with: "."))
+            }
+            return nil
+        }
+
+        private func intValue(_ value: Any?) -> Int? {
+            if let number = value as? NSNumber {
+                return number.intValue
+            }
+            if let string = value as? String {
+                return Int(string)
+            }
+            return nil
+        }
+
+        private func boolValue(_ value: Any?) -> Bool? {
+            if let bool = value as? Bool {
+                return bool
+            }
+            if let number = value as? NSNumber {
+                return number.boolValue
+            }
+            if let string = value as? String {
+                switch string.lowercased() {
+                case "true", "yes", "ja", "1": return true
+                case "false", "no", "nee", "0": return false
+                default: return nil
+                }
+            }
+            return nil
+        }
+
+        private func confidenceValue(_ value: Any?) -> Double {
+            if let number = value as? NSNumber {
+                return min(max(number.doubleValue, 0), 1)
+            }
+            if let string = value as? String {
+                switch string.lowercased() {
+                case "high": return 0.85
+                case "medium": return 0.65
+                case "low": return 0.35
+                default:
+                    return min(max(Double(string) ?? 0.5, 0), 1)
+                }
+            }
+            return 0.5
+        }
+
         // MARK: - Prompt Engineering
 
-        private func buildContextPrompt(stats: AggregatedStats, input: String) -> String {
+        private func buildContextPrompt(
+            stats: AggregatedStats,
+            input: String,
+            allowTherapySuggestions: Bool,
+            allowAdjustmentSuggestions: Bool
+        ) -> String {
             let unitsStr = provider.units.rawValue
             let personalitySuffix = personality.systemPromptSuffix
 
@@ -436,6 +777,8 @@ extension AIInsights {
             - Mention reasons not to change only when they matter for the user's question
             - If data is insufficient, say so clearly rather than guessing
             - When a setting review, meal analysis, or therapy edit would help, explicitly mention the next in-app view to open. The app may render those as interactive action cards.
+            - Use inline trend tokens in prose when helpful: (arrowUp), (arrowDown), (arrowFlat), (arrowDoubleUp), (arrowDoubleDown), (arrowUpRight), (arrowDownRight).
+            - Mention Trio setting names naturally, for example basal rates, ISF, carb ratios, overrides, and temporary targets. The app turns those words into inline links.
             - Use lightweight Markdown for emphasis and lists when helpful: **bold** key findings, and use short bullet lists for multiple points.
 
             CURRENT DATA (last \(stats.periodDays) days):
@@ -499,10 +842,44 @@ extension AIInsights {
             
             Only output this block if the knowledge base needs to be updated. Do NOT output it if nothing has changed.
 
+            STRUCTURED SUGGESTIONS:
+            \(structuredSuggestionInstruction(allowTherapy: allowTherapySuggestions, allowAdjustments: allowAdjustmentSuggestions))
+
             USER QUESTION: \(input)
             """
 
             return prompt
+        }
+
+        private func structuredSuggestionInstruction(allowTherapy: Bool, allowAdjustments: Bool) -> String {
+            guard allowTherapy || allowAdjustments else {
+                return "Do not output a <TRIO_SUGGESTIONS> block for this answer."
+            }
+
+            var sections: [String] = []
+            if allowTherapy {
+                sections.append("""
+                If the user's question asks for setting changes or a pattern that likely needs setting review, append therapySuggestions inside <TRIO_SUGGESTIONS>. Use only justified conservative changes:
+                {"settingType":"Basal Rate"|"Insulin Sensitivity Factor"|"Carb Ratio","timeBlock":"03:00 - 07:00","currentValue":"0.80 U/hr","proposedValue":"0.72 U/hr","reasoning":"Short evidence-based reason in the user's language.","confidence":0.0-1.0}
+                """)
+            }
+
+            if allowAdjustments {
+                sections.append("""
+                If an override or temporary target would be useful, append adjustmentSuggestions inside <TRIO_SUGGESTIONS>:
+                {"kind":"override"|"tempTarget","name":"Short preset name","durationMinutes":120,"targetValue":8.3,"percentage":80,"smbIsOff":false,"isf":true,"cr":true,"reasoning":"Short evidence-based reason in the user's language.","confidence":0.0-1.0}
+                Use targetValue in \(provider.units.rawValue). For tempTarget, targetValue is required. For override, percentage is optional and defaults to 100.
+                """)
+            }
+
+            return """
+            \(sections.joined(separator: "\n"))
+            Output the structured block only at the very end, and only in this exact wrapper:
+            <TRIO_SUGGESTIONS>
+            {"therapySuggestions":[],"adjustmentSuggestions":[]}
+            </TRIO_SUGGESTIONS>
+            Do not mention the hidden block to the user.
+            """
         }
     }
 }

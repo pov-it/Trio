@@ -144,6 +144,7 @@ enum AIInsights {
             case basalSettings
             case isfSettings
             case carbRatioSettings
+            case adjustmentSettings
             case risingPattern
             case fallingPattern
         }
@@ -156,6 +157,8 @@ enum AIInsights {
         let timestamp: Date
         var hintChip: HintChip?
         var actions: [ChatAction]? = nil
+        var therapySuggestions: [Suggestion]? = nil
+        var adjustmentSuggestions: [AdjustmentSuggestion]? = nil
     }
 
     struct ChatConversation: Identifiable, Codable, Equatable {
@@ -172,7 +175,7 @@ enum AIInsights {
 
     // MARK: - Suggestion
 
-    struct Suggestion: Identifiable, Codable {
+    struct Suggestion: Identifiable, Codable, Equatable {
         var id: UUID = UUID()
         let settingType: SettingType
         let timeBlock: String
@@ -182,7 +185,7 @@ enum AIInsights {
         let confidence: Double
         let createdAt: Date
 
-        enum SettingType: String, Codable {
+        enum SettingType: String, Codable, Equatable {
             case basalRate = "Basal Rate"
             case isf = "Insulin Sensitivity Factor"
             case carbRatio = "Carb Ratio"
@@ -192,6 +195,46 @@ enum AIInsights {
                 case .basalRate: return String(localized: "Basal Rate", comment: "Therapy setting type")
                 case .isf: return String(localized: "Insulin Sensitivity Factor", comment: "Therapy setting type")
                 case .carbRatio: return String(localized: "Carb Ratio", comment: "Therapy setting type")
+                }
+            }
+        }
+    }
+
+    // MARK: - Chat Adjustment Suggestion
+
+    struct AdjustmentSuggestion: Identifiable, Codable, Equatable {
+        var id: UUID = UUID()
+        let kind: Kind
+        let name: String
+        let durationMinutes: Int
+        let targetValue: Decimal?
+        let percentage: Double?
+        let smbIsOff: Bool
+        let isf: Bool
+        let cr: Bool
+        let reasoning: String
+        let confidence: Double
+        let createdAt: Date
+
+        enum Kind: String, Codable, Equatable {
+            case override
+            case tempTarget
+
+            var localizedTitle: String {
+                switch self {
+                case .override:
+                    return String(localized: "Override", comment: "AI adjustment suggestion type")
+                case .tempTarget:
+                    return String(localized: "Temporary Target", comment: "AI adjustment suggestion type")
+                }
+            }
+
+            var icon: String {
+                switch self {
+                case .override:
+                    return "slider.horizontal.3"
+                case .tempTarget:
+                    return "scope"
                 }
             }
         }
