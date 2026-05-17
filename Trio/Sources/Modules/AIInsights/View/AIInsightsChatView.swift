@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import Swinject
 
@@ -554,9 +555,25 @@ private struct InlineMessageText: View {
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
-        renderedText
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                switch line {
+                case let .text(text):
+                    renderedText(for: text)
+                        .fixedSize(horizontal: false, vertical: true)
+                case let .bullet(text, level):
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("•")
+                            .frame(width: 10, alignment: .leading)
+                        renderedText(for: text)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.leading, CGFloat(level) * 14)
+                }
+            }
+        }
             .font(.subheadline)
-            .foregroundStyle(colorScheme == .dark ? .white : .primary)
+            .foregroundStyle(isUser ? .white : (colorScheme == .dark ? .white : .primary))
             .lineLimit(nil)
             .environment(\.openURL, OpenURLAction { url in
                 guard url.scheme == "trio-ai",
@@ -569,20 +586,21 @@ private struct InlineMessageText: View {
             })
     }
 
-    private var renderedText: Text {
-        segments.reduce(Text("")) { partial, segment in
-            partial + text(for: segment)
+    private var lines: [InlineMessageLine] {
+        InlineMessageLine.parse(AIChatTextNormalizer.normalize(content))
+    }
+
+    private func renderedText(for rawText: String) -> Text {
+        InlineSegment.parse(rawText).reduce(Text("")) { partial, segment in
+            partial + renderedSegment(for: segment)
         }
     }
 
-    private var segments: [InlineSegment] {
-        InlineSegment.parse(AIChatTextNormalizer.normalize(content))
-    }
-
-    private func text(for segment: InlineSegment) -> Text {
+    private func renderedSegment(for segment: InlineSegment) -> Text {
         switch segment {
         case let .plain(text):
-            if let attributed = try? AttributedString(markdown: text) {
+            let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+            if let attributed = try? AttributedString(markdown: text, options: options) {
                 return Text(attributed)
             }
             return Text(text)
@@ -591,10 +609,8 @@ private struct InlineMessageText: View {
         case let .link(title, destination):
             var attributed = AttributedString(localizedLinkTitle(for: title, destination: destination))
             attributed.link = URL(string: "trio-ai://\(destination.deepLinkID)")
-            attributed.font = .subheadline.bold()
             attributed.foregroundColor = .accentColor
-            attributed.underlineStyle = .single
-            return Text(" ") + Text(attributed) + Text(" ")
+            return Text(" ") + Text(attributed).bold() + Text(" ")
         }
     }
 
@@ -614,6 +630,36 @@ private struct InlineMessageText: View {
         default:
             return title
         }
+    }
+}
+
+private enum InlineMessageLine {
+    case text(String)
+    case bullet(String, level: Int)
+
+    static func parse(_ content: String) -> [InlineMessageLine] {
+        content
+            .replacingOccurrences(of: "\\s+•\\s+", with: "\n• ", options: .regularExpression)
+            .replacingOccurrences(of: #"([.!?])\s+[-*]\s+"#, with: "$1\n• ", options: .regularExpression)
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .compactMap { rawLine in
+                let line = String(rawLine)
+                guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    return nil
+                }
+
+                let leadingWhitespace = line.prefix { $0 == " " || $0 == "\t" }
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                let level = leadingWhitespace.reduce(0) { partial, character in
+                    partial + (character == "\t" ? 2 : 1)
+                } / 2
+
+                for marker in ["• ", "â€¢ ", "- ", "* "] where trimmed.hasPrefix(marker) {
+                    return .bullet(String(trimmed.dropFirst(marker.count)), level: level)
+                }
+
+                return .text(trimmed)
+            }
     }
 }
 
@@ -682,9 +728,6 @@ private enum AIChatTextNormalizer {
         text = regexReplace(text, pattern: #"(?m)^\s*[-_—]{3,}\s*$"#, template: "\n")
         text = regexReplace(text, pattern: #"\s+[*•]\s+"#, template: "\n• ")
         text = regexReplace(text, pattern: #"(?m)^\s*[-*]\s+"#, template: "• ")
-        text = regexReplace(text, pattern: #"\*\*([^*\n]+)\*\*"#, template: "$1")
-        text = regexReplace(text, pattern: #"__([^_\n]+)__"#, template: "$1")
-        text = regexReplace(text, pattern: #"\*\*"#, template: "")
         text = regexReplace(text, pattern: #"([.!?])([A-ZÀ-ÖØ-Þ])"#, template: "$1 $2")
 
         let rightArrow = NSRegularExpression.escapedPattern(for: String(UnicodeScalar(0x2192)!))
@@ -758,26 +801,13 @@ private struct ChatTherapySuggestionCard: View {
 
     var body: some View {
         ChatSwipeActionContainer(
-            leadingActions: [
-                ChatSwipeAction(
-                    title: String(localized: "Apply", comment: "Apply suggestion"),
-                    systemImage: "checkmark.circle",
-                    tint: .green,
-                    action: onApply
-                )
-            ],
+            leadingActions: leadingActions,
             trailingActions: [
                 ChatSwipeAction(
                     title: String(localized: "Edit", comment: "Edit therapy settings"),
                     systemImage: "pencil",
                     tint: .blue,
                     action: onEdit
-                ),
-                ChatSwipeAction(
-                    title: String(localized: "Revert", comment: "Revert suggestion"),
-                    systemImage: "arrow.uturn.backward",
-                    tint: .orange,
-                    action: onRevert
                 ),
                 ChatSwipeAction(
                     title: String(localized: "Dismiss", comment: "Dismiss suggestion"),
@@ -799,7 +829,7 @@ private struct ChatTherapySuggestionCard: View {
                 Text(suggestion.settingType.localizedTitle)
                     .font(.caption.bold())
                 Spacer()
-                confidenceBadge
+                statusBadge
             }
 
             Label(suggestion.timeBlock, systemImage: "clock")
@@ -822,7 +852,11 @@ private struct ChatTherapySuggestionCard: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 12).fill(cardBackground))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(AIChatStyle.gradient, lineWidth: 1))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.gray.opacity(0.16), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private func valueColumn(title: String, value: String) -> some View {
@@ -856,13 +890,60 @@ private struct ChatTherapySuggestionCard: View {
         }
     }
 
-    private var confidenceBadge: some View {
-        Text(String(format: "%.0f%%", suggestion.confidence * 100))
+    private var leadingActions: [ChatSwipeAction] {
+        if latestHistoryStatus == .applied {
+            return [
+                ChatSwipeAction(
+                    title: String(localized: "Revert", comment: "Revert suggestion"),
+                    systemImage: "arrow.uturn.backward",
+                    tint: .orange,
+                    action: onRevert
+                )
+            ]
+        }
+
+        return [
+            ChatSwipeAction(
+                title: String(localized: "Apply", comment: "Apply suggestion"),
+                systemImage: "checkmark.circle",
+                tint: .green,
+                action: onApply
+            )
+        ]
+    }
+
+    private var statusBadge: some View {
+        Text(statusBadgeText)
             .font(.caption2.bold())
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(Capsule().fill(confidenceColor.opacity(0.15)))
-            .foregroundStyle(confidenceColor)
+            .background(Capsule().fill(statusBadgeColor.opacity(0.15)))
+            .foregroundStyle(statusBadgeColor)
+    }
+
+    private var statusBadgeText: String {
+        if let latestHistoryStatus {
+            return latestHistoryStatus.localizedTitle
+        }
+        return String(format: "%.0f%%", suggestion.confidence * 100)
+    }
+
+    private var statusBadgeColor: Color {
+        switch latestHistoryStatus {
+        case .applied: return .green
+        case .reverted: return .orange
+        case .dismissed: return .gray
+        case nil: return confidenceColor
+        }
+    }
+
+    private var latestHistoryStatus: AIInsights.SuggestionHistoryRecord.Status? {
+        AIInsights.SuggestionHistoryStore.load().first { record in
+            record.suggestion.id == suggestion.id ||
+                (record.suggestion.settingType == suggestion.settingType &&
+                    record.suggestion.timeBlock == suggestion.timeBlock &&
+                    record.suggestion.proposedValue == suggestion.proposedValue)
+        }?.status
     }
 
     private var confidenceColor: Color {
@@ -1049,6 +1130,20 @@ private struct ChatSwipeActionContainer<Content: View>: View {
             }
             .onEnded { value in
                 let proposed = settledOffset + value.translation.width
+                let predicted = settledOffset + value.predictedEndTranslation.width
+                if leadingWidth > 0, (proposed > leadingWidth * 0.85 || predicted > leadingWidth * 1.05),
+                   let action = leadingActions.first
+                {
+                    perform(action)
+                    return
+                }
+                if trailingWidth > 0, (proposed < -trailingWidth * 0.85 || predicted < -trailingWidth * 1.05),
+                   let action = trailingActions.last
+                {
+                    perform(action)
+                    return
+                }
+
                 let threshold: CGFloat = 38
                 if proposed > threshold, leadingWidth > 0 {
                     settledOffset = leadingWidth
@@ -1063,9 +1158,7 @@ private struct ChatSwipeActionContainer<Content: View>: View {
 
     private func actionButton(_ action: ChatSwipeAction) -> some View {
         Button {
-            action.action()
-            settledOffset = 0
-            offset = 0
+            perform(action)
         } label: {
             VStack(spacing: 3) {
                 Image(systemName: action.systemImage)
@@ -1082,6 +1175,12 @@ private struct ChatSwipeActionContainer<Content: View>: View {
             .background(action.tint)
         }
         .buttonStyle(.plain)
+    }
+
+    private func perform(_ action: ChatSwipeAction) {
+        action.action()
+        settledOffset = 0
+        offset = 0
     }
 }
 

@@ -261,7 +261,7 @@ extension AIInsights {
                             state.dismissSuggestion(suggestion)
                         }
                     }
-                    .swipeActions(edge: .trailing) {
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(String(localized: "Delete", comment: "Delete suggestion"), systemImage: "trash", role: .destructive) {
                             state.dismissSuggestion(suggestion)
                         }
@@ -270,7 +270,7 @@ extension AIInsights {
                         }
                         .tint(.blue)
                     }
-                    .swipeActions(edge: .leading) {
+                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
                         Button(String(localized: "Apply", comment: "Apply suggestion"), systemImage: "checkmark.circle") {
                             state.requestApply(suggestion)
                         }
@@ -303,7 +303,7 @@ extension AIInsights {
                             state.deleteHistoryRecord(record)
                         }
                     }
-                    .swipeActions(edge: .trailing) {
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(String(localized: "Delete", comment: "Delete history item"), systemImage: "trash", role: .destructive) {
                             state.deleteHistoryRecord(record)
                         }
@@ -312,7 +312,7 @@ extension AIInsights {
                         }
                         .tint(.blue)
                     }
-                    .swipeActions(edge: .leading) {
+                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
                         if record.status == .applied {
                             Button(String(localized: "Revert", comment: "Revert suggestion"), systemImage: "arrow.uturn.backward") {
                                 Task { await state.revertSuggestion(record) }
@@ -451,7 +451,16 @@ private struct SuggestionRow: View {
                 .lineLimit(4)
 
         }
-        .padding(.vertical, 6)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.55) : Color.white)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.gray.opacity(0.16), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private var settingIcon: String {
@@ -561,6 +570,11 @@ private struct HistoryRecordRow: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.5) : Color(.systemGray6).opacity(0.7))
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.gray.opacity(0.12), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private var statusIcon: String {

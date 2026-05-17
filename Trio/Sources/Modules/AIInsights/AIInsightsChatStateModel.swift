@@ -207,7 +207,8 @@ extension AIInsights {
                         afterSnapshot: afterSnapshot
                     )
                 )
-                removeTherapySuggestion(suggestion)
+                messages = messages.map { $0 }
+                saveMessages()
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -257,6 +258,8 @@ extension AIInsights {
             do {
                 try await provider.restoreSnapshot(record.beforeSnapshot, for: record.suggestion.settingType)
                 SuggestionHistoryStore.updateStatus(for: record.id, to: .reverted)
+                messages = messages.map { $0 }
+                saveMessages()
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -803,6 +806,7 @@ extension AIInsights {
             - In Dutch answers, prefer "basaalwaarden" over "basal rates" and "koolhydraatratio's" over "carb ratios". "override" and "overrides" may stay as-is.
             - For value changes, write current value -> proposed value, then explain in words. Do not add another arrow after the proposed value.
             - Use lightweight Markdown for emphasis and lists when helpful: **bold** key findings, and use short bullet lists for multiple points.
+            - Put every bullet point on its own line. Never place two bullet points inside the same paragraph.
             - Do not output markdown horizontal separators such as "-----".
             - Finish the visible answer in complete sentences before any hidden XML-style blocks. Never start <KNOWLEDGE> or <TRIO_SUGGESTIONS> until the user-facing answer is fully complete.
 

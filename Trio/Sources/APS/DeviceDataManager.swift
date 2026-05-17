@@ -646,6 +646,12 @@ extension BaseDeviceDataManager: PumpManagerDelegate {
 
 extension BaseDeviceDataManager: DeviceManagerDelegate {
     func issueAlert(_ alert: Alert) {
+        if shouldSuppressPumpTimeOffsetAlert(identifier: alert.identifier.alertIdentifier) {
+            alertHistoryStorage.removeAlert(identifier: alert.identifier.alertIdentifier)
+            debug(.deviceManager, "Suppressing stale pump time offset alert: \(alert.identifier.alertIdentifier)")
+            return
+        }
+
         alertHistoryStorage.addAlert(
             AlertEntry(
                 alertIdentifier: alert.identifier.alertIdentifier,
@@ -658,6 +664,10 @@ extension BaseDeviceDataManager: DeviceManagerDelegate {
                 contentBody: alert.foregroundContent?.body
             )
         )
+    }
+
+    fileprivate func shouldSuppressPumpTimeOffsetAlert(identifier: String) -> Bool {
+        identifier == "timeOffsetChangeDetected"
     }
 
     func retractAlert(identifier: Alert.Identifier) {
@@ -721,6 +731,11 @@ extension BaseDeviceDataManager: CGMManagerDelegate {
 extension BaseDeviceDataManager: AlertObserver {
     func AlertDidUpdate(_ alerts: [AlertEntry]) {
         alerts.forEach { alert in
+            if shouldSuppressPumpTimeOffsetAlert(identifier: alert.alertIdentifier) {
+                alertHistoryStorage.removeAlert(identifier: alert.alertIdentifier)
+                return
+            }
+
             if alert.acknowledgedDate == nil {
                 ackAlert(alert: alert)
             }
