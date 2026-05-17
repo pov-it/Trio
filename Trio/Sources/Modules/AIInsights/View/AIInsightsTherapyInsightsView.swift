@@ -74,8 +74,12 @@ extension AIInsights {
             }
             .onChange(of: state.analysisPeriodDays) {
                 state.saveAnalysisPeriod()
+                Task { await state.refreshSettingsScore() }
             }
-            .onAppear(perform: configureView)
+            .onAppear {
+                configureView()
+                Task { await state.refreshSettingsScore() }
+            }
             .alert(
                 String(localized: "Apply Suggestion?", comment: "Disclaimer alert title"),
                 isPresented: $state.showApplyDisclaimer
@@ -397,6 +401,7 @@ extension AIInsights {
 private struct SuggestionRow: View {
     let suggestion: AIInsights.Suggestion
     let colorScheme: ColorScheme
+    @State private var isExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -448,7 +453,7 @@ private struct SuggestionRow: View {
             Text(suggestion.reasoning)
                 .font(.caption)
                 .foregroundColor(.secondary)
-                .lineLimit(4)
+                .lineLimit(isExpanded ? nil : 4)
 
         }
         .padding(12)
@@ -461,6 +466,12 @@ private struct SuggestionRow: View {
                 .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.gray.opacity(0.16), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .onLongPressGesture(minimumDuration: 0.35) {
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+                isExpanded.toggle()
+            }
+        }
     }
 
     private var settingIcon: String {
@@ -505,6 +516,7 @@ private struct SuggestionRow: View {
 private struct HistoryRecordRow: View {
     let record: AIInsights.SuggestionHistoryRecord
     let colorScheme: ColorScheme
+    @State private var isExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -564,6 +576,11 @@ private struct HistoryRecordRow: View {
                     )
                     .foregroundStyle(statusColor)
             }
+
+            Text(record.suggestion.reasoning)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(isExpanded ? nil : 2)
         }
         .padding(12)
         .background(
@@ -575,6 +592,12 @@ private struct HistoryRecordRow: View {
                 .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.gray.opacity(0.12), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .onLongPressGesture(minimumDuration: 0.35) {
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+                isExpanded.toggle()
+            }
+        }
     }
 
     private var statusIcon: String {

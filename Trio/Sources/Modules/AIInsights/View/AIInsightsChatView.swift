@@ -467,6 +467,7 @@ private struct MessageBubble: View {
                         isUser: message.isUser,
                         onNavigate: onNavigate
                     )
+                    .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                     .layoutPriority(1)
 
@@ -519,6 +520,7 @@ private struct MessageBubble: View {
                 RoundedRectangle(cornerRadius: 16)
                     .stroke(message.isUser ? AIChatStyle.gradient : AIChatStyle.clearGradient, lineWidth: message.isUser ? 1.5 : 0)
             )
+            .clipShape(RoundedRectangle(cornerRadius: 16))
             if !message.isUser { Spacer(minLength: 60) }
         }
     }
@@ -573,7 +575,7 @@ private struct InlineMessageText: View {
             }
         }
             .font(.subheadline)
-            .foregroundStyle(isUser ? .white : (colorScheme == .dark ? .white : .primary))
+            .foregroundStyle(colorScheme == .dark ? .white : .primary)
             .lineLimit(nil)
             .environment(\.openURL, OpenURLAction { url in
                 guard url.scheme == "trio-ai",
@@ -725,6 +727,12 @@ private enum AIChatTextNormalizer {
             .replacingOccurrences(of: "-----", with: "\n\n")
             .replacingOccurrences(of: "_____", with: "\n\n")
 
+        for marker in ["<TRIO_SUGGESTIONS>", "<KNOWLEDGE>"] {
+            if let range = text.range(of: marker) {
+                text.removeSubrange(range.lowerBound ..< text.endIndex)
+            }
+        }
+
         text = regexReplace(text, pattern: #"(?m)^\s*[-_—]{3,}\s*$"#, template: "\n")
         text = regexReplace(text, pattern: #"\s+[*•]\s+"#, template: "\n• ")
         text = regexReplace(text, pattern: #"(?m)^\s*[-*]\s+"#, template: "• ")
@@ -798,6 +806,7 @@ private struct ChatTherapySuggestionCard: View {
     var onDismiss: () -> Void
 
     @Environment(\.colorScheme) var colorScheme
+    @State private var isExpanded = false
 
     var body: some View {
         ChatSwipeActionContainer(
@@ -808,17 +817,12 @@ private struct ChatTherapySuggestionCard: View {
                     systemImage: "pencil",
                     tint: .blue,
                     action: onEdit
-                ),
-                ChatSwipeAction(
-                    title: String(localized: "Dismiss", comment: "Dismiss suggestion"),
-                    systemImage: "xmark.circle",
-                    tint: .red,
-                    action: onDismiss
                 )
             ]
         ) {
             cardContent
         }
+        .shadow(color: isExpanded ? Color.black.opacity(colorScheme == .dark ? 0.25 : 0.12) : .clear, radius: 10, y: 4)
     }
 
     private var cardContent: some View {
@@ -847,7 +851,7 @@ private struct ChatTherapySuggestionCard: View {
             Text(suggestion.reasoning)
                 .font(.caption)
                 .foregroundColor(.secondary)
-                .lineLimit(nil)
+                .lineLimit(isExpanded ? nil : 3)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -857,6 +861,12 @@ private struct ChatTherapySuggestionCard: View {
                 .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.gray.opacity(0.16), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .onLongPressGesture(minimumDuration: 0.35) {
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+                isExpanded.toggle()
+            }
+        }
     }
 
     private func valueColumn(title: String, value: String) -> some View {
@@ -871,7 +881,7 @@ private struct ChatTherapySuggestionCard: View {
     }
 
     private var cardBackground: Color {
-        colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.85) : Color.chart
+        colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.9) : Color.white
     }
 
     private var settingIcon: String {
@@ -964,15 +974,16 @@ private struct ChatAdjustmentSuggestionCard: View {
     var onDismiss: () -> Void
 
     @Environment(\.colorScheme) var colorScheme
+    @State private var isExpanded = false
 
     var body: some View {
         ChatSwipeActionContainer(
             leadingActions: [
                 ChatSwipeAction(
-                    title: String(localized: "Add Preset", comment: "Add adjustment suggestion to presets"),
-                    systemImage: "plus.circle",
+                    title: String(localized: "Accept", comment: "Accept adjustment suggestion"),
+                    systemImage: "checkmark.circle",
                     tint: .green,
-                    action: onAddPreset
+                    action: onStart
                 )
             ],
             trailingActions: [
@@ -981,17 +992,12 @@ private struct ChatAdjustmentSuggestionCard: View {
                     systemImage: "pencil",
                     tint: .blue,
                     action: onEdit
-                ),
-                ChatSwipeAction(
-                    title: String(localized: "Dismiss", comment: "Dismiss suggestion"),
-                    systemImage: "xmark.circle",
-                    tint: .red,
-                    action: onDismiss
                 )
             ]
         ) {
             cardContent
         }
+        .shadow(color: isExpanded ? Color.black.opacity(colorScheme == .dark ? 0.25 : 0.12) : .clear, radius: 10, y: 4)
     }
 
     private var cardContent: some View {
@@ -1024,20 +1030,29 @@ private struct ChatAdjustmentSuggestionCard: View {
             Text(suggestion.reasoning)
                 .font(.caption)
                 .foregroundColor(.secondary)
-                .lineLimit(nil)
+                .lineLimit(isExpanded ? nil : 3)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 12).fill(cardBackground))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(AIChatStyle.gradient, lineWidth: 1))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.gray.opacity(0.16), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .contentShape(RoundedRectangle(cornerRadius: 12))
         .onTapGesture {
             onStart()
         }
+        .onLongPressGesture(minimumDuration: 0.35) {
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+                isExpanded.toggle()
+            }
+        }
     }
 
     private var cardBackground: Color {
-        colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.85) : Color.chart
+        colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.9) : Color.white
     }
 
     private var labels: [String] {

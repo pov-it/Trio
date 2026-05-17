@@ -430,7 +430,7 @@ extension AIInsights {
                     temperature: 0.7,
                     topP: 0.95,
                     topK: nil,
-                    maxTokens: 4096
+                    maxTokens: 8192
                 )
 
                 let response = try await AIServiceAdapter.send(
@@ -456,6 +456,9 @@ extension AIInsights {
                     }
                     // Remove the block so the user doesn't see the internal RAG working
                     responseText.removeSubrange(knowledgeRange)
+                    responseText = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+                } else if let start = responseText.range(of: "<KNOWLEDGE>") {
+                    responseText.removeSubrange(start.lowerBound ..< responseText.endIndex)
                     responseText = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
                 }
 
@@ -603,19 +606,21 @@ extension AIInsights {
             allowTherapy: Bool,
             allowAdjustments: Bool
         ) -> (therapy: [Suggestion], adjustments: [AdjustmentSuggestion]) {
-            guard let blockRange = responseText.range(
-                of: "(?s)<TRIO_SUGGESTIONS>(.*?)</TRIO_SUGGESTIONS>",
-                options: .regularExpression
-            ) else {
+            guard let startTag = responseText.range(of: "<TRIO_SUGGESTIONS>") else {
                 return ([], [])
             }
 
-            let jsonText = String(responseText[blockRange])
+            let contentStart = startTag.upperBound
+            let closingTag = responseText.range(of: "</TRIO_SUGGESTIONS>", range: contentStart ..< responseText.endIndex)
+            let contentEnd = closingTag?.lowerBound ?? responseText.endIndex
+            let removalEnd = closingTag?.upperBound ?? responseText.endIndex
+
+            let jsonText = String(responseText[contentStart ..< contentEnd])
                 .replacingOccurrences(of: "<TRIO_SUGGESTIONS>", with: "")
                 .replacingOccurrences(of: "</TRIO_SUGGESTIONS>", with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            responseText.removeSubrange(blockRange)
+            responseText.removeSubrange(startTag.lowerBound ..< removalEnd)
             responseText = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
 
             guard let data = jsonText.data(using: .utf8),
@@ -808,6 +813,7 @@ extension AIInsights {
             - Use lightweight Markdown for emphasis and lists when helpful: **bold** key findings, and use short bullet lists for multiple points.
             - Put every bullet point on its own line. Never place two bullet points inside the same paragraph.
             - Do not output markdown horizontal separators such as "-----".
+            - When you include structured suggestions, keep the visible answer concise enough that the hidden block is not truncated.
             - Finish the visible answer in complete sentences before any hidden XML-style blocks. Never start <KNOWLEDGE> or <TRIO_SUGGESTIONS> until the user-facing answer is fully complete.
 
             CURRENT DATA (last \(stats.periodDays) days):

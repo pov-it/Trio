@@ -160,6 +160,15 @@ extension AIInsights {
         // MARK: - Analysis
 
         @MainActor
+        func refreshSettingsScore() async {
+            guard provider != nil else { return }
+
+            let (aggregated, _) = await loadAnalysisData()
+            stats = aggregated
+            settingsScore = computeSettingsScore(from: aggregated)
+        }
+
+        @MainActor
         func runAnalysis(for settingType: Suggestion.SettingType? = nil) async {
             guard provider != nil else {
                 errorMessage = String(localized: "AI Insights is not ready yet.", comment: "AI error")
@@ -177,56 +186,7 @@ extension AIInsights {
 
             do {
                 // 1. Fetch and aggregate data
-                let startDate = Date().addingTimeInterval(-Double(analysisPeriodDays) * 24 * 3600)
-                async let glucoseTask = provider.fetchGlucose(since: startDate)
-                async let carbsTask = provider.fetchCarbs(since: startDate)
-                async let basalProfileTask = provider.getBasalProfile()
-                async let isfTask = provider.getISF()
-                async let crTask = provider.getCR()
-                async let targetTask = provider.getTarget()
-                async let isfDescriptionTask = provider.getISFDescription()
-                async let crDescriptionTask = provider.getCRDescription()
-                async let targetDescriptionTask = provider.getTargetDescription()
-
-                let (
-                    glucose,
-                    carbs,
-                    basalProfile,
-                    isf,
-                    cr,
-                    target,
-                    isfDescription,
-                    crDescription,
-                    targetDescription
-                ) = await (
-                    glucoseTask,
-                    carbsTask,
-                    basalProfileTask,
-                    isfTask,
-                    crTask,
-                    targetTask,
-                    isfDescriptionTask,
-                    crDescriptionTask,
-                    targetDescriptionTask
-                )
-
-                let aggregated = DataAggregator.aggregate(
-                    glucose: glucose,
-                    carbs: carbs,
-                    basalProfile: basalProfile,
-                    isf: isf,
-                    cr: cr,
-                    target: target,
-                    isfDescription: isfDescription,
-                    crDescription: crDescription,
-                    targetDescription: targetDescription,
-                    units: provider.units,
-                    iob: provider.currentIOB,
-                    cob: nil,
-                    periodDays: analysisPeriodDays,
-                    lowThreshold: provider.settings.low,
-                    highThreshold: provider.settings.high
-                )
+                let (aggregated, carbs) = await loadAnalysisData()
 
                 self.stats = aggregated
 
@@ -273,6 +233,60 @@ extension AIInsights {
             } catch {
                 errorMessage = String(localized: "Error: \(error.localizedDescription)", comment: "AI error")
             }
+        }
+
+        private func loadAnalysisData() async -> (AggregatedStats, [CarbsEntry]) {
+            let startDate = Date().addingTimeInterval(-Double(analysisPeriodDays) * 24 * 3600)
+            async let glucoseTask = provider.fetchGlucose(since: startDate)
+            async let carbsTask = provider.fetchCarbs(since: startDate)
+            async let basalProfileTask = provider.getBasalProfile()
+            async let isfTask = provider.getISF()
+            async let crTask = provider.getCR()
+            async let targetTask = provider.getTarget()
+            async let isfDescriptionTask = provider.getISFDescription()
+            async let crDescriptionTask = provider.getCRDescription()
+            async let targetDescriptionTask = provider.getTargetDescription()
+
+            let (
+                glucose,
+                carbs,
+                basalProfile,
+                isf,
+                cr,
+                target,
+                isfDescription,
+                crDescription,
+                targetDescription
+            ) = await (
+                glucoseTask,
+                carbsTask,
+                basalProfileTask,
+                isfTask,
+                crTask,
+                targetTask,
+                isfDescriptionTask,
+                crDescriptionTask,
+                targetDescriptionTask
+            )
+
+            let aggregated = DataAggregator.aggregate(
+                glucose: glucose,
+                carbs: carbs,
+                basalProfile: basalProfile,
+                isf: isf,
+                cr: cr,
+                target: target,
+                isfDescription: isfDescription,
+                crDescription: crDescription,
+                targetDescription: targetDescription,
+                units: provider.units,
+                iob: provider.currentIOB,
+                cob: nil,
+                periodDays: analysisPeriodDays,
+                lowThreshold: provider.settings.low,
+                highThreshold: provider.settings.high
+            )
+            return (aggregated, carbs)
         }
 
         // MARK: - Settings Score
