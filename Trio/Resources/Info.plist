@@ -83,6 +83,8 @@
 	<string>For authorized access to bolus</string>
 	<key>NSCameraUsageDescription</key>
 	<string>The camera is used to analyze food and ingredients with the FoodFinder AI feature.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>The photo library is used to pick existing meal photos for FoodFinder AI analysis.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Trio reverse-geocodes your current location once per AI chat session so the assistant can tailor regional cuisine, climate, and venue context. Coordinates stay on-device; only the venue and city/country labels are sent to the AI provider.</string>
 	<key>NSMotionUsageDescription</key>
@@ -92,7 +94,7 @@
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Speech recognition is used to turn dictated meal descriptions into text for FoodFinder.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>Health App is used to store blood glucose, carbs and insulin</string>
+	<string>Apple Health is used to read blood glucose, carbs, insulin, dietary caffeine, and alcoholic beverages so Trio's AI Insights can include them in its analysis.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Health App is used to store blood glucose, carbs and insulin</string>
 	<key>NSHumanReadableCopyright</key>

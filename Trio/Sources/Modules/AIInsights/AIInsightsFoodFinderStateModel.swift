@@ -98,6 +98,7 @@ extension AIInsights {
         var recentResults: [FoodAnalysisResult] = []
         var showCamera: Bool = false
         var showBarcodeScanner: Bool = false
+        var showPhotoPicker: Bool = false
         var capturedImageData: Data?
         var isDictating: Bool = false
 

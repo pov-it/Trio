@@ -66,6 +66,12 @@ extension AIInsights {
                 }
                 .ignoresSafeArea()
             }
+            .fullScreenCover(isPresented: $state.showPhotoPicker) {
+                AIInsights.PhotoLibraryPickerView { imageData in
+                    state.attachImage(imageData)
+                }
+                .ignoresSafeArea()
+            }
             .alert(
                 ingredientPromptItemID == nil
                     ? String(localized: "Add Ingredient", comment: "FoodFinder add ingredient alert")
@@ -358,29 +364,7 @@ extension AIInsights {
 
                     Spacer()
 
-                    HStack(spacing: 4) {
-                        Button {
-                            state.updatePortion(for: item.id, multiplier: item.portionMultiplier - 0.25)
-                        } label: {
-                            Image(systemName: "minus.circle")
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(.borderless)
-                        .contentShape(Rectangle())
-
-                        Text(String(format: "%.2fx", item.portionMultiplier))
-                            .font(.caption.monospacedDigit())
-                            .frame(width: 42)
-
-                        Button {
-                            state.updatePortion(for: item.id, multiplier: item.portionMultiplier + 0.25)
-                        } label: {
-                            Image(systemName: "plus.circle")
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(.borderless)
-                        .contentShape(Rectangle())
-                    }
+                    portionControl(for: item)
                 }
 
                 HStack(spacing: 14) {
@@ -392,6 +376,68 @@ extension AIInsights {
                 }
             }
             .padding(.vertical, 6)
+        }
+
+        /// Compact portion editor: minus / editable grams (or "x.xx×") / plus.
+        /// Tries to extract grams from `item.portion` (e.g. "500g cooked"); if found,
+        /// renders a numeric TextField for direct gram entry. Otherwise falls back to
+        /// the multiplier display. +/- step is 0.25× either way.
+        @ViewBuilder
+        private func portionControl(for item: FoodItem) -> some View {
+            let baseGrams = portionGramsFromString(item.portion)
+            let currentGrams = baseGrams.map { $0 * item.portionMultiplier }
+
+            HStack(spacing: 4) {
+                Button {
+                    state.updatePortion(for: item.id, multiplier: item.portionMultiplier - 0.25)
+                } label: {
+                    Image(systemName: "minus.circle")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .contentShape(Rectangle())
+
+                if let base = baseGrams, let current = currentGrams {
+                    PortionGramsField(
+                        valueGrams: current,
+                        baseGrams: base,
+                        onCommit: { newGrams in
+                            let multiplier = max(0.1, newGrams / base)
+                            state.updatePortion(for: item.id, multiplier: multiplier)
+                        }
+                    )
+                    .frame(width: 64)
+                } else {
+                    Text(String(format: "%.2fx", item.portionMultiplier))
+                        .font(.caption.monospacedDigit())
+                        .frame(width: 42)
+                }
+
+                Button {
+                    state.updatePortion(for: item.id, multiplier: item.portionMultiplier + 0.25)
+                } label: {
+                    Image(systemName: "plus.circle")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .contentShape(Rectangle())
+            }
+        }
+
+        /// Extract the first gram value from a free-form portion string. Matches
+        /// "500g", "500 g", "500 gram", "500 grams". Returns nil if no match.
+        private func portionGramsFromString(_ portion: String) -> Double? {
+            let pattern = #"(\d+(?:[.,]\d+)?)\s*g(?:ram(?:s)?)?\b"#
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+                return nil
+            }
+            let range = NSRange(portion.startIndex..<portion.endIndex, in: portion)
+            guard let match = regex.firstMatch(in: portion, options: [], range: range),
+                  match.numberOfRanges >= 2,
+                  let valueRange = Range(match.range(at: 1), in: portion)
+            else { return nil }
+            let raw = String(portion[valueRange]).replacingOccurrences(of: ",", with: ".")
+            return Double(raw)
         }
 
         private func ingredientMetric(_ label: String, value: Double, unit: String, color: Color) -> some View {
@@ -536,6 +582,11 @@ extension AIInsights {
                     }
                     .disabled(state.isAnalyzing)
 
+                    roundInputButton(systemImage: "photo.on.rectangle") {
+                        state.showPhotoPicker = true
+                    }
+                    .disabled(state.isAnalyzing)
+
                     roundInputButton(systemImage: "barcode.viewfinder") {
                         state.showBarcodeScanner = true
                     }
@@ -645,6 +696,58 @@ extension AIInsights {
 }
 
 // MARK: - Flow Layout (for example food chips)
+
+/// Editable grams field used inside FoodFinder's portion control.
+/// Owns its own text-state so the user can type freely without each keystroke
+/// firing an update; commit happens on submit / focus loss.
+private struct PortionGramsField: View {
+    let valueGrams: Double
+    let baseGrams: Double
+    let onCommit: (Double) -> Void
+
+    @State private var text: String = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("", text: $text)
+            .keyboardType(.decimalPad)
+            .multilineTextAlignment(.center)
+            .font(.caption.monospacedDigit())
+            .focused($focused)
+            .onAppear { syncText() }
+            .onChange(of: valueGrams) { syncText() }
+            .onChange(of: focused) {
+                if !focused { commit() }
+            }
+            .onSubmit { commit() }
+            .padding(.vertical, 2)
+            .padding(.horizontal, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(Color.secondary.opacity(0.4), lineWidth: 0.5)
+            )
+            .overlay(alignment: .trailing) {
+                Text("g")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .padding(.trailing, 2)
+                    .opacity(focused ? 0 : 1)
+            }
+    }
+
+    private func syncText() {
+        text = String(format: "%.0f", valueGrams)
+    }
+
+    private func commit() {
+        let normalized = text.replacingOccurrences(of: ",", with: ".")
+        if let grams = Double(normalized), grams > 0 {
+            onCommit(grams)
+        } else {
+            syncText()
+        }
+    }
+}
 
 private struct FlowLayout: Layout {
     var spacing: CGFloat = 8

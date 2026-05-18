@@ -172,7 +172,7 @@ extension AIInsights {
                 String(localized: "Connection Test", comment: "Test alert title"),
                 isPresented: $showTestResult
             ) {
-                Button("OK") {}
+                Button(String(localized: "OK", comment: "OK alert button")) {}
             } message: {
                 if let errorMsg = testErrorMessage {
                     Text(String(localized: "Connection failed:\n", comment: "Test failure prefix") + errorMsg)

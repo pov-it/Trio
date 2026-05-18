@@ -858,6 +858,11 @@ extension AIInsights {
                 prompt += "\n\n" + caffeineContext
             }
 
+            let alcoholContext = AIInsights_AlcoholTracker.shared.buildAlcoholPromptContext()
+            if !alcoholContext.isEmpty {
+                prompt += "\n\n" + alcoholContext
+            }
+
             let locationContext = AIInsights_LocationService.shared.locationContextForPrompt()
             if !locationContext.isEmpty {
                 prompt += "\n\n" + locationContext

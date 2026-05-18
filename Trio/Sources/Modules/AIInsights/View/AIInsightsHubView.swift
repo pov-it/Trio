@@ -83,6 +83,17 @@ extension AIInsights {
                         )
 
                         HubMenuCard(
+                            icon: "wineglass.fill",
+                            title: String(localized: "Alcohol Tracker", comment: "Alcohol tracker feature name"),
+                            description: String(localized: "Log drinks; AI flags late-hypo risk windows.", comment: "Alcohol tracker description"),
+                            gradientColors: [
+                                Color(red: 0.8, green: 0.4, blue: 0.2),
+                                Color(red: 0.9, green: 0.55, blue: 0.3)
+                            ],
+                            destination: AnyView(AIInsightsAlcoholLogView())
+                        )
+
+                        HubMenuCard(
                             icon: "figure.walk.motion",
                             title: String(localized: "AutoPresets", comment: "AutoPresets feature name"),
                             description: String(localized: "Auto-activate override presets on walking or running.", comment: "AutoPresets description"),

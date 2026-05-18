@@ -64,10 +64,10 @@ extension AIInsights {
                                     ProgressView()
                                         .progressViewStyle(CircularProgressViewStyle())
                                         .padding(.trailing, 5)
-                                    Text("Analyzing Data...")
+                                    Text(String(localized: "Analyzing Data...", comment: "AI legacy analyze in-progress label"))
                                 }
                             } else {
-                                Text("Generate AI Insights (Legacy)")
+                                Text(String(localized: "Generate AI Insights (Legacy)", comment: "AI legacy generate button"))
                             }
                         }
                         .disabled(state.isGenerating || state.apiKey.isEmpty)
@@ -75,7 +75,7 @@ extension AIInsights {
                     .listRowBackground(Color.chart)
 
                     if !state.insightsResult.isEmpty {
-                        Section(header: Text("Results")) {
+                        Section(header: Text(String(localized: "Results", comment: "AI legacy results section header"))) {
                             ScrollView {
                                 Text(state.insightsResult)
                                     .font(.system(.body, design: .monospaced))
@@ -86,7 +86,7 @@ extension AIInsights {
                             Button(action: {
                                 UIPasteboard.general.string = state.insightsResult
                             }) {
-                                Label("Copy to Clipboard", systemImage: "doc.on.doc")
+                                Label(String(localized: "Copy to Clipboard", comment: "Copy legacy AI result"), systemImage: "doc.on.doc")
                             }
                             .font(.caption)
                         }

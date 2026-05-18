@@ -783,6 +783,8 @@
 		AABBCC00000000000000C0C6 /* AIInsights_CaffeineTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B6 /* AIInsights_CaffeineTracker.swift */; };
 		AABBCC00000000000000C0C7 /* AIInsights_LocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B7 /* AIInsights_LocationService.swift */; };
 		AABBCC00000000000000C0C8 /* AIInsightsCaffeineLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B8 /* AIInsightsCaffeineLogView.swift */; };
+		AABBCC00000000000000C0C9 /* AIInsights_AlcoholTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B9 /* AIInsights_AlcoholTracker.swift */; };
+		AABBCC00000000000000C0CA /* AIInsightsAlcoholLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0BA /* AIInsightsAlcoholLogView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1664,6 +1666,8 @@
 		AABBCC00000000000000B0B6 /* AIInsights_CaffeineTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsights_CaffeineTracker.swift; sourceTree = "<group>"; };
 		AABBCC00000000000000B0B7 /* AIInsights_LocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsights_LocationService.swift; sourceTree = "<group>"; };
 		AABBCC00000000000000B0B8 /* AIInsightsCaffeineLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsCaffeineLogView.swift; sourceTree = "<group>"; };
+		AABBCC00000000000000B0B9 /* AIInsights_AlcoholTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsights_AlcoholTracker.swift; sourceTree = "<group>"; };
+		AABBCC00000000000000B0BA /* AIInsightsAlcoholLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsAlcoholLogView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -1771,6 +1775,7 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 				C3D4E5F6A7B8C9D0E1F2A3B4 /* AIInsightsChatView.swift */,
 				E5F6A7B8C9D0E1F2A3B4C5D6 /* AIInsightsSettingsView.swift */,
 				AABBCC00000000000000B0B8 /* AIInsightsCaffeineLogView.swift */,
+				AABBCC00000000000000B0BA /* AIInsightsAlcoholLogView.swift */,
 			);
 			path = View;
 			sourceTree = "<group>";
@@ -1800,6 +1805,7 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 				C9D0E1F2A3B4C5D6E7F8A9B0 /* AIInsights_DataAggregator.swift */,
 				AABBCC00000000000000B0B6 /* AIInsights_CaffeineTracker.swift */,
 				AABBCC00000000000000B0B7 /* AIInsights_LocationService.swift */,
+				AABBCC00000000000000B0B9 /* AIInsights_AlcoholTracker.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -4392,6 +4398,8 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 				AABBCC00000000000000C0C6 /* AIInsights_CaffeineTracker.swift in Sources */,
 				AABBCC00000000000000C0C7 /* AIInsights_LocationService.swift in Sources */,
 				AABBCC00000000000000C0C8 /* AIInsightsCaffeineLogView.swift in Sources */,
+				AABBCC00000000000000C0C9 /* AIInsights_AlcoholTracker.swift in Sources */,
+				AABBCC00000000000000C0CA /* AIInsightsAlcoholLogView.swift in Sources */,
 				E8F324C38D0BBA22600C21E1 /* AIInsights_SuggestionHistory.swift in Sources */,
 				5DF1E896A440773414E19B3A /* AIInsights_BackgroundMonitor.swift in Sources */,
 				5F285860DCE234306124B2C4 /* AIInsightsTherapyInsightsView.swift in Sources */,

@@ -855,6 +855,7 @@ private struct ChatTherapySuggestionCard: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 92)
         .background(RoundedRectangle(cornerRadius: 12).fill(cardBackground))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
@@ -988,6 +989,12 @@ private struct ChatAdjustmentSuggestionCard: View {
             ],
             trailingActions: [
                 ChatSwipeAction(
+                    title: String(localized: "Save", comment: "Save adjustment suggestion as preset"),
+                    systemImage: "tray.and.arrow.down.fill",
+                    tint: .orange,
+                    action: onAddPreset
+                ),
+                ChatSwipeAction(
                     title: String(localized: "Edit", comment: "Edit adjustment suggestion"),
                     systemImage: "pencil",
                     tint: .blue,
@@ -1034,6 +1041,7 @@ private struct ChatAdjustmentSuggestionCard: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 92)
         .background(RoundedRectangle(cornerRadius: 12).fill(cardBackground))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
@@ -1041,9 +1049,6 @@ private struct ChatAdjustmentSuggestionCard: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .contentShape(RoundedRectangle(cornerRadius: 12))
-        .onTapGesture {
-            onStart()
-        }
         .onLongPressGesture(minimumDuration: 0.35) {
             withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
                 isExpanded.toggle()
