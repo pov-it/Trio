@@ -775,6 +775,14 @@
 		E8F324C38D0BBA22600C21E1 /* AIInsights_SuggestionHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED1F19964F2ACBB9FAD28B67 /* AIInsights_SuggestionHistory.swift */; };
 		D26A63997C2FBCABD9A7D2EF /* AIInsightsFoodFinderStateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E10AD1C04CB08A2E386B2E1 /* AIInsightsFoodFinderStateModel.swift */; };
 		1BFCEE8860D8786328460975 /* AIInsightsTherapyInsightsStateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA643F8DCF09F3FEA8182B3 /* AIInsightsTherapyInsightsStateModel.swift */; };
+		AABBCC00000000000000C0C1 /* AutoPresetsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B1 /* AutoPresetsModels.swift */; };
+		AABBCC00000000000000C0C2 /* AutoPresetsStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B2 /* AutoPresetsStorage.swift */; };
+		AABBCC00000000000000C0C3 /* AutoPresetsActivityDetectionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B3 /* AutoPresetsActivityDetectionManager.swift */; };
+		AABBCC00000000000000C0C4 /* AutoPresetsCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B4 /* AutoPresetsCoordinator.swift */; };
+		AABBCC00000000000000C0C5 /* AutoPresetsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B5 /* AutoPresetsSettingsView.swift */; };
+		AABBCC00000000000000C0C6 /* AIInsights_CaffeineTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B6 /* AIInsights_CaffeineTracker.swift */; };
+		AABBCC00000000000000C0C7 /* AIInsights_LocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B7 /* AIInsights_LocationService.swift */; };
+		AABBCC00000000000000C0C8 /* AIInsightsCaffeineLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B8 /* AIInsightsCaffeineLogView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1648,6 +1656,14 @@
 		ED1F19964F2ACBB9FAD28B67 /* AIInsights_SuggestionHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsights_SuggestionHistory.swift; sourceTree = "<group>"; };
 		5E10AD1C04CB08A2E386B2E1 /* AIInsightsFoodFinderStateModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsFoodFinderStateModel.swift; sourceTree = "<group>"; };
 		9DA643F8DCF09F3FEA8182B3 /* AIInsightsTherapyInsightsStateModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsTherapyInsightsStateModel.swift; sourceTree = "<group>"; };
+		AABBCC00000000000000B0B1 /* AutoPresetsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoPresetsModels.swift; sourceTree = "<group>"; };
+		AABBCC00000000000000B0B2 /* AutoPresetsStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoPresetsStorage.swift; sourceTree = "<group>"; };
+		AABBCC00000000000000B0B3 /* AutoPresetsActivityDetectionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoPresetsActivityDetectionManager.swift; sourceTree = "<group>"; };
+		AABBCC00000000000000B0B4 /* AutoPresetsCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoPresetsCoordinator.swift; sourceTree = "<group>"; };
+		AABBCC00000000000000B0B5 /* AutoPresetsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoPresetsSettingsView.swift; sourceTree = "<group>"; };
+		AABBCC00000000000000B0B6 /* AIInsights_CaffeineTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsights_CaffeineTracker.swift; sourceTree = "<group>"; };
+		AABBCC00000000000000B0B7 /* AIInsights_LocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsights_LocationService.swift; sourceTree = "<group>"; };
+		AABBCC00000000000000B0B8 /* AIInsightsCaffeineLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsCaffeineLogView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -1754,6 +1770,7 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 				C2E69494986447F4BF5EC179 /* AIInsightsRootView.swift */,
 				C3D4E5F6A7B8C9D0E1F2A3B4 /* AIInsightsChatView.swift */,
 				E5F6A7B8C9D0E1F2A3B4C5D6 /* AIInsightsSettingsView.swift */,
+				AABBCC00000000000000B0B8 /* AIInsightsCaffeineLogView.swift */,
 			);
 			path = View;
 			sourceTree = "<group>";
@@ -1781,8 +1798,46 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 				AF6617AE4D486199D4B4BFA3 /* AIInsights_BackgroundMonitor.swift */,
 				A7B8C9D0E1F2A3B4C5D6E7F8 /* AIInsights_AIServiceAdapter.swift */,
 				C9D0E1F2A3B4C5D6E7F8A9B0 /* AIInsights_DataAggregator.swift */,
+				AABBCC00000000000000B0B6 /* AIInsights_CaffeineTracker.swift */,
+				AABBCC00000000000000B0B7 /* AIInsights_LocationService.swift */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		AABBCC00000000000000A001 /* AutoPresets */ = {
+			isa = PBXGroup;
+			children = (
+				AABBCC00000000000000A002 /* Models */,
+				AABBCC00000000000000A003 /* Services */,
+				AABBCC00000000000000A004 /* View */,
+				AABBCC00000000000000B0B4 /* AutoPresetsCoordinator.swift */,
+			);
+			path = AutoPresets;
+			sourceTree = "<group>";
+		};
+		AABBCC00000000000000A002 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				AABBCC00000000000000B0B1 /* AutoPresetsModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		AABBCC00000000000000A003 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				AABBCC00000000000000B0B2 /* AutoPresetsStorage.swift */,
+				AABBCC00000000000000B0B3 /* AutoPresetsActivityDetectionManager.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		AABBCC00000000000000A004 /* View */ = {
+			isa = PBXGroup;
+			children = (
+				AABBCC00000000000000B0B5 /* AutoPresetsSettingsView.swift */,
+			);
+			path = View;
 			sourceTree = "<group>";
 		};
 		0610F7D6D2EC00E3BA1569F0 /* ConfigEditor */ = {
@@ -2025,6 +2080,7 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 			children = (
 				DDD163032C4C67B400CD525A /* Adjustments */,
 				1307459B9D494BECAB3B785F /* AIInsights */,
+				AABBCC00000000000000A001 /* AutoPresets */,
 				DD1745382C55BF8B00211FAC /* AlgorithmAdvancedSettings */,
 				DDF690FE2DA2C9EE008BF16C /* AppDiagnostics */,
 				DD1745422C55C5C400211FAC /* AutosensSettings */,
@@ -4328,6 +4384,14 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 			files = (
 				1BFCEE8860D8786328460975 /* AIInsightsTherapyInsightsStateModel.swift in Sources */,
 				D26A63997C2FBCABD9A7D2EF /* AIInsightsFoodFinderStateModel.swift in Sources */,
+				AABBCC00000000000000C0C1 /* AutoPresetsModels.swift in Sources */,
+				AABBCC00000000000000C0C2 /* AutoPresetsStorage.swift in Sources */,
+				AABBCC00000000000000C0C3 /* AutoPresetsActivityDetectionManager.swift in Sources */,
+				AABBCC00000000000000C0C4 /* AutoPresetsCoordinator.swift in Sources */,
+				AABBCC00000000000000C0C5 /* AutoPresetsSettingsView.swift in Sources */,
+				AABBCC00000000000000C0C6 /* AIInsights_CaffeineTracker.swift in Sources */,
+				AABBCC00000000000000C0C7 /* AIInsights_LocationService.swift in Sources */,
+				AABBCC00000000000000C0C8 /* AIInsightsCaffeineLogView.swift in Sources */,
 				E8F324C38D0BBA22600C21E1 /* AIInsights_SuggestionHistory.swift in Sources */,
 				5DF1E896A440773414E19B3A /* AIInsights_BackgroundMonitor.swift in Sources */,
 				5F285860DCE234306124B2C4 /* AIInsightsTherapyInsightsView.swift in Sources */,

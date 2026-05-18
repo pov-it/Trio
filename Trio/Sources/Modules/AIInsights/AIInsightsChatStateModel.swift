@@ -39,7 +39,15 @@ extension AIInsights {
 
             // Load live status
             currentIOB = provider.currentIOB
-            
+
+            // Wire the location service gate to the live settings value (chat may open
+            // without the settings view ever being shown, so we re-wire here too).
+            AIInsights_LocationService.shared.isEnabledProvider = { [weak self] in
+                self?.provider?.settings.aiLocationContextEnabled ?? false
+            }
+            // Fire a fresh location lookup if the user has opted in.
+            AIInsights_LocationService.shared.requestLocationIfEnabled()
+
             loadConversations()
             startNewConversation()
             loadKnowledgeBase()
@@ -843,6 +851,16 @@ extension AIInsights {
                 USER PROFILE & KNOWLEDGE BASE (Continuously Updated):
                 \(knowledgeBase)
                 """
+            }
+
+            let caffeineContext = AIInsights_CaffeineTracker.shared.buildCaffeinePromptContext()
+            if !caffeineContext.isEmpty {
+                prompt += "\n\n" + caffeineContext
+            }
+
+            let locationContext = AIInsights_LocationService.shared.locationContextForPrompt()
+            if !locationContext.isEmpty {
+                prompt += "\n\n" + locationContext
             }
 
             prompt += """

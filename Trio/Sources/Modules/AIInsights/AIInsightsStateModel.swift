@@ -15,6 +15,7 @@ extension AIInsights {
         var analysisPeriodDays: Int = 7
         var aiEnabled: Bool = false
         var openFoodFactsBaseURL: String = AIInsights.defaultOpenFoodFactsBaseURL
+        var locationContextEnabled: Bool = false
 
         override func subscribe() {
             if let savedKey = provider.keychain.getValue(String.self, forKey: "ai_insights_api_key") {
@@ -29,6 +30,13 @@ extension AIInsights {
             analysisPeriodDays = provider.settings.aiAnalysisPeriodDays
             aiEnabled = provider.settings.aiEnabled
             openFoodFactsBaseURL = provider.settings.openFoodFactsBaseURL
+            locationContextEnabled = provider.settings.aiLocationContextEnabled
+
+            // Wire the location service's gate to the live settings value so the
+            // singleton can self-check before geocoding or emitting prompt context.
+            AIInsights_LocationService.shared.isEnabledProvider = { [weak self] in
+                self?.provider?.settings.aiLocationContextEnabled ?? false
+            }
         }
 
         func saveAPIKey() {
@@ -48,6 +56,7 @@ extension AIInsights {
             settings.aiAnalysisPeriodDays = analysisPeriodDays
             settings.aiEnabled = aiEnabled
             settings.openFoodFactsBaseURL = openFoodFactsBaseURL
+            settings.aiLocationContextEnabled = locationContextEnabled
             provider.settings = settings
         }
 

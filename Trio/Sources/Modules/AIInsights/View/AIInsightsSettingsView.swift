@@ -106,6 +106,25 @@ extension AIInsights {
                 }
                 .listRowBackground(Color.chart)
 
+                // MARK: - Location Context
+                Section(
+                    header: Text("Location Context", comment: "Location context section header"),
+                    footer: Text("When on, Trio reverse-geocodes your current location (venue + city + country) and adds it to the AI prompt for richer answers. iOS will ask for Location permission on first use. Coordinates stay on-device.", comment: "Location context footer")
+                ) {
+                    Toggle(isOn: $state.locationContextEnabled) {
+                        Label(String(localized: "Inject venue + locality into AI prompt", comment: "Location context toggle"), systemImage: "location")
+                    }
+                    .onChange(of: state.locationContextEnabled) {
+                        state.saveSettings()
+                        if state.locationContextEnabled {
+                            AIInsights_LocationService.shared.requestLocationIfEnabled()
+                        } else {
+                            AIInsights_LocationService.shared.clearLocation()
+                        }
+                    }
+                }
+                .listRowBackground(Color.chart)
+
                 // MARK: - FoodFinder
                 Section(
                     header: Text("FoodFinder", comment: "FoodFinder AI settings section header"),

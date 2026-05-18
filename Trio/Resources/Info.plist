@@ -83,6 +83,10 @@
 	<string>For authorized access to bolus</string>
 	<key>NSCameraUsageDescription</key>
 	<string>The camera is used to analyze food and ingredients with the FoodFinder AI feature.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Trio reverse-geocodes your current location once per AI chat session so the assistant can tailor regional cuisine, climate, and venue context. Coordinates stay on-device; only the venue and city/country labels are sent to the AI provider.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Trio uses Motion &amp; Fitness data so AutoPresets can detect when you start walking or running and automatically activate the override preset you have assigned.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>The microphone is used to dictate meal descriptions in FoodFinder.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
