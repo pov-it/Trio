@@ -14,6 +14,10 @@ extension AIInsights {
         var suggestionHistory: [SuggestionHistoryRecord] = []
         var showApplyDisclaimer: Bool = false
         var pendingApplySuggestion: Suggestion?
+        /// Timestamp of the last successful AI analysis (round-trip OK). nil if AI was never
+        /// called or the most recent call errored. Used to distinguish "nothing analyzed yet"
+        /// from "AI returned zero suggestions" (settings are fine) in the UI.
+        var lastAnalysisCompletedAt: Date?
 
         // Settings from shared AI config
         var apiKey: String = ""
@@ -227,6 +231,7 @@ extension AIInsights {
                 let parsed = parseSuggestions(from: response.text, settingType: settingType)
                 suggestions = parsed
                 saveSuggestions()
+                lastAnalysisCompletedAt = Date()
 
             } catch let error as AIServiceAdapter.AIError {
                 errorMessage = error.errorDescription ?? error.localizedDescription

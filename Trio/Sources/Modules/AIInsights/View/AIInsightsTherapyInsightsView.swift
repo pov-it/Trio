@@ -26,13 +26,29 @@ extension AIInsights {
                     }
 
                     if let error = state.errorMessage {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.orange)
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.orange)
+                                Text(String(localized: "AI analysis failed", comment: "Therapy insights error title"))
+                                    .font(.subheadline.weight(.semibold))
+                            }
                             Text(error)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
+                            Button {
+                                Task { await state.runAnalysis() }
+                            } label: {
+                                Label(
+                                    String(localized: "Retry analysis", comment: "Retry therapy analysis button"),
+                                    systemImage: "arrow.clockwise"
+                                )
+                                .font(.caption)
+                            }
+                            .buttonStyle(.borderless)
+                            .padding(.top, 4)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .padding()
                         .background(
                             RoundedRectangle(cornerRadius: 12)
@@ -40,7 +56,15 @@ extension AIInsights {
                         )
                     }
 
-                    if state.suggestions.isEmpty && !state.isAnalyzing && state.settingsScore == nil && state.suggestionHistory.isEmpty {
+                    if state.suggestions.isEmpty,
+                       !state.isAnalyzing,
+                       state.errorMessage == nil,
+                       state.lastAnalysisCompletedAt != nil
+                    {
+                        noRecommendationsCard
+                    }
+
+                    if state.suggestions.isEmpty && !state.isAnalyzing && state.settingsScore == nil && state.suggestionHistory.isEmpty && state.lastAnalysisCompletedAt == nil {
                         emptyStateView
                     }
                 }
@@ -348,6 +372,43 @@ extension AIInsights {
                 return .crEditor
             }
         }
+
+        // MARK: - No-recommendations card
+
+        /// Shown after a successful analysis that produced zero suggestions. Distinguishes
+        /// "AI ran and said your settings look fine" from "you haven't analyzed yet" and
+        /// from "AI failed" (handled separately above).
+        private var noRecommendationsCard: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundColor(.green)
+                    Text(String(localized: "No changes recommended", comment: "Therapy insights empty-result title"))
+                        .font(.subheadline.weight(.semibold))
+                }
+                Text(String(localized: "The AI reviewed your data and did not suggest any conservative adjustments. This usually means your basal, ISF, and carb ratio are tracking well for the selected period. Try a longer period or run again later if your patterns change.", comment: "Therapy insights empty-result body"))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                if let ts = state.lastAnalysisCompletedAt {
+                    Text(String(localized: "Last analysis: \(Self.timeFormatter.string(from: ts))", comment: "Therapy insights last analyzed timestamp"))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.green.opacity(0.1))
+            )
+        }
+
+        private static let timeFormatter: DateFormatter = {
+            let f = DateFormatter()
+            f.dateStyle = .short
+            f.timeStyle = .short
+            return f
+        }()
 
         // MARK: - Empty State
 

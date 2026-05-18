@@ -1,50 +1,279 @@
 import AVFoundation
+import PhotosUI
 import SwiftUI
 import UIKit
 
-// MARK: - Camera Capture View (UIImagePickerController wrapper)
+// MARK: - Camera Capture (custom AVCapture-based with explicit flash toggle)
 
 extension AIInsights {
-    /// A SwiftUI wrapper around UIImagePickerController for taking food photos.
+    /// Custom camera capture using AVCaptureSession. Provides explicit Flash
+    /// (auto / on / off) and a shortcut to the photo library — UIImagePickerController
+    /// hid those behind small icons that users missed.
     struct CameraCaptureView: UIViewControllerRepresentable {
         @Environment(\.dismiss) var dismiss
         var onImageCaptured: (Data) -> Void
 
-        func makeUIViewController(context: Context) -> UIImagePickerController {
-            let picker = UIImagePickerController()
-            picker.sourceType = .camera
-            picker.cameraCaptureMode = .photo
+        func makeUIViewController(context: Context) -> AICameraCaptureViewController {
+            let vc = AICameraCaptureViewController()
+            vc.onCaptured = { data in
+                onImageCaptured(data)
+                dismiss()
+            }
+            vc.onCancel = { dismiss() }
+            vc.onPickFromLibrary = { data in
+                onImageCaptured(data)
+                dismiss()
+            }
+            return vc
+        }
+
+        func updateUIViewController(_: AICameraCaptureViewController, context _: Context) {}
+    }
+
+    /// Standalone Photo Library picker. Used as the entry-point when the user wants
+    /// to analyze an existing photo instead of taking one.
+    struct PhotoLibraryPickerView: UIViewControllerRepresentable {
+        @Environment(\.dismiss) var dismiss
+        var onImagePicked: (Data) -> Void
+
+        func makeUIViewController(context: Context) -> PHPickerViewController {
+            var config = PHPickerConfiguration()
+            config.filter = .images
+            config.selectionLimit = 1
+            let picker = PHPickerViewController(configuration: config)
             picker.delegate = context.coordinator
             return picker
         }
 
-        func updateUIViewController(_: UIImagePickerController, context _: Context) {}
+        func updateUIViewController(_: PHPickerViewController, context _: Context) {}
 
-        func makeCoordinator() -> Coordinator {
-            Coordinator(self)
+        func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+        final class Coordinator: NSObject, PHPickerViewControllerDelegate {
+            let parent: PhotoLibraryPickerView
+            init(_ parent: PhotoLibraryPickerView) { self.parent = parent }
+
+            func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+                guard let result = results.first else {
+                    parent.dismiss()
+                    return
+                }
+                let provider = result.itemProvider
+                guard provider.canLoadObject(ofClass: UIImage.self) else {
+                    parent.dismiss()
+                    return
+                }
+                provider.loadObject(ofClass: UIImage.self) { [weak self] object, _ in
+                    DispatchQueue.main.async {
+                        if let image = object as? UIImage,
+                           let data = image.jpegData(compressionQuality: 0.7)
+                        {
+                            self?.parent.onImagePicked(data)
+                        }
+                        self?.parent.dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    /// Backing view-controller for `CameraCaptureView`.
+    final class AICameraCaptureViewController: UIViewController, AVCapturePhotoCaptureDelegate, PHPickerViewControllerDelegate {
+        var onCaptured: ((Data) -> Void)?
+        var onCancel: (() -> Void)?
+        var onPickFromLibrary: ((Data) -> Void)?
+
+        private let session = AVCaptureSession()
+        private let photoOutput = AVCapturePhotoOutput()
+        private var previewLayer: AVCaptureVideoPreviewLayer?
+        private weak var device: AVCaptureDevice?
+        private var flashMode: AVCaptureDevice.FlashMode = .auto
+        private weak var flashButton: UIButton?
+
+        override func viewDidLoad() {
+            super.viewDidLoad()
+            view.backgroundColor = .black
+            configureSession()
+            configureUI()
         }
 
-        class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-            let parent: CameraCaptureView
-
-            init(_ parent: CameraCaptureView) {
-                self.parent = parent
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            if session.isRunning {
+                session.stopRunning()
             }
+        }
 
-            func imagePickerController(
-                _: UIImagePickerController,
-                didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-            ) {
-                if let image = info[.originalImage] as? UIImage,
-                   let data = image.jpegData(compressionQuality: 0.7)
-                {
-                    parent.onImageCaptured(data)
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            previewLayer?.frame = view.layer.bounds
+        }
+
+        private func configureSession() {
+            guard let videoDevice = AVCaptureDevice.default(for: .video),
+                  let input = try? AVCaptureDeviceInput(device: videoDevice)
+            else { return }
+            self.device = videoDevice
+
+            session.beginConfiguration()
+            session.sessionPreset = .photo
+            if session.canAddInput(input) {
+                session.addInput(input)
+            }
+            if session.canAddOutput(photoOutput) {
+                session.addOutput(photoOutput)
+            }
+            session.commitConfiguration()
+
+            let preview = AVCaptureVideoPreviewLayer(session: session)
+            preview.videoGravity = .resizeAspectFill
+            preview.frame = view.layer.bounds
+            view.layer.insertSublayer(preview, at: 0)
+            previewLayer = preview
+
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                self?.session.startRunning()
+            }
+        }
+
+        private func configureUI() {
+            // Top bar
+            let topBar = UIView()
+            topBar.translatesAutoresizingMaskIntoConstraints = false
+            topBar.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+            view.addSubview(topBar)
+
+            let cancel = UIButton(type: .system)
+            cancel.setTitle(NSLocalizedString("Cancel", comment: "Cancel camera"), for: .normal)
+            cancel.setTitleColor(.white, for: .normal)
+            cancel.titleLabel?.font = .boldSystemFont(ofSize: 16)
+            cancel.translatesAutoresizingMaskIntoConstraints = false
+            cancel.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
+            topBar.addSubview(cancel)
+
+            let flash = UIButton(type: .system)
+            flash.tintColor = .white
+            flash.setImage(UIImage(systemName: "bolt.badge.a.fill"), for: .normal)
+            flash.imageView?.contentMode = .scaleAspectFit
+            flash.translatesAutoresizingMaskIntoConstraints = false
+            flash.addTarget(self, action: #selector(flashTapped), for: .touchUpInside)
+            topBar.addSubview(flash)
+            flashButton = flash
+
+            NSLayoutConstraint.activate([
+                topBar.topAnchor.constraint(equalTo: view.topAnchor),
+                topBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                topBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                topBar.heightAnchor.constraint(equalToConstant: 96),
+
+                cancel.leadingAnchor.constraint(equalTo: topBar.leadingAnchor, constant: 16),
+                cancel.bottomAnchor.constraint(equalTo: topBar.bottomAnchor, constant: -12),
+
+                flash.trailingAnchor.constraint(equalTo: topBar.trailingAnchor, constant: -16),
+                flash.bottomAnchor.constraint(equalTo: topBar.bottomAnchor, constant: -12),
+                flash.widthAnchor.constraint(equalToConstant: 32),
+                flash.heightAnchor.constraint(equalToConstant: 32)
+            ])
+
+            // Bottom bar
+            let bottomBar = UIView()
+            bottomBar.translatesAutoresizingMaskIntoConstraints = false
+            bottomBar.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+            view.addSubview(bottomBar)
+
+            let library = UIButton(type: .system)
+            library.tintColor = .white
+            library.setImage(UIImage(systemName: "photo.on.rectangle"), for: .normal)
+            library.imageView?.contentMode = .scaleAspectFit
+            library.translatesAutoresizingMaskIntoConstraints = false
+            library.addTarget(self, action: #selector(libraryTapped), for: .touchUpInside)
+            bottomBar.addSubview(library)
+
+            let capture = UIButton(type: .system)
+            capture.translatesAutoresizingMaskIntoConstraints = false
+            capture.backgroundColor = .white
+            capture.layer.cornerRadius = 36
+            capture.layer.borderWidth = 4
+            capture.layer.borderColor = UIColor.lightGray.cgColor
+            capture.addTarget(self, action: #selector(captureTapped), for: .touchUpInside)
+            bottomBar.addSubview(capture)
+
+            NSLayoutConstraint.activate([
+                bottomBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                bottomBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                bottomBar.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+                bottomBar.heightAnchor.constraint(equalToConstant: 140),
+
+                capture.centerXAnchor.constraint(equalTo: bottomBar.centerXAnchor),
+                capture.bottomAnchor.constraint(equalTo: bottomBar.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+                capture.widthAnchor.constraint(equalToConstant: 72),
+                capture.heightAnchor.constraint(equalToConstant: 72),
+
+                library.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor, constant: 28),
+                library.centerYAnchor.constraint(equalTo: capture.centerYAnchor),
+                library.widthAnchor.constraint(equalToConstant: 36),
+                library.heightAnchor.constraint(equalToConstant: 36)
+            ])
+        }
+
+        @objc private func cancelTapped() { onCancel?() }
+
+        @objc private func flashTapped() {
+            switch flashMode {
+            case .auto: flashMode = .on
+            case .on: flashMode = .off
+            case .off: flashMode = .auto
+            @unknown default: flashMode = .auto
+            }
+            let iconName: String
+            switch flashMode {
+            case .auto: iconName = "bolt.badge.a.fill"
+            case .on: iconName = "bolt.fill"
+            case .off: iconName = "bolt.slash.fill"
+            @unknown default: iconName = "bolt.badge.a.fill"
+            }
+            flashButton?.setImage(UIImage(systemName: iconName), for: .normal)
+        }
+
+        @objc private func captureTapped() {
+            let settings = AVCapturePhotoSettings()
+            if photoOutput.supportedFlashModes.contains(flashMode) {
+                settings.flashMode = flashMode
+            }
+            photoOutput.capturePhoto(with: settings, delegate: self)
+        }
+
+        @objc private func libraryTapped() {
+            var config = PHPickerConfiguration()
+            config.filter = .images
+            config.selectionLimit = 1
+            let picker = PHPickerViewController(configuration: config)
+            picker.delegate = self
+            present(picker, animated: true)
+        }
+
+        func photoOutput(
+            _: AVCapturePhotoOutput,
+            didFinishProcessingPhoto photo: AVCapturePhoto,
+            error _: Error?
+        ) {
+            if let data = photo.fileDataRepresentation() {
+                onCaptured?(data)
+            }
+        }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            picker.dismiss(animated: true)
+            guard let provider = results.first?.itemProvider,
+                  provider.canLoadObject(ofClass: UIImage.self) else { return }
+            provider.loadObject(ofClass: UIImage.self) { [weak self] object, _ in
+                DispatchQueue.main.async {
+                    if let image = object as? UIImage,
+                       let data = image.jpegData(compressionQuality: 0.7)
+                    {
+                        self?.onPickFromLibrary?(data)
+                    }
                 }
-                parent.dismiss()
-            }
-
-            func imagePickerControllerDidCancel(_: UIImagePickerController) {
-                parent.dismiss()
             }
         }
     }
