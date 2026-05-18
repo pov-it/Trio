@@ -84,6 +84,8 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var aiAnalysisPeriodDays: Int = 7
     var aiPersonality: AIPersonality = .clinicalExpert
     var openFoodFactsBaseURL: String = AIInsights.defaultOpenFoodFactsBaseURL
+    /// Inject reverse-geocoded venue/locality into AI chat prompt. Off by default; first use triggers iOS Location permission prompt.
+    var aiLocationContextEnabled: Bool = false
 
     /// Selected Garmin watchface (Trio or SwissAlpine)
     var garminWatchface: GarminWatchface = .trio
@@ -426,6 +428,10 @@ extension TrioSettings: Decodable {
 
         if let openFoodFactsBaseURL = try? container.decode(String.self, forKey: .openFoodFactsBaseURL) {
             settings.openFoodFactsBaseURL = openFoodFactsBaseURL
+        }
+
+        if let aiLocationContextEnabled = try? container.decode(Bool.self, forKey: .aiLocationContextEnabled) {
+            settings.aiLocationContextEnabled = aiLocationContextEnabled
         }
 
         self = settings

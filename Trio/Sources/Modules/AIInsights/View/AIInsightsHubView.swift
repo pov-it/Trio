@@ -70,6 +70,28 @@ extension AIInsights {
                             ],
                             destination: AnyView(AIInsights.FoodFinderView(resolver: resolver))
                         )
+
+                        HubMenuCard(
+                            icon: "cup.and.saucer.fill",
+                            title: String(localized: "Caffeine Tracker", comment: "Caffeine tracker feature name"),
+                            description: String(localized: "Log intake; AI uses it for glucose context.", comment: "Caffeine tracker description"),
+                            gradientColors: [
+                                Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902),
+                                Color(red: 0.3, green: 0.7, blue: 0.4)
+                            ],
+                            destination: AnyView(AIInsightsCaffeineLogView())
+                        )
+
+                        HubMenuCard(
+                            icon: "figure.walk.motion",
+                            title: String(localized: "AutoPresets", comment: "AutoPresets feature name"),
+                            description: String(localized: "Auto-activate override presets on walking or running.", comment: "AutoPresets description"),
+                            gradientColors: [
+                                Color(red: 0.3, green: 0.7, blue: 0.4),
+                                Color(red: 0.35, green: 0.55, blue: 0.85)
+                            ],
+                            destination: AnyView(AutoPresetsSettingsView())
+                        )
                     }
                     .padding(.horizontal)
 
