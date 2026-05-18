@@ -2,10 +2,12 @@
 //  AIInsightsAlcoholLogView.swift
 //  Trio
 //
-//  Alcohol logging UI mirroring caffeine tracker shape.
+//  Alcohol logging UI: status, log entry (time + presets + custom ml/ABV/barcode),
+//  recent entries. HealthKit sync + glucose-effect info live in AI Settings /
+//  the toolbar (i) button respectively (see AIInsightsSettingsView and
+//  AIInsightsSharedLogControls).
 //
 
-import HealthKit
 import SwiftUI
 
 private let alcoholAccent = Color(red: 0.8, green: 0.4, blue: 0.2)
@@ -14,38 +16,69 @@ struct AIInsightsAlcoholLogView: View {
     @ObservedObject var tracker: AIInsights_AlcoholTracker = .shared
 
     @State private var logTimestamp: Date = Date()
-    @State private var customDrinks: String = ""
+    @State private var customVolumeMl: String = ""
+    @State private var customAbvPercent: String = ""
     @State private var customSource: String = ""
     @State private var showingCustomEntry = false
+    @State private var showingBarcodeScanner = false
+    @State private var barcodeLookupError: String?
+    @State private var isLookingUpBarcode = false
     @State private var editingEntry: AIInsightsAlcoholEntry?
     @State private var editDrinks: String = ""
     @State private var editSource: String = ""
     @State private var editTimestamp: Date = Date()
     @State private var showingClearConfirmation = false
     @State private var showGlucoseInfo = false
-    @State private var healthKitAuthorized = false
 
     private var currentState: AIInsightsAlcoholState { tracker.currentState() }
+
+    /// Computed standard drinks from current ml + ABV entry. nil if either invalid.
+    private var computedStandardDrinks: Double? {
+        guard let ml = Double(customVolumeMl.replacingOccurrences(of: ",", with: ".")), ml > 0,
+              let abv = Double(customAbvPercent.replacingOccurrences(of: ",", with: ".")), abv > 0
+        else { return nil }
+        return AIInsights_AlcoholTracker.standardDrinks(volumeMl: ml, abvPercent: abv)
+    }
 
     var body: some View {
         List {
             statusSection
-            timestampSection
-            quickAddSection
-            if showingCustomEntry {
-                customEntrySection
-            }
-            glucoseEffectSection
-            healthKitSection
+            logEntrySection
             recentEntriesSection
         }
         .navigationTitle(String(localized: "Alcohol Tracker", comment: "Alcohol tracker nav title"))
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showGlucoseInfo = true
+                } label: {
+                    Image(systemName: "info.circle")
+                }
+                .accessibilityLabel(String(localized: "How alcohol affects glucose", comment: "Alcohol info button"))
+            }
+        }
         .sheet(item: $editingEntry) { entry in
             editEntrySheet(entry)
         }
-        .task {
-            await refreshHealthKit()
+        .sheet(isPresented: $showGlucoseInfo) {
+            AIInsightsGlucoseEffectSheet(
+                title: String(localized: "Alcohol & Glucose", comment: "Alcohol info sheet title"),
+                paragraphs: [
+                    String(localized: "Alcohol blocks the liver's ability to release glucose (hepatic gluconeogenesis) for 4–12 hours. In Type 1 diabetes this dramatically raises the risk of hypoglycemia — especially overnight after evening drinking.", comment: "Alcohol info paragraph 1"),
+                    String(localized: "Beer and sweet cocktails carry carbs which can spike BG short-term, then drop low later. Spirits and dry wine carry little to no carbs but the late-hypo effect remains.", comment: "Alcohol info paragraph 2"),
+                    String(localized: "Practical impact: consider raising your overnight target, reducing basal, or eating slow carbs at bedtime when you've had 2+ drinks. The AI assistant flags this window automatically when you log drinks.", comment: "Alcohol info paragraph 3")
+                ]
+            )
+        }
+        .fullScreenCover(isPresented: $showingBarcodeScanner) {
+            AIInsights.BarcodeScannerView { barcode in
+                Task { await lookupBarcode(barcode) }
+            }
+            .ignoresSafeArea()
+        }
+        .onAppear {
+            logTimestamp = Date()
         }
     }
 
@@ -100,36 +133,12 @@ struct AIInsightsAlcoholLogView: View {
         }
     }
 
-    // MARK: - Timestamp
+    // MARK: - Log entry
 
-    private var timestampSection: some View {
-        Section(
-            header: Text(String(localized: "Log Time", comment: "Alcohol log time section")),
-            footer: Text(String(localized: "Time used when you tap a preset or add a custom entry. Resets to now after each log.", comment: "Alcohol log time footer"))
-        ) {
-            DatePicker(
-                String(localized: "When", comment: "Alcohol entry timestamp label"),
-                selection: $logTimestamp,
-                in: ...Date(),
-                displayedComponents: [.date, .hourAndMinute]
-            )
-            if abs(logTimestamp.timeIntervalSinceNow) > 60 {
-                Button(action: { logTimestamp = Date() }) {
-                    HStack {
-                        Image(systemName: "arrow.uturn.backward.circle")
-                        Text(String(localized: "Reset to Now", comment: "Reset alcohol log timestamp"))
-                    }
-                    .font(.caption)
-                    .foregroundColor(alcoholAccent)
-                }
-            }
-        }
-    }
+    private var logEntrySection: some View {
+        Section(header: Text(String(localized: "Log Drink", comment: "Alcohol log section"))) {
+            AIInsightsLogTimeRow(timestamp: $logTimestamp)
 
-    // MARK: - Quick add
-
-    private var quickAddSection: some View {
-        Section(header: Text(String(localized: "Quick Add", comment: "Alcohol quick add section"))) {
             let presets = AIInsightsAlcoholPreset.defaults
             let columns = [GridItem(.flexible()), GridItem(.flexible())]
 
@@ -163,106 +172,119 @@ struct AIInsightsAlcoholLogView: View {
             Button(action: { showingCustomEntry.toggle() }) {
                 HStack {
                     Image(systemName: showingCustomEntry ? "minus.circle" : "plus.circle")
-                    Text(String(localized: "Custom Entry", comment: "Toggle custom alcohol entry"))
+                    Text(String(localized: "Custom Entry (ml + ABV%)", comment: "Toggle custom alcohol entry"))
                 }
                 .font(.subheadline)
                 .foregroundColor(alcoholAccent)
             }
+
+            if showingCustomEntry {
+                customEntryFields
+            }
         }
     }
 
-    // MARK: - Custom
-
-    private var customEntrySection: some View {
-        Section(header: Text(String(localized: "Custom Drink Entry", comment: "Custom alcohol entry section"))) {
-            TextField(String(localized: "Standard drinks (e.g. 1.5)", comment: "Alcohol drinks field"), text: $customDrinks)
+    /// Custom alcohol entry: volume in ml + ABV %. Derives standard drinks via
+    /// AIInsights_AlcoholTracker.standardDrinks(volumeMl:abvPercent:). Barcode
+    /// button kicks off an OpenFoodFacts lookup that auto-fills these fields.
+    @ViewBuilder
+    private var customEntryFields: some View {
+        HStack {
+            TextField(String(localized: "Volume (ml)", comment: "Alcohol volume field"), text: $customVolumeMl)
                 .keyboardType(.decimalPad)
-            TextField(String(localized: "Source (e.g. IPA)", comment: "Alcohol source field"), text: $customSource)
-
-            Button(action: {
-                if let drinks = Double(customDrinks.replacingOccurrences(of: ",", with: ".")), drinks > 0 {
-                    let source = customSource.isEmpty ? String(localized: "Custom", comment: "Default custom source label") : customSource
-                    tracker.logDrink(standardDrinks: drinks, source: source, at: logTimestamp)
-                    customDrinks = ""
-                    customSource = ""
-                    showingCustomEntry = false
-                    logTimestamp = Date()
-                }
-            }) {
-                HStack {
-                    Spacer()
-                    Text(String(localized: "Add Entry", comment: "Add alcohol entry button"))
-                        .fontWeight(.medium)
-                    Spacer()
-                }
-                .foregroundColor(.white)
-                .padding(.vertical, 8)
-                .background((Double(customDrinks.replacingOccurrences(of: ",", with: ".")) ?? 0) > 0 ? alcoholAccent : Color.gray)
-                .cornerRadius(8)
-            }
-            .buttonStyle(.plain)
-            .disabled((Double(customDrinks.replacingOccurrences(of: ",", with: ".")) ?? 0) <= 0)
+            TextField(String(localized: "ABV (%)", comment: "Alcohol ABV field"), text: $customAbvPercent)
+                .keyboardType(.decimalPad)
         }
-    }
 
-    // MARK: - Glucose effect
+        TextField(String(localized: "Source (e.g. IPA)", comment: "Alcohol source field"), text: $customSource)
 
-    private var glucoseEffectSection: some View {
-        Section {
-            DisclosureGroup(isExpanded: $showGlucoseInfo) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(String(localized: "Alcohol blocks the liver's ability to release glucose (hepatic gluconeogenesis) for 4–12 hours. In Type 1 diabetes this dramatically raises the risk of hypoglycemia — especially overnight after evening drinking.", comment: "Alcohol glucose effect paragraph 1"))
-                    Text(String(localized: "Beer and sweet cocktails carry carbs which can spike BG short-term, then drop low later. Spirits and dry wine carry little to no carbs but the late-hypo effect remains.", comment: "Alcohol glucose effect paragraph 2"))
-                    Text(String(localized: "Practical impact: consider raising your overnight target, reducing basal, or eating slow carbs at bedtime when you've had 2+ drinks. The AI assistant flags this window automatically when you log drinks.", comment: "Alcohol glucose effect paragraph 3"))
+        Button(action: { showingBarcodeScanner = true }) {
+            HStack {
+                if isLookingUpBarcode {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle())
+                } else {
+                    Image(systemName: "barcode.viewfinder")
                 }
+                Text(String(localized: "Scan Barcode", comment: "Alcohol scan barcode"))
+            }
+            .font(.subheadline)
+            .foregroundColor(alcoholAccent)
+        }
+        .disabled(isLookingUpBarcode)
+
+        if let lookupError = barcodeLookupError {
+            Text(lookupError)
                 .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.vertical, 4)
-            } label: {
-                Label(
-                    String(localized: "How alcohol affects your glucose", comment: "Alcohol glucose effect disclosure"),
-                    systemImage: "drop.triangle"
-                )
-                .font(.subheadline)
-            }
+                .foregroundColor(.red)
         }
+
+        if let drinks = computedStandardDrinks {
+            Text(
+                String(
+                    localized: "≈ \(String(format: "%.2f", drinks)) standard drinks",
+                    comment: "Computed standard drinks preview"
+                )
+            )
+            .font(.caption)
+            .foregroundColor(.secondary)
+        }
+
+        Button(action: submitCustomEntry) {
+            HStack {
+                Spacer()
+                Text(String(localized: "Add Entry", comment: "Add alcohol entry button"))
+                    .fontWeight(.medium)
+                Spacer()
+            }
+            .foregroundColor(.white)
+            .padding(.vertical, 8)
+            .background((computedStandardDrinks ?? 0) > 0 ? alcoholAccent : Color.gray)
+            .cornerRadius(8)
+        }
+        .buttonStyle(.plain)
+        .disabled((computedStandardDrinks ?? 0) <= 0)
     }
 
-    // MARK: - HealthKit
-
-    private var healthKitSection: some View {
-        Section(
-            header: Text(String(localized: "Apple Health", comment: "Apple Health section header")),
-            footer: Text(String(localized: "Trio merges alcoholic beverages logged in Apple Health alongside your manual entries. Read-only.", comment: "Alcohol Apple Health footer"))
-        ) {
-            Button(action: {
-                Task {
-                    try? await AIInsightsAlcoholHealthKitBridge.shared.requestAuthorization()
-                    await refreshHealthKit()
-                }
-            }) {
-                HStack {
-                    Image(systemName: "heart.text.square")
-                        .foregroundColor(.red)
-                    Text(String(localized: "Sync from Apple Health now", comment: "Alcohol HealthKit sync button"))
-                    Spacer()
-                    if healthKitAuthorized {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                    }
-                }
-            }
-        }
+    private func submitCustomEntry() {
+        guard let drinks = computedStandardDrinks, drinks > 0 else { return }
+        let source: String = {
+            if !customSource.isEmpty { return customSource }
+            // Auto-build a label when missing: e.g. "330 ml @ 5.0%"
+            return String(
+                format: "%@ ml @ %@%%",
+                customVolumeMl.replacingOccurrences(of: ",", with: "."),
+                customAbvPercent.replacingOccurrences(of: ",", with: ".")
+            )
+        }()
+        tracker.logDrink(standardDrinks: drinks, source: source, at: logTimestamp)
+        customVolumeMl = ""
+        customAbvPercent = ""
+        customSource = ""
+        showingCustomEntry = false
+        logTimestamp = Date()
     }
 
     @MainActor
-    private func refreshHealthKit() async {
-        let bridge = AIInsightsAlcoholHealthKitBridge.shared
-        healthKitAuthorized = bridge.authorizationStatus() == .sharingAuthorized
-        await tracker.syncFromHealthKit()
+    private func lookupBarcode(_ barcode: String) async {
+        isLookingUpBarcode = true
+        barcodeLookupError = nil
+        defer { isLookingUpBarcode = false }
+
+        let baseURL = AIInsights.defaultOpenFoodFactsBaseURL
+        guard let lookup = await AIInsights_AlcoholTracker.lookupBarcode(barcode, baseURL: baseURL) else {
+            barcodeLookupError = String(localized: "Barcode not found. Fill in volume and ABV manually.", comment: "Alcohol barcode lookup failure")
+            return
+        }
+        if customSource.isEmpty { customSource = lookup.name }
+        if let ml = lookup.volumeMl { customVolumeMl = String(format: "%.0f", ml) }
+        if let abv = lookup.abvPercent { customAbvPercent = String(format: "%.1f", abv) }
+        if lookup.volumeMl == nil || lookup.abvPercent == nil {
+            barcodeLookupError = String(localized: "Some fields could not be detected. Please fill in the missing values.", comment: "Alcohol barcode partial lookup")
+        }
     }
 
-    // MARK: - Recent
+    // MARK: - Recent entries
 
     private var recentEntriesSection: some View {
         Section(header: Text(String(localized: "Recent Entries", comment: "Alcohol recent entries section"))) {

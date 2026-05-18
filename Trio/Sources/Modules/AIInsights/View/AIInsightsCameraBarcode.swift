@@ -306,6 +306,8 @@ extension AIInsights {
 
         private var captureSession: AVCaptureSession?
         private var previewLayer: AVCaptureVideoPreviewLayer?
+        private weak var captureDevice: AVCaptureDevice?
+        private weak var torchButton: UIButton?
         private var hasScanned = false
 
         override func viewDidLoad() {
@@ -320,6 +322,7 @@ extension AIInsights {
                 showError()
                 return
             }
+            captureDevice = device
 
             if session.canAddInput(input) {
                 session.addInput(input)
@@ -352,6 +355,23 @@ extension AIInsights {
                 cancelButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
                 cancelButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20)
             ])
+
+            // Torch / flashlight button (only if the device has a torch)
+            if device.hasTorch {
+                let torch = UIButton(type: .system)
+                torch.tintColor = .white
+                torch.setImage(UIImage(systemName: "bolt.slash.fill"), for: .normal)
+                torch.translatesAutoresizingMaskIntoConstraints = false
+                torch.addTarget(self, action: #selector(torchTapped), for: .touchUpInside)
+                view.addSubview(torch)
+                NSLayoutConstraint.activate([
+                    torch.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+                    torch.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+                    torch.widthAnchor.constraint(equalToConstant: 32),
+                    torch.heightAnchor.constraint(equalToConstant: 32)
+                ])
+                torchButton = torch
+            }
 
             // Scan frame overlay
             let frameView = UIView()
@@ -392,7 +412,37 @@ extension AIInsights {
 
         @objc private func cancelTapped() {
             captureSession?.stopRunning()
+            disableTorch()
             onCancel?()
+        }
+
+        @objc private func torchTapped() {
+            guard let device = captureDevice, device.hasTorch else { return }
+            do {
+                try device.lockForConfiguration()
+                if device.torchMode == .on {
+                    device.torchMode = .off
+                    torchButton?.setImage(UIImage(systemName: "bolt.slash.fill"), for: .normal)
+                } else {
+                    try device.setTorchModeOn(level: 1.0)
+                    torchButton?.setImage(UIImage(systemName: "bolt.fill"), for: .normal)
+                }
+                device.unlockForConfiguration()
+            } catch {
+                // Silently ignore torch errors (e.g. device too hot, permission denied).
+            }
+        }
+
+        private func disableTorch() {
+            guard let device = captureDevice, device.hasTorch, device.torchMode == .on else { return }
+            try? device.lockForConfiguration()
+            device.torchMode = .off
+            device.unlockForConfiguration()
+        }
+
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            disableTorch()
         }
 
         func metadataOutput(

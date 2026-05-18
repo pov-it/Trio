@@ -106,6 +106,39 @@ extension AIInsights {
                 }
                 .listRowBackground(Color.chart)
 
+                // MARK: - Apple Health
+                Section(
+                    header: Text(String(localized: "Apple Health", comment: "Apple Health section header")),
+                    footer: Text(String(localized: "Trio reads from Apple Health (no writes). Enabling a source triggers iOS's Health permission prompt the first time. The tracker pages merge HealthKit-sourced entries (heart icon) with manual entries.", comment: "Apple Health section footer"))
+                ) {
+                    Toggle(isOn: $state.healthKitCaffeineEnabled) {
+                        Label(String(localized: "Sync dietary caffeine", comment: "Caffeine HealthKit toggle"), systemImage: "cup.and.saucer.fill")
+                    }
+                    .onChange(of: state.healthKitCaffeineEnabled) {
+                        state.saveSettings()
+                        if state.healthKitCaffeineEnabled {
+                            Task {
+                                try? await AIInsightsCaffeineHealthKitBridge.shared.requestAuthorization()
+                                await AIInsights_CaffeineTracker.shared.syncFromHealthKit()
+                            }
+                        }
+                    }
+
+                    Toggle(isOn: $state.healthKitAlcoholEnabled) {
+                        Label(String(localized: "Sync alcoholic beverages", comment: "Alcohol HealthKit toggle"), systemImage: "wineglass.fill")
+                    }
+                    .onChange(of: state.healthKitAlcoholEnabled) {
+                        state.saveSettings()
+                        if state.healthKitAlcoholEnabled {
+                            Task {
+                                try? await AIInsightsAlcoholHealthKitBridge.shared.requestAuthorization()
+                                await AIInsights_AlcoholTracker.shared.syncFromHealthKit()
+                            }
+                        }
+                    }
+                }
+                .listRowBackground(Color.chart)
+
                 // MARK: - Location Context
                 Section(
                     header: Text("Location Context", comment: "Location context section header"),
