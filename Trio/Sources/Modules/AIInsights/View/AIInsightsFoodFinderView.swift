@@ -56,7 +56,7 @@ extension AIInsights {
             .onAppear(perform: configureView)
             .fullScreenCover(isPresented: $state.showCamera) {
                 AIInsights.CameraCaptureView { imageData in
-                    state.attachImage(imageData)
+                    state.pendingImageForCrop = imageData
                 }
                 .ignoresSafeArea()
             }
@@ -68,9 +68,31 @@ extension AIInsights {
             }
             .fullScreenCover(isPresented: $state.showPhotoPicker) {
                 AIInsights.PhotoLibraryPickerView { imageData in
-                    state.attachImage(imageData)
+                    state.pendingImageForCrop = imageData
                 }
                 .ignoresSafeArea()
+            }
+            .fullScreenCover(isPresented: Binding(
+                get: { state.pendingImageForCrop != nil },
+                set: { if !$0 { state.pendingImageForCrop = nil } }
+            )) {
+                if let data = state.pendingImageForCrop {
+                    AIInsightsImageCropView(
+                        originalData: data,
+                        onComplete: { cropped in
+                            state.attachImage(cropped)
+                            state.pendingImageForCrop = nil
+                        },
+                        onSkip: {
+                            state.attachImage(data)
+                            state.pendingImageForCrop = nil
+                        },
+                        onCancel: {
+                            state.pendingImageForCrop = nil
+                        }
+                    )
+                    .ignoresSafeArea()
+                }
             }
             .alert(
                 ingredientPromptItemID == nil

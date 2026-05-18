@@ -785,6 +785,8 @@
 		AABBCC00000000000000C0C8 /* AIInsightsCaffeineLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B8 /* AIInsightsCaffeineLogView.swift */; };
 		AABBCC00000000000000C0C9 /* AIInsights_AlcoholTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B9 /* AIInsights_AlcoholTracker.swift */; };
 		AABBCC00000000000000C0CA /* AIInsightsAlcoholLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0BA /* AIInsightsAlcoholLogView.swift */; };
+		AABBCC00000000000000C0CB /* AIInsightsSharedLogControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0BB /* AIInsightsSharedLogControls.swift */; };
+		AABBCC00000000000000C0CC /* AIInsightsImageCropView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0BC /* AIInsightsImageCropView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1668,6 +1670,8 @@
 		AABBCC00000000000000B0B8 /* AIInsightsCaffeineLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsCaffeineLogView.swift; sourceTree = "<group>"; };
 		AABBCC00000000000000B0B9 /* AIInsights_AlcoholTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsights_AlcoholTracker.swift; sourceTree = "<group>"; };
 		AABBCC00000000000000B0BA /* AIInsightsAlcoholLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsAlcoholLogView.swift; sourceTree = "<group>"; };
+		AABBCC00000000000000B0BB /* AIInsightsSharedLogControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsSharedLogControls.swift; sourceTree = "<group>"; };
+		AABBCC00000000000000B0BC /* AIInsightsImageCropView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsImageCropView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -1776,6 +1780,8 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 				E5F6A7B8C9D0E1F2A3B4C5D6 /* AIInsightsSettingsView.swift */,
 				AABBCC00000000000000B0B8 /* AIInsightsCaffeineLogView.swift */,
 				AABBCC00000000000000B0BA /* AIInsightsAlcoholLogView.swift */,
+				AABBCC00000000000000B0BB /* AIInsightsSharedLogControls.swift */,
+				AABBCC00000000000000B0BC /* AIInsightsImageCropView.swift */,
 			);
 			path = View;
 			sourceTree = "<group>";
@@ -4400,6 +4406,8 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 				AABBCC00000000000000C0C8 /* AIInsightsCaffeineLogView.swift in Sources */,
 				AABBCC00000000000000C0C9 /* AIInsights_AlcoholTracker.swift in Sources */,
 				AABBCC00000000000000C0CA /* AIInsightsAlcoholLogView.swift in Sources */,
+				AABBCC00000000000000C0CB /* AIInsightsSharedLogControls.swift in Sources */,
+				AABBCC00000000000000C0CC /* AIInsightsImageCropView.swift in Sources */,
 				E8F324C38D0BBA22600C21E1 /* AIInsights_SuggestionHistory.swift in Sources */,
 				5DF1E896A440773414E19B3A /* AIInsights_BackgroundMonitor.swift in Sources */,
 				5F285860DCE234306124B2C4 /* AIInsightsTherapyInsightsView.swift in Sources */,

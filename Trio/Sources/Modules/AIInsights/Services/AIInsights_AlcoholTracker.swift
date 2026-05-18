@@ -58,6 +58,12 @@ struct AIInsightsAlcoholState: Equatable {
     )
 }
 
+struct AlcoholBarcodeLookup {
+    let name: String
+    let volumeMl: Double?
+    let abvPercent: Double?
+}
+
 struct AIInsightsAlcoholPreset: Identifiable {
     let id = UUID()
     let name: String
@@ -180,6 +186,85 @@ final class AIInsights_AlcoholTracker: ObservableObject, @unchecked Sendable {
     func clearAllManualEntries() {
         saveManualEntries([])
         rebuildMergedEntries()
+    }
+
+    // MARK: - Math helpers
+
+    /// Convert "drank volume in ml + ABV %" into US standard drinks.
+    /// Formula: ml × (abv/100) × ethanolDensity ÷ 14
+    /// where ethanolDensity = 0.789 g/ml, 14 g ethanol = 1 US standard drink.
+    static func standardDrinks(volumeMl: Double, abvPercent: Double) -> Double {
+        let ethanolGrams = volumeMl * (abvPercent / 100.0) * 0.789
+        return ethanolGrams / 14.0
+    }
+
+    // MARK: - Barcode lookup (OpenFoodFacts)
+
+    /// Looks up a barcode on OpenFoodFacts and tries to extract drink name, serving
+    /// volume in ml, and ABV %. Returns nil for any field that cannot be resolved.
+    static func lookupBarcode(_ barcode: String, baseURL: String) async -> AlcoholBarcodeLookup? {
+        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = trimmed.isEmpty ? "https://world.openfoodfacts.org/api/v2" : trimmed
+        guard let url = URL(string: "\(base)/product/\(barcode).json?fields=product_name,serving_size,serving_quantity,nutriments") else {
+            return nil
+        }
+
+        var request = URLRequest(url: url)
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+        request.setValue("TrioAIInsights/\(appVersion) (https://github.com/pov-it/Trio)", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let product = json["product"] as? [String: Any]
+            else {
+                return nil
+            }
+
+            let name = (product["product_name"] as? String) ?? barcode
+            let nutriments = product["nutriments"] as? [String: Any] ?? [:]
+
+            // OFF stores ABV either in `alcohol_value` (%) or `alcohol_100g` (g/100g — convert).
+            var abv: Double?
+            if let raw = doubleValueAny(nutriments["alcohol_value"]) {
+                abv = raw
+            } else if let alcoholPer100g = doubleValueAny(nutriments["alcohol_100g"]) {
+                // Approx convert grams alcohol per 100 g to % ABV (assumes density ~1 g/ml; close enough for beer/wine.)
+                abv = alcoholPer100g / 0.789
+            }
+
+            var volumeMl: Double?
+            if let raw = doubleValueAny(product["serving_quantity"]) {
+                volumeMl = raw
+            } else if let str = product["serving_size"] as? String {
+                volumeMl = parseMl(from: str)
+            }
+
+            return AlcoholBarcodeLookup(name: name, volumeMl: volumeMl, abvPercent: abv)
+        } catch {
+            return nil
+        }
+    }
+
+    private static func doubleValueAny(_ value: Any?) -> Double? {
+        if let v = value as? Double { return v }
+        if let v = value as? Int { return Double(v) }
+        if let v = value as? String {
+            return Double(v.replacingOccurrences(of: ",", with: "."))
+        }
+        return nil
+    }
+
+    private static func parseMl(from text: String) -> Double? {
+        let pattern = #"(\d+(?:[.,]\d+)?)\s*ml"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = regex.firstMatch(in: text, options: [], range: range),
+              let valueRange = Range(match.range(at: 1), in: text)
+        else { return nil }
+        return Double(text[valueRange].replacingOccurrences(of: ",", with: "."))
     }
 
     // MARK: - HealthKit

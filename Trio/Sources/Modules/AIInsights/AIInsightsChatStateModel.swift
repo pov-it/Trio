@@ -48,6 +48,15 @@ extension AIInsights {
             // Fire a fresh location lookup if the user has opted in.
             AIInsights_LocationService.shared.requestLocationIfEnabled()
 
+            // Pull latest HealthKit-sourced caffeine / alcohol entries when opted in.
+            // Silent on auth failure — tracker buildPromptContext gracefully no-ops.
+            if provider.settings.aiHealthKitCaffeineEnabled {
+                Task { await AIInsights_CaffeineTracker.shared.syncFromHealthKit() }
+            }
+            if provider.settings.aiHealthKitAlcoholEnabled {
+                Task { await AIInsights_AlcoholTracker.shared.syncFromHealthKit() }
+            }
+
             loadConversations()
             startNewConversation()
             loadKnowledgeBase()

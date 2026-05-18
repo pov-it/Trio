@@ -99,6 +99,10 @@ extension AIInsights {
         var showCamera: Bool = false
         var showBarcodeScanner: Bool = false
         var showPhotoPicker: Bool = false
+        /// Image that just came back from camera/library — view shows the
+        /// crop sheet while this is non-nil. Setting it nil dismisses the
+        /// sheet (e.g. on Skip or Cancel).
+        var pendingImageForCrop: Data?
         var capturedImageData: Data?
         var isDictating: Bool = false
 

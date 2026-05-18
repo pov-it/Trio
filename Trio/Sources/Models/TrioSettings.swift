@@ -86,6 +86,11 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var openFoodFactsBaseURL: String = AIInsights.defaultOpenFoodFactsBaseURL
     /// Inject reverse-geocoded venue/locality into AI chat prompt. Off by default; first use triggers iOS Location permission prompt.
     var aiLocationContextEnabled: Bool = false
+    /// Read dietaryCaffeine from Apple Health and merge with manual caffeine entries.
+    /// First enable triggers HealthKit read-authorization prompt.
+    var aiHealthKitCaffeineEnabled: Bool = false
+    /// Read numberOfAlcoholicBeverages from Apple Health and merge with manual entries.
+    var aiHealthKitAlcoholEnabled: Bool = false
 
     /// Selected Garmin watchface (Trio or SwissAlpine)
     var garminWatchface: GarminWatchface = .trio
@@ -432,6 +437,14 @@ extension TrioSettings: Decodable {
 
         if let aiLocationContextEnabled = try? container.decode(Bool.self, forKey: .aiLocationContextEnabled) {
             settings.aiLocationContextEnabled = aiLocationContextEnabled
+        }
+
+        if let aiHealthKitCaffeineEnabled = try? container.decode(Bool.self, forKey: .aiHealthKitCaffeineEnabled) {
+            settings.aiHealthKitCaffeineEnabled = aiHealthKitCaffeineEnabled
+        }
+
+        if let aiHealthKitAlcoholEnabled = try? container.decode(Bool.self, forKey: .aiHealthKitAlcoholEnabled) {
+            settings.aiHealthKitAlcoholEnabled = aiHealthKitAlcoholEnabled
         }
 
         self = settings

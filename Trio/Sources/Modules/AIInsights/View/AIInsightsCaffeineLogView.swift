@@ -65,7 +65,6 @@ struct AIInsightsCaffeineLogView: View {
     @State private var showingClearConfirmation = false
     @State private var activeInfo: AIInsightsCaffeineInfoTip?
     @State private var showGlucoseInfo = false
-    @State private var healthKitAuthorized = false
 
     @Environment(\.dismiss) private var dismiss
 
@@ -74,22 +73,36 @@ struct AIInsightsCaffeineLogView: View {
     var body: some View {
         List {
             currentLevelSection
-            timestampSection
-            quickAddSection
-            if showingCustomEntry {
-                customEntrySection
-            }
-            glucoseEffectSection
-            healthKitSection
+            logEntrySection
             recentEntriesSection
         }
         .navigationTitle(String(localized: "Caffeine Tracker", comment: "Caffeine tracker nav title"))
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showGlucoseInfo = true
+                } label: {
+                    Image(systemName: "info.circle")
+                }
+                .accessibilityLabel(String(localized: "How caffeine affects glucose", comment: "Caffeine info button"))
+            }
+        }
         .sheet(item: $editingEntry) { entry in
             editEntrySheet(entry)
         }
-        .task {
-            await refreshHealthKit()
+        .sheet(isPresented: $showGlucoseInfo) {
+            AIInsightsGlucoseEffectSheet(
+                title: String(localized: "Caffeine & Glucose", comment: "Caffeine info sheet title"),
+                paragraphs: [
+                    String(localized: "Caffeine raises cortisol and adrenaline. In Type 1 diabetes this can reduce insulin sensitivity by roughly 15–30% for a few hours, producing slow post-meal glucose rises 30–90 minutes after intake — even without carbs.", comment: "Caffeine info paragraph 1"),
+                    String(localized: "Effect is dose-dependent and most noticeable above ~200 mg in one sitting (≈ 2 cups of brewed coffee). Tolerance lowers the effect somewhat for daily drinkers.", comment: "Caffeine info paragraph 2"),
+                    String(localized: "Practical impact: morning coffee can blunt your breakfast bolus; an energy drink mid-afternoon can drift you upward into dinner. The AI assistant uses your logged caffeine to flag these patterns.", comment: "Caffeine info paragraph 3")
+                ]
+            )
+        }
+        .onAppear {
+            logTimestamp = Date()
         }
     }
 
@@ -169,37 +182,12 @@ struct AIInsightsCaffeineLogView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Timestamp
+    // MARK: - Log Entry
 
-    private var timestampSection: some View {
-        Section(
-            header: Text(String(localized: "Log Time", comment: "Caffeine log time section")),
-            footer: Text(String(localized: "Time used when you tap a preset or add a custom entry below. Defaults to now after each log.", comment: "Caffeine log time footer"))
-        ) {
-            DatePicker(
-                String(localized: "When", comment: "Caffeine entry timestamp label"),
-                selection: $logTimestamp,
-                in: ...Date(),
-                displayedComponents: [.date, .hourAndMinute]
-            )
+    private var logEntrySection: some View {
+        Section(header: Text(String(localized: "Log Caffeine", comment: "Caffeine log section"))) {
+            AIInsightsLogTimeRow(timestamp: $logTimestamp)
 
-            if abs(logTimestamp.timeIntervalSinceNow) > 60 {
-                Button(action: { logTimestamp = Date() }) {
-                    HStack {
-                        Image(systemName: "arrow.uturn.backward.circle")
-                        Text(String(localized: "Reset to Now", comment: "Reset caffeine log timestamp"))
-                    }
-                    .font(.caption)
-                    .foregroundColor(caffeineGreen)
-                }
-            }
-        }
-    }
-
-    // MARK: - Quick Add
-
-    private var quickAddSection: some View {
-        Section(header: Text(String(localized: "Quick Add", comment: "Caffeine quick add section"))) {
             let presets = AIInsightsCaffeinePreset.defaults
             let columns = [GridItem(.flexible()), GridItem(.flexible())]
 
@@ -238,97 +226,36 @@ struct AIInsightsCaffeineLogView: View {
                 .font(.subheadline)
                 .foregroundColor(caffeineGreen)
             }
-        }
-    }
 
-    // MARK: - Custom Entry
+            if showingCustomEntry {
+                TextField(String(localized: "Amount (mg)", comment: "Caffeine amount field"), text: $customMg)
+                    .keyboardType(.decimalPad)
+                TextField(String(localized: "Source (e.g. Matcha Latte)", comment: "Caffeine source field"), text: $customSource)
 
-    private var customEntrySection: some View {
-        Section(header: Text(String(localized: "Custom Caffeine Entry", comment: "Custom caffeine entry section"))) {
-            TextField(String(localized: "Amount (mg)", comment: "Caffeine amount field"), text: $customMg)
-                .keyboardType(.decimalPad)
-            TextField(String(localized: "Source (e.g. Matcha Latte)", comment: "Caffeine source field"), text: $customSource)
-
-            Button(action: {
-                if let mg = Double(customMg.replacingOccurrences(of: ",", with: ".")), mg > 0 {
-                    let source = customSource.isEmpty ? String(localized: "Custom", comment: "Default custom source label") : customSource
-                    tracker.logCaffeine(milligrams: mg, source: source, at: logTimestamp)
-                    customMg = ""
-                    customSource = ""
-                    showingCustomEntry = false
-                    logTimestamp = Date()
-                }
-            }) {
-                HStack {
-                    Spacer()
-                    Text(String(localized: "Add Entry", comment: "Add caffeine entry button")).fontWeight(.medium)
-                    Spacer()
-                }
-                .foregroundColor(.white)
-                .padding(.vertical, 8)
-                .background((Double(customMg.replacingOccurrences(of: ",", with: ".")) ?? 0) > 0 ? caffeineGreen : Color.gray)
-                .cornerRadius(8)
-            }
-            .buttonStyle(.plain)
-            .disabled((Double(customMg.replacingOccurrences(of: ",", with: ".")) ?? 0) <= 0)
-        }
-    }
-
-    // MARK: - Glucose Effect Info
-
-    private var glucoseEffectSection: some View {
-        Section {
-            DisclosureGroup(isExpanded: $showGlucoseInfo) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(String(localized: "Caffeine raises cortisol and adrenaline. In Type 1 diabetes this can reduce insulin sensitivity by roughly 15–30% for a few hours, producing slow post-meal glucose rises 30–90 minutes after intake — even without carbs.", comment: "Caffeine glucose effect paragraph 1"))
-                    Text(String(localized: "Effect is dose-dependent and most noticeable above ~200 mg in one sitting (≈ 2 cups of brewed coffee). Tolerance lowers the effect somewhat for daily drinkers.", comment: "Caffeine glucose effect paragraph 2"))
-                    Text(String(localized: "Practical impact: morning coffee can blunt your breakfast bolus; an energy drink mid-afternoon can drift you upward into dinner. The AI assistant uses your logged caffeine to flag these patterns.", comment: "Caffeine glucose effect paragraph 3"))
-                }
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.vertical, 4)
-            } label: {
-                Label(
-                    String(localized: "How caffeine affects your glucose", comment: "Caffeine glucose effect disclosure"),
-                    systemImage: "drop.triangle"
-                )
-                .font(.subheadline)
-            }
-        }
-    }
-
-    // MARK: - HealthKit Sync
-
-    private var healthKitSection: some View {
-        Section(
-            header: Text(String(localized: "Apple Health", comment: "Apple Health section header")),
-            footer: Text(String(localized: "Trio merges dietary caffeine logged in Apple Health alongside your manual entries. Read-only — Trio does not write caffeine to Apple Health.", comment: "Caffeine Apple Health footer"))
-        ) {
-            Button(action: {
-                Task {
-                    try? await AIInsightsCaffeineHealthKitBridge.shared.requestAuthorization()
-                    await refreshHealthKit()
-                }
-            }) {
-                HStack {
-                    Image(systemName: "heart.text.square")
-                        .foregroundColor(.red)
-                    Text(String(localized: "Sync from Apple Health now", comment: "Caffeine HealthKit sync button"))
-                    Spacer()
-                    if healthKitAuthorized {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
+                Button(action: {
+                    if let mg = Double(customMg.replacingOccurrences(of: ",", with: ".")), mg > 0 {
+                        let source = customSource.isEmpty ? String(localized: "Custom", comment: "Default custom source label") : customSource
+                        tracker.logCaffeine(milligrams: mg, source: source, at: logTimestamp)
+                        customMg = ""
+                        customSource = ""
+                        showingCustomEntry = false
+                        logTimestamp = Date()
                     }
+                }) {
+                    HStack {
+                        Spacer()
+                        Text(String(localized: "Add Entry", comment: "Add caffeine entry button")).fontWeight(.medium)
+                        Spacer()
+                    }
+                    .foregroundColor(.white)
+                    .padding(.vertical, 8)
+                    .background((Double(customMg.replacingOccurrences(of: ",", with: ".")) ?? 0) > 0 ? caffeineGreen : Color.gray)
+                    .cornerRadius(8)
                 }
+                .buttonStyle(.plain)
+                .disabled((Double(customMg.replacingOccurrences(of: ",", with: ".")) ?? 0) <= 0)
             }
         }
-    }
-
-    @MainActor
-    private func refreshHealthKit() async {
-        let bridge = AIInsightsCaffeineHealthKitBridge.shared
-        healthKitAuthorized = bridge.authorizationStatus() == .sharingAuthorized
-        await tracker.syncFromHealthKit()
     }
 
     // MARK: - Recent Entries

@@ -16,6 +16,8 @@ extension AIInsights {
         var aiEnabled: Bool = false
         var openFoodFactsBaseURL: String = AIInsights.defaultOpenFoodFactsBaseURL
         var locationContextEnabled: Bool = false
+        var healthKitCaffeineEnabled: Bool = false
+        var healthKitAlcoholEnabled: Bool = false
 
         override func subscribe() {
             if let savedKey = provider.keychain.getValue(String.self, forKey: "ai_insights_api_key") {
@@ -31,6 +33,8 @@ extension AIInsights {
             aiEnabled = provider.settings.aiEnabled
             openFoodFactsBaseURL = provider.settings.openFoodFactsBaseURL
             locationContextEnabled = provider.settings.aiLocationContextEnabled
+            healthKitCaffeineEnabled = provider.settings.aiHealthKitCaffeineEnabled
+            healthKitAlcoholEnabled = provider.settings.aiHealthKitAlcoholEnabled
 
             // Wire the location service's gate to the live settings value so the
             // singleton can self-check before geocoding or emitting prompt context.
@@ -57,6 +61,8 @@ extension AIInsights {
             settings.aiEnabled = aiEnabled
             settings.openFoodFactsBaseURL = openFoodFactsBaseURL
             settings.aiLocationContextEnabled = locationContextEnabled
+            settings.aiHealthKitCaffeineEnabled = healthKitCaffeineEnabled
+            settings.aiHealthKitAlcoholEnabled = healthKitAlcoholEnabled
             provider.settings = settings
         }
 
