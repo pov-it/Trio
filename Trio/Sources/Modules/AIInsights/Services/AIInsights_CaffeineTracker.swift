@@ -256,7 +256,9 @@ final class AIInsights_CaffeineTracker: ObservableObject, @unchecked Sendable {
 
     func buildCaffeinePromptContext(at now: Date = Date()) -> String {
         let state = currentState(at: now)
-        guard state.entriesLast24h > 0 else { return "" }
+        guard state.entriesLast24h > 0 else {
+            return "## Caffeine Intake\n- No caffeine entries logged in the last 24h. (Caffeine tracking is available; the user may not have logged anything yet.)\n"
+        }
 
         var ctx = "## Caffeine Intake\n"
         ctx += "- Current estimated caffeine level: \(String(format: "%.0f", state.currentLevelMg)) mg\n"

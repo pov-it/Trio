@@ -101,9 +101,16 @@ extension AIInsights {
                             Text(currentConversationTitle)
                                 .font(.headline)
                                 .lineLimit(1)
+                                .truncationMode(.tail)
+                                .layoutPriority(1)
                             Image(systemName: "chevron.down")
                                 .font(.caption.bold())
                         }
+                        // Cap the title's width so it can never overlap the
+                        // trailing gear icon, even on narrower devices. iOS
+                        // doesn't reserve space for principal items, so we
+                        // have to constrain it ourselves.
+                        .frame(maxWidth: 220)
                         .foregroundStyle(.primary)
                     }
                     .buttonStyle(.plain)

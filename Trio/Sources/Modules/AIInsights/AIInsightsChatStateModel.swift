@@ -824,6 +824,14 @@ extension AIInsights {
             - If data is insufficient, say so clearly rather than guessing
             - When a setting review, meal analysis, or therapy edit would help, explicitly mention the next in-app view to open. The app may render those as interactive action cards.
             - Use inline trend tokens in prose when helpful: (arrowUp), (arrowDown), (arrowFlat), (arrowDoubleUp), (arrowDoubleDown), (arrowUpRight), (arrowDownRight).
+            - When a trend token follows a glucose value, place it BETWEEN the value and the unit, not after the unit. Correct: "7.2 (arrowUp) mmol/L". Wrong: "7.2 mmol/L (arrowUp)". Same rule for mg/dL.
+
+            DATA SOURCES AVAILABLE TO YOU (sections appear below when populated):
+            - "## Caffeine Intake": recent caffeine entries with mg, source, time, and current estimated level. Use this to explain post-coffee glucose drift or blunted insulin response.
+            - "## Alcohol Intake": recent drinks with standard-drink count, source, time, and late-hypo risk window. Use this to flag overnight/post-meal hypo risk.
+            - "## Recent Meals (FoodFinder)": meals the user analyzed with FoodFinder in the last 48h (name, carbs/fat/protein/fiber/calories, ingredients). Reference these by name when the user asks about meals or post-prandial patterns.
+            - "## AutoPresets Activity Log": automatic activations of override presets triggered by detected walking/running/cycling. Use these to correlate exercise with glucose patterns and to bring up delayed-hypo risk windows after sustained activity.
+            - When the user asks "what did I eat / drink / do" or similar, look in these sections FIRST before saying you don't have the data. If a section says "No entries in the last X hours", you can tell the user the feature exists but they haven't logged anything yet, and offer to walk them through it.
             - Mention Trio setting names naturally, for example basal rates, ISF, carb ratios, overrides, and temporary targets. The app turns those words into inline links.
             - In Dutch answers, prefer "basaalwaarden" over "basal rates" and "koolhydraatratio's" over "carb ratios". "override" and "overrides" may stay as-is.
             - For value changes, write current value -> proposed value, then explain in words. Do not add another arrow after the proposed value.
@@ -870,6 +878,16 @@ extension AIInsights {
             let alcoholContext = AIInsights_AlcoholTracker.shared.buildAlcoholPromptContext()
             if !alcoholContext.isEmpty {
                 prompt += "\n\n" + alcoholContext
+            }
+
+            let mealContext = AIInsights.FoodFinderStateModel.buildMealPromptContext()
+            if !mealContext.isEmpty {
+                prompt += "\n\n" + mealContext
+            }
+
+            let autoPresetsContext = AutoPresetsCoordinator.shared.buildAutoPresetsPromptContext()
+            if !autoPresetsContext.isEmpty {
+                prompt += "\n\n" + autoPresetsContext
             }
 
             let locationContext = AIInsights_LocationService.shared.locationContextForPrompt()

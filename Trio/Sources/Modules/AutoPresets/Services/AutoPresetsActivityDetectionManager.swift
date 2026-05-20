@@ -59,6 +59,16 @@ final class AutoPresetsActivityDetectionManager {
     var activityStopInterval: TimeInterval = 300
     var continuousActivityTime: TimeInterval = 30
     var requireHighConfidence: Bool = false
+    /// Per-activity override; coordinator pushes this from `AutoPresetsSettings`.
+    /// Walking/running/cycling read from here before falling back to the global.
+    var perActivityContinuousTime: [String: TimeInterval] = [:]
+
+    private func continuousTime(for activity: AutoPresetsActivityType) -> TimeInterval {
+        if let override = perActivityContinuousTime[activity.rawValue], override > 0 {
+            return override
+        }
+        return activity.defaultContinuousTime
+    }
 
     private var _continuousActivityTimer: Timer?
     private var _activityStopTimer: Timer?
@@ -202,14 +212,16 @@ final class AutoPresetsActivityDetectionManager {
             guard acceptable else { return }
 
             var type: AutoPresetsActivityType?
-            if self.supportedActivities.contains(.walking), activity.walking,
-               !activity.automotive, !activity.cycling
-            {
-                type = .walking
+            if self.supportedActivities.contains(.cycling), activity.cycling, !activity.automotive {
+                type = .cycling
             } else if self.supportedActivities.contains(.running), activity.running,
                       !activity.automotive, !activity.cycling
             {
                 type = .running
+            } else if self.supportedActivities.contains(.walking), activity.walking,
+                      !activity.automotive, !activity.cycling
+            {
+                type = .walking
             }
 
             if let type {
@@ -217,8 +229,22 @@ final class AutoPresetsActivityDetectionManager {
                     self._detectedActivityType = type
                     self._lastClassifierTime = Date()
                 }
+                // Cycling doesn't produce pedometer steps, so kick off the
+                // continuous-activity timer directly when the classifier
+                // first reports it. Walking/running stays pedometer-gated.
+                if type == .cycling {
+                    let needsTimerStart = self.stateQueue.sync { () -> Bool in
+                        self._currentActivity == nil && self._continuousActivityTimer == nil
+                    }
+                    if needsTimerStart {
+                        DispatchQueue.main.async { [weak self] in
+                            self?.startContinuousActivityTimer(for: .cycling)
+                        }
+                    }
+                }
             } else {
-                let shouldStop = activity.confidence != .low && (activity.automotive || activity.cycling)
+                let cyclingIsStop = activity.cycling && !self.supportedActivities.contains(.cycling)
+                let shouldStop = activity.confidence != .low && (activity.automotive || cyclingIsStop)
                 if shouldStop {
                     DispatchQueue.main.async { [weak self] in
                         self?.handleNonTargetActivity()
@@ -244,7 +270,7 @@ final class AutoPresetsActivityDetectionManager {
         }
 
         let stepsAtThreshold = stateQueue.sync { _totalSteps }
-        let timerInterval = continuousActivityTime
+        let timerInterval = continuousTime(for: activity)
         let timerStartTime = Date()
 
         let newTimer = Timer(timeInterval: timerInterval, repeats: false) { [weak self] timer in
@@ -288,6 +314,37 @@ final class AutoPresetsActivityDetectionManager {
                 }
             } else {
                 classifierConfirmed = true
+            }
+
+            // Cycling: confirm purely from the motion classifier since no
+            // pedometer steps are produced. Require the classifier to still
+            // report cycling within the last 60s.
+            if activity == .cycling {
+                let classifierStillCycling: Bool = {
+                    guard classifierType == .cycling, let cTime = classifierTime else { return false }
+                    return now.timeIntervalSince(cTime) <= 60
+                }()
+
+                if classifierStillCycling {
+                    self.stateQueue.sync {
+                        self._currentActivity = .cycling
+                        self._continuousActivityTimer = nil
+                    }
+                    os_log(
+                        "Cycling confirmed after %.1fs (classifier-only)",
+                        log: self.log,
+                        type: .info,
+                        elapsed
+                    )
+                    self.delegate?.activityDetectionDidConfirm(.cycling)
+                    self.startActivityStopTimer()
+                } else {
+                    self.stateQueue.sync {
+                        self._continuousActivityTimer = nil
+                    }
+                }
+                timer.invalidate()
+                return
             }
 
             let pedometerSufficient = stepIsRecent && additionalSteps >= minAdditionalSteps

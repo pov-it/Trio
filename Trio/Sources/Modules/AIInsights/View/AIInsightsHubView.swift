@@ -61,6 +61,17 @@ extension AIInsights {
                         )
 
                         HubMenuCard(
+                            icon: "calendar.badge.clock",
+                            title: String(localized: "Recap", comment: "Periodic recap feature name"),
+                            description: String(localized: "Weekly or monthly observations of your patterns.", comment: "Periodic recap description"),
+                            gradientColors: [
+                                Color(red: 0.5803921569, green: 0.4, blue: 0.8),
+                                Color(red: 0.4862745098, green: 0.5450980392, blue: 0.9529411765)
+                            ],
+                            destination: AnyView(AIInsights.RecapView(resolver: resolver))
+                        )
+
+                        HubMenuCard(
                             icon: "fork.knife.circle.fill",
                             title: String(localized: "FoodFinder", comment: "FoodFinder feature name"),
                             description: String(localized: "Identify meals and estimate carbs using AI.", comment: "FoodFinder description"),

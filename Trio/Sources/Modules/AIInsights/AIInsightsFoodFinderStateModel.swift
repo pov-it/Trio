@@ -90,12 +90,23 @@ extension AIInsights {
 
     // MARK: - FoodFinder State Model
 
+    /// Per-item portion-adjustment stats used to bias future analyses.
+    /// If a user systematically pushes "Pasta" to 1.5× we eventually start
+    /// every new Pasta result at 1.5× instead of 1.0×.
+    struct PortionLearningStat: Codable {
+        var sum: Double
+        var count: Int
+        var lastMultiplier: Double
+    }
+
     @Observable final class FoodFinderStateModel: BaseStateModel<Provider> {
         var isAnalyzing: Bool = false
         var errorMessage: String?
         var currentResult: FoodAnalysisResult?
         var foodDescription: String = ""
         var recentResults: [FoodAnalysisResult] = []
+        /// Meals the user has analyzed ≥ 3 times. Latest snapshot per meal.
+        var frequentMeals: [FoodAnalysisResult] = []
         var showCamera: Bool = false
         var showBarcodeScanner: Bool = false
         var showPhotoPicker: Bool = false
@@ -139,9 +150,18 @@ extension AIInsights {
             openFoodFactsBaseURL = provider.settings.openFoodFactsBaseURL
 
             loadRecentResults()
+            loadFrequentMeals()
         }
 
         // MARK: - Persistence
+
+        private static let usageCountsKey = "ai_foodfinder_meal_usage"
+        private static let frequentMealsKey = "ai_foodfinder_frequent"
+        private static let portionLearningKey = "ai_foodfinder_portion_learning"
+        private static let frequentThreshold = 3
+        private static let frequentMealsMax = 10
+        private static let portionLearningMinSamples = 2
+        private static let portionLearningMinDeviation = 0.10
 
         func loadRecentResults() {
             if let data = UserDefaults.standard.data(forKey: "ai_foodfinder_recent"),
@@ -157,6 +177,156 @@ extension AIInsights {
             if let data = try? JSONEncoder().encode(toSave) {
                 UserDefaults.standard.set(data, forKey: "ai_foodfinder_recent")
             }
+        }
+
+        func loadFrequentMeals() {
+            if let data = UserDefaults.standard.data(forKey: Self.frequentMealsKey),
+               let saved = try? JSONDecoder().decode([FoodAnalysisResult].self, from: data)
+            {
+                frequentMeals = saved
+            }
+        }
+
+        private func saveFrequentMeals() {
+            let toSave = Array(frequentMeals.prefix(Self.frequentMealsMax))
+            if let data = try? JSONEncoder().encode(toSave) {
+                UserDefaults.standard.set(data, forKey: Self.frequentMealsKey)
+            }
+        }
+
+        // MARK: - Frequency-based promotion
+
+        /// Increments the usage counter for a meal name and returns the new total.
+        @discardableResult
+        private func bumpMealUsage(for name: String) -> Int {
+            let key = Self.normalizeMealKey(name)
+            guard !key.isEmpty else { return 0 }
+            var counts = UserDefaults.standard.dictionary(forKey: Self.usageCountsKey) as? [String: Int] ?? [:]
+            let newCount = (counts[key] ?? 0) + 1
+            counts[key] = newCount
+            UserDefaults.standard.set(counts, forKey: Self.usageCountsKey)
+            return newCount
+        }
+
+        /// If a meal has been analyzed ≥ frequentThreshold times, store the
+        /// latest snapshot as a "Frequent Meal". Replaces any earlier snapshot
+        /// with the same normalized name.
+        private func promoteIfFrequent(_ result: FoodAnalysisResult) {
+            let nameRaw = result.mealName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                ?? result.items.map(\.name).joined(separator: ", ")
+            let key = Self.normalizeMealKey(nameRaw)
+            guard !key.isEmpty else { return }
+            let count = bumpMealUsage(for: nameRaw)
+            guard count >= Self.frequentThreshold else { return }
+            frequentMeals.removeAll { Self.normalizeMealKey($0.mealName ?? "") == key }
+            frequentMeals.insert(result, at: 0)
+            saveFrequentMeals()
+        }
+
+        private static func normalizeMealKey(_ name: String) -> String {
+            name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+
+        // MARK: - Portion learning
+
+        private func loadPortionLearning() -> [String: PortionLearningStat] {
+            guard let data = UserDefaults.standard.data(forKey: Self.portionLearningKey),
+                  let saved = try? JSONDecoder().decode([String: PortionLearningStat].self, from: data)
+            else { return [:] }
+            return saved
+        }
+
+        private func savePortionLearning(_ stats: [String: PortionLearningStat]) {
+            if let data = try? JSONEncoder().encode(stats) {
+                UserDefaults.standard.set(data, forKey: Self.portionLearningKey)
+            }
+        }
+
+        /// Records the user's chosen multiplier for an item so future analyses
+        /// of the same item can start at the learned average.
+        private func recordPortionLearning(itemName: String, multiplier: Double) {
+            let key = Self.normalizeMealKey(itemName)
+            guard !key.isEmpty else { return }
+            var stats = loadPortionLearning()
+            var entry = stats[key] ?? PortionLearningStat(sum: 0, count: 0, lastMultiplier: 1.0)
+            entry.sum += multiplier
+            entry.count += 1
+            entry.lastMultiplier = multiplier
+            stats[key] = entry
+            savePortionLearning(stats)
+        }
+
+        /// Applies learned per-item portion multipliers to a fresh analysis
+        /// result before showing it to the user. Only applies when the user
+        /// has logged at least `portionLearningMinSamples` adjustments AND
+        /// the learned average deviates by at least 10% from 1.0×.
+        private func applyLearnedPortions(to result: inout FoodAnalysisResult) {
+            let stats = loadPortionLearning()
+            guard !stats.isEmpty else { return }
+            for i in result.items.indices {
+                let key = Self.normalizeMealKey(result.items[i].name)
+                guard let stat = stats[key],
+                      stat.count >= Self.portionLearningMinSamples
+                else { continue }
+                let avg = stat.sum / Double(stat.count)
+                if abs(avg - 1.0) >= Self.portionLearningMinDeviation {
+                    result.items[i].portionMultiplier = max(0.25, avg)
+                }
+            }
+        }
+
+        /// Load recent FoodFinder analyses without instantiating the full state
+        /// model. Used by the chat prompt builder to inject meal history.
+        static func loadStoredRecentResults() -> [FoodAnalysisResult] {
+            guard let data = UserDefaults.standard.data(forKey: "ai_foodfinder_recent"),
+                  let saved = try? JSONDecoder().decode([FoodAnalysisResult].self, from: data)
+            else { return [] }
+            return saved
+        }
+
+        /// Build a chat prompt section describing recent FoodFinder analyses.
+        /// Always returns a section header so the AI knows FoodFinder data
+        /// exists, even when the user hasn't logged anything recently.
+        static func buildMealPromptContext(at now: Date = Date()) -> String {
+            let cutoff = now.addingTimeInterval(-48 * 3600)
+            let recent = loadStoredRecentResults()
+                .filter { $0.timestamp >= cutoff }
+                .sorted { $0.timestamp > $1.timestamp }
+
+            guard !recent.isEmpty else {
+                return "## Recent Meals (FoodFinder)\n- No meals analyzed in the last 48h. (FoodFinder is available; the user can describe meals or scan barcodes to log carbs/fat/protein.)\n"
+            }
+
+            let formatter = DateFormatter()
+            formatter.dateStyle = .none
+            formatter.timeStyle = .short
+            let dayFormatter = DateFormatter()
+            dayFormatter.dateFormat = "EEE"
+
+            var ctx = "## Recent Meals (FoodFinder)\n"
+            ctx += "Last \(recent.count) meal analysis(es) from the past 48h:\n"
+            for result in recent.prefix(8) {
+                let when = "\(dayFormatter.string(from: result.timestamp)) \(formatter.string(from: result.timestamp))"
+                let name = result.mealName?.trimmingCharacters(in: .whitespacesAndNewlines).aiInsightsNilIfEmpty
+                    ?? result.items.map(\.name).joined(separator: ", ").aiInsightsNilIfEmpty
+                    ?? "Meal"
+                ctx += String(
+                    format: "- %@ — %@: %.0fg carbs, %.0fg fat, %.0fg protein, %.0fg fiber, %.0f kcal",
+                    when,
+                    name,
+                    result.totalCarbs,
+                    result.totalFat,
+                    result.totalProtein,
+                    result.totalFiber,
+                    result.totalCalories
+                )
+                if result.items.count > 1 {
+                    let itemList = result.items.prefix(5).map(\.name).joined(separator: ", ")
+                    ctx += " [\(itemList)\(result.items.count > 5 ? ", …" : "")]"
+                }
+                ctx += "\n"
+            }
+            return ctx
         }
 
         // MARK: - Text Analysis
@@ -229,7 +399,7 @@ extension AIInsights {
                     return
                 }
 
-                let result = FoodAnalysisResult(
+                var result = FoodAnalysisResult(
                     items: parsed.items,
                     rawResponse: response.text,
                     timestamp: Date(),
@@ -240,10 +410,12 @@ extension AIInsights {
                     mealPortion: parsed.mealPortion,
                     confidence: parsed.confidence
                 )
+                applyLearnedPortions(to: &result)
 
                 currentResult = result
                 recentResults.insert(result, at: 0)
                 saveRecentResults()
+                promoteIfFrequent(result)
                 foodDescription = ""
                 capturedImageData = nil
 
@@ -396,8 +568,12 @@ extension AIInsights {
             guard var result = currentResult,
                   let idx = result.items.firstIndex(where: { $0.id == itemId })
             else { return }
-            result.items[idx].portionMultiplier = max(0.25, multiplier)
+            let clamped = max(0.25, multiplier)
+            result.items[idx].portionMultiplier = clamped
             storeUpdatedResult(result)
+            // Record so future analyses of the same item start at the
+            // user's preferred portion automatically.
+            recordPortionLearning(itemName: result.items[idx].name, multiplier: clamped)
         }
 
         func updateItemName(for itemId: UUID, name: String) {
@@ -637,6 +813,19 @@ extension AIInsights {
             saveRecentResults()
         }
 
+        /// Remove a meal from the "Frequent Meals" list and also reset its
+        /// usage counter so we don't immediately re-promote it.
+        func deleteFrequentMeal(_ result: FoodAnalysisResult) {
+            let key = Self.normalizeMealKey(result.mealName ?? "")
+            frequentMeals.removeAll { $0.id == result.id || Self.normalizeMealKey($0.mealName ?? "") == key }
+            saveFrequentMeals()
+            if !key.isEmpty {
+                var counts = UserDefaults.standard.dictionary(forKey: Self.usageCountsKey) as? [String: Int] ?? [:]
+                counts.removeValue(forKey: key)
+                UserDefaults.standard.set(counts, forKey: Self.usageCountsKey)
+            }
+        }
+
         private func storeUpdatedResult(_ result: FoodAnalysisResult) {
             currentResult = result
             if let idx = recentResults.firstIndex(where: { $0.id == result.id }) {
@@ -733,7 +922,7 @@ extension AIInsights {
                     return
                 }
 
-                let result = FoodAnalysisResult(
+                var result = FoodAnalysisResult(
                     items: parsed.items,
                     rawResponse: response.text,
                     timestamp: Date(),
@@ -744,9 +933,11 @@ extension AIInsights {
                     mealPortion: parsed.mealPortion,
                     confidence: parsed.confidence
                 )
+                applyLearnedPortions(to: &result)
                 currentResult = result
                 recentResults.insert(result, at: 0)
                 saveRecentResults()
+                promoteIfFrequent(result)
                 foodDescription = ""
                 capturedImageData = nil
 

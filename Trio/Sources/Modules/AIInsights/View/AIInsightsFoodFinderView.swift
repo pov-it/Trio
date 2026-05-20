@@ -21,51 +21,22 @@ extension AIInsights {
             sortDescriptors: [NSSortDescriptor(key: "dish", ascending: true)]
         ) var savedMealPresets: FetchedResults<MealPresetStored>
 
+        /// Pulse the input bar briefly when the user lands on a meal detail
+        /// so the "Adding to <meal>" context is impossible to miss.
+        @State private var inputBarHighlight: Bool = false
+
         var body: some View {
-            List {
-                if let result = state.currentResult {
-                    resultSections(result)
-                } else {
-                    Section {
-                        VStack {
-                            emptyStateView
-                        }
-                        .frame(maxWidth: .infinity)
-                        .listRowBackground(Color.clear)
+            rootContent
+                .navigationDestination(isPresented: Binding(
+                    get: { state.currentResult != nil },
+                    set: { isPresented in
+                        if !isPresented { state.currentResult = nil }
                     }
-
-                    if !savedMealPresets.isEmpty {
-                        savedMealsSection
-                    }
-
-                    if !state.recentResults.isEmpty {
-                        recentResultsSection
-                    }
+                )) {
+                    mealDetailScreen
                 }
-            }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(appState.trioBackgroundColor(for: colorScheme))
-            .scrollDismissesKeyboard(.interactively)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                foodInputBar
-            }
-            .navigationTitle(String(localized: "FoodFinder", comment: "Nav title"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    if state.currentResult != nil {
-                        Button {
-                            state.clearResult()
-                        } label: {
-                            Text(String(localized: "New", comment: "New analysis button"))
-                                .font(.subheadline)
-                        }
-                    }
-                }
-            }
-            .onAppear(perform: configureView)
-            .fullScreenCover(isPresented: $state.showCamera) {
+                .onAppear(perform: configureView)
+                .fullScreenCover(isPresented: $state.showCamera) {
                 AIInsights.CameraCaptureView { imageData in
                     state.pendingImageForCrop = imageData
                 }
@@ -135,6 +106,89 @@ extension AIInsights {
                 }
             } message: {
                 Text(String(localized: "Search OpenFoodFacts first. If no match is found, AI will estimate it.", comment: "FoodFinder add ingredient help"))
+            }
+        }
+
+        // MARK: - Root content (default FoodFinder page)
+
+        private var rootContent: some View {
+            List {
+                Section {
+                    VStack {
+                        emptyStateView
+                    }
+                    .frame(maxWidth: .infinity)
+                    .listRowBackground(Color.clear)
+                }
+
+                if !state.frequentMeals.isEmpty {
+                    frequentMealsSection
+                }
+
+                if !savedMealPresets.isEmpty {
+                    savedMealsSection
+                }
+
+                if !state.recentResults.isEmpty {
+                    recentResultsSection
+                }
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(appState.trioBackgroundColor(for: colorScheme))
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                // Only show the input bar at the root when no meal is active.
+                // Otherwise SwiftUI is in the middle of pushing the meal detail
+                // and we'd briefly render the "Adding to..." context here.
+                if state.currentResult == nil {
+                    foodInputBar
+                }
+            }
+            .navigationTitle(String(localized: "FoodFinder", comment: "Nav title"))
+            .navigationBarTitleDisplayMode(.inline)
+        }
+
+        // MARK: - Meal detail screen (pushed onto nav stack)
+
+        @ViewBuilder private var mealDetailScreen: some View {
+            if let result = state.currentResult {
+                List {
+                    resultSections(result)
+                }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(appState.trioBackgroundColor(for: colorScheme))
+                .scrollDismissesKeyboard(.interactively)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    foodInputBar
+                }
+                .navigationTitle(mealTitle(for: result))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            state.clearResult()
+                        } label: {
+                            Text(String(localized: "New", comment: "New analysis button"))
+                                .font(.subheadline)
+                        }
+                    }
+                }
+                .onAppear {
+                    triggerInputBarHighlight()
+                }
+            }
+        }
+
+        private func triggerInputBarHighlight() {
+            withAnimation(.easeOut(duration: 0.35)) {
+                inputBarHighlight = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) {
+                withAnimation(.easeIn(duration: 0.55)) {
+                    inputBarHighlight = false
+                }
             }
         }
 
@@ -535,6 +589,47 @@ extension AIInsights {
             )
         }
 
+        // MARK: - Frequent Meals (auto-promoted from usage frequency)
+
+        private var frequentMealsSection: some View {
+            Section {
+                ForEach(state.frequentMeals.prefix(5)) { result in
+                    Button {
+                        state.currentResult = result
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(mealTitle(for: result))
+                                    .font(.subheadline)
+                                    .lineLimit(1)
+                                    .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                                Text(String(localized: "Often eaten", comment: "Frequent meals subtitle"))
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            HStack(spacing: 6) {
+                                Text(String(format: "%.0fg", result.totalCarbs))
+                                    .font(.subheadline.bold())
+                                    .foregroundStyle(.blue)
+                                Image(systemName: "star.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.yellow)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button(String(localized: "Remove", comment: "Remove frequent meal"), systemImage: "trash", role: .destructive) {
+                            state.deleteFrequentMeal(result)
+                        }
+                    }
+                }
+            } header: {
+                Text(String(localized: "Frequent Meals", comment: "Frequent meals section header"))
+            }
+        }
+
         // MARK: - Saved Meals (MealPresets)
 
         private var savedMealsSection: some View {
@@ -797,6 +892,31 @@ extension AIInsights {
                 .padding(.vertical, 8)
             }
             .background(colorScheme == .dark ? Color.bgDarkBlue : Color.white)
+            .overlay(alignment: .top) {
+                // Brief attention pulse when arriving at a meal detail.
+                // Draws a glowing accent line above the input bar that fades out.
+                if inputBarHighlight {
+                    LinearGradient(
+                        colors: [
+                            Color.accentColor.opacity(0.0),
+                            Color.accentColor.opacity(0.9),
+                            Color.accentColor.opacity(0.0)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(height: 2)
+                    .blur(radius: 1)
+                    .transition(.opacity)
+                }
+            }
+            .shadow(
+                color: inputBarHighlight ? Color.accentColor.opacity(0.45) : .clear,
+                radius: inputBarHighlight ? 12 : 0,
+                y: -2
+            )
+            .scaleEffect(inputBarHighlight ? 1.02 : 1.0, anchor: .bottom)
+            .animation(.spring(response: 0.45, dampingFraction: 0.65), value: inputBarHighlight)
         }
 
         private var hasFoodFinderInput: Bool {

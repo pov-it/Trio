@@ -331,7 +331,9 @@ final class AIInsights_AlcoholTracker: ObservableObject, @unchecked Sendable {
 
     func buildAlcoholPromptContext(at now: Date = Date()) -> String {
         let state = currentState(at: now)
-        guard state.entriesLast24h > 0 else { return "" }
+        guard state.entriesLast24h > 0 else {
+            return "## Alcohol Intake\n- No alcohol entries logged in the last 24h. (Alcohol tracking is available; the user may not have logged anything yet.)\n"
+        }
 
         var ctx = "## Alcohol Intake\n"
         ctx += "- Total drinks last 24h: \(formatDrinks(state.drinksLast24h)) (\(state.entriesLast24h) entry/entries)\n"
