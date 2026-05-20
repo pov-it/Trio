@@ -607,12 +607,12 @@ private struct InlineMessageText: View {
             }
             return Text(text)
         case let .trend(token):
-            return Text(" ") + Text(Image(systemName: token.systemImage)) + Text(" ")
+            return Text(Image(systemName: token.systemImage))
         case let .link(title, destination):
             var attributed = AttributedString(localizedLinkTitle(for: title, destination: destination))
             attributed.link = URL(string: "trio-ai://\(destination.deepLinkID)")
             attributed.foregroundColor = .accentColor
-            return Text(" ") + Text(attributed).bold() + Text(" ")
+            return Text(attributed).bold()
         }
     }
 

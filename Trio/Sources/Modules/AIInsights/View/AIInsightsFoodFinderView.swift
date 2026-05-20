@@ -1,3 +1,4 @@
+import CoreData
 import SwiftUI
 import Swinject
 
@@ -9,10 +10,16 @@ extension AIInsights {
 
         @Environment(\.colorScheme) var colorScheme
         @Environment(AppState.self) var appState
+        @Environment(\.managedObjectContext) var moc
         @FocusState private var isTextFieldFocused: Bool
         @State private var ingredientPromptText = ""
         @State private var ingredientPromptItemID: UUID?
         @State private var showIngredientPrompt = false
+
+        @FetchRequest(
+            entity: MealPresetStored.entity(),
+            sortDescriptors: [NSSortDescriptor(key: "dish", ascending: true)]
+        ) var savedMealPresets: FetchedResults<MealPresetStored>
 
         var body: some View {
             List {
@@ -25,6 +32,10 @@ extension AIInsights {
                         }
                         .frame(maxWidth: .infinity)
                         .listRowBackground(Color.clear)
+                    }
+
+                    if !savedMealPresets.isEmpty {
+                        savedMealsSection
                     }
 
                     if !state.recentResults.isEmpty {
@@ -62,7 +73,13 @@ extension AIInsights {
             }
             .fullScreenCover(isPresented: $state.showBarcodeScanner) {
                 AIInsights.BarcodeScannerView { barcode in
-                    Task { await state.lookupBarcode(barcode) }
+                    Task {
+                        if state.currentResult != nil {
+                            await state.addIngredientFromBarcode(barcode)
+                        } else {
+                            await state.lookupBarcode(barcode)
+                        }
+                    }
                 }
                 .ignoresSafeArea()
             }
@@ -95,9 +112,7 @@ extension AIInsights {
                 }
             }
             .alert(
-                ingredientPromptItemID == nil
-                    ? String(localized: "Add Ingredient", comment: "FoodFinder add ingredient alert")
-                    : String(localized: "Edit Ingredient", comment: "FoodFinder edit ingredient alert"),
+                String(localized: "Edit Ingredient", comment: "FoodFinder edit ingredient alert"),
                 isPresented: $showIngredientPrompt
             ) {
                 TextField(String(localized: "Ingredient", comment: "FoodFinder ingredient text field"), text: $ingredientPromptText)
@@ -213,14 +228,6 @@ extension AIInsights {
                             .tint(.blue)
                         }
                 }
-
-                Button {
-                    beginAddIngredient()
-                } label: {
-                    Label(String(localized: "Add Ingredient", comment: "FoodFinder add ingredient button"), systemImage: "magnifyingglass.circle.fill")
-                        .frame(maxWidth: .infinity, alignment: .center)
-                }
-                .disabled(state.isAnalyzing)
             } header: {
                 Text(String(localized: "Ingredients", comment: "FoodFinder ingredients section"))
             }
@@ -528,6 +535,39 @@ extension AIInsights {
             )
         }
 
+        // MARK: - Saved Meals (MealPresets)
+
+        private var savedMealsSection: some View {
+            Section {
+                ForEach(savedMealPresets) { preset in
+                    Button {
+                        state.currentResult = resultFromPreset(preset)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(preset.dish ?? "")
+                                    .font(.subheadline)
+                                    .lineLimit(1)
+                                    .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                            }
+                            Spacer()
+                            HStack(spacing: 6) {
+                                Text(String(format: "%.0fg", preset.carbs?.doubleValue ?? 0))
+                                    .font(.subheadline.bold())
+                                    .foregroundStyle(.blue)
+                                Image(systemName: "bookmark.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            } header: {
+                Text(String(localized: "Saved Meals", comment: "Saved meal presets section header"))
+            }
+        }
+
         // MARK: - Recent Results
 
         private var recentResultsSection: some View {
@@ -558,117 +598,204 @@ extension AIInsights {
                             state.deleteRecentResult(result)
                         }
                     }
+                    .swipeActions(edge: .leading) {
+                        Button {
+                            saveRecentResultAsPreset(result)
+                        } label: {
+                            Label(String(localized: "Save", comment: "Save as meal preset"), systemImage: "bookmark")
+                        }
+                        .tint(.blue)
+                    }
                 }
             } header: {
                 Text(String(localized: "Recent Meals", comment: "Recent results section header"))
             }
         }
 
+        private func resultFromPreset(_ preset: MealPresetStored) -> FoodAnalysisResult {
+            let carbs = preset.carbs?.doubleValue ?? 0
+            let fat = preset.fat?.doubleValue ?? 0
+            let protein = preset.protein?.doubleValue ?? 0
+            let kcal = carbs * 4 + fat * 9 + protein * 4
+            let item = FoodItem(
+                name: preset.dish ?? String(localized: "Meal", comment: "Generic meal title"),
+                portion: String(localized: "1 serving", comment: "Default food serving"),
+                carbs: carbs,
+                fat: fat,
+                protein: protein,
+                fiber: 0,
+                calories: kcal
+            )
+            return FoodAnalysisResult(
+                items: [item],
+                rawResponse: nil,
+                timestamp: Date(),
+                source: .aiText,
+                imageData: nil,
+                mealDescription: nil,
+                mealName: preset.dish,
+                mealPortion: nil,
+                confidence: 1.0
+            )
+        }
+
+        private func saveRecentResultAsPreset(_ result: FoodAnalysisResult) {
+            let preset = MealPresetStored(context: moc)
+            preset.dish = mealTitle(for: result)
+            preset.carbs = NSDecimalNumber(value: result.totalCarbs)
+            preset.fat = NSDecimalNumber(value: result.totalFat)
+            preset.protein = NSDecimalNumber(value: result.totalProtein)
+            do {
+                guard moc.hasChanges else { return }
+                try moc.save()
+            } catch {
+                debugPrint("Failed to save meal preset: \(error)")
+            }
+        }
+
         // MARK: - Input Bar
 
         private var foodInputBar: some View {
-            VStack(spacing: 6) {
-                if state.capturedImageData != nil {
-                    HStack(spacing: 8) {
-                        if let imageData = state.capturedImageData,
-                           let image = UIImage(data: imageData)
-                        {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 54, height: 54)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                        }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(String(localized: "Photo attached", comment: "FoodFinder photo attached label"))
-                                .font(.caption.weight(.semibold))
-                            Text(String(localized: "This photo will be analyzed with your description.", comment: "FoodFinder attached photo help"))
+            VStack(spacing: 0) {
+                // Context banner: shown when viewing a meal (all inputs add to that meal)
+                if let result = state.currentResult {
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.caption.bold())
+                        Text(
+                            String(
+                                format: String(
+                                    localized: "Adding to \"%@\"",
+                                    comment: "FoodFinder add ingredient context banner"
+                                ),
+                                mealTitle(for: result)
+                            )
+                        )
+                        .font(.caption.bold())
+                        .lineLimit(1)
+                        Spacer()
+                    }
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+                }
+
+                VStack(spacing: 6) {
+                    if state.capturedImageData != nil {
+                        HStack(spacing: 8) {
+                            if let imageData = state.capturedImageData,
+                               let image = UIImage(data: imageData)
+                            {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 54, height: 54)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(String(localized: "Photo attached", comment: "FoodFinder photo attached label"))
+                                    .font(.caption.weight(.semibold))
+                                Text(
+                                    state.currentResult != nil
+                                        ? String(localized: "Photo will be added as ingredient.", comment: "FoodFinder photo add ingredient help")
+                                        : String(localized: "This photo will be analyzed with your description.", comment: "FoodFinder attached photo help")
+                                )
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
-                        }
-                        Spacer()
-                        Button {
-                            state.discardCapturedImage()
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                }
-
-                HStack(spacing: 8) {
-                    roundInputButton(systemImage: "camera.fill") {
-                        state.showCamera = true
-                    }
-                    .disabled(state.isAnalyzing)
-
-                    roundInputButton(systemImage: "photo.on.rectangle") {
-                        state.showPhotoPicker = true
-                    }
-                    .disabled(state.isAnalyzing)
-
-                    roundInputButton(systemImage: "barcode.viewfinder") {
-                        state.showBarcodeScanner = true
-                    }
-                    .disabled(state.isAnalyzing)
-
-                    roundInputButton(systemImage: state.isDictating ? "mic.fill" : "mic") {
-                        state.toggleDictation()
-                    }
-                    .foregroundStyle(state.isDictating ? .red : (colorScheme == .dark ? .white : .primary))
-                    .disabled(state.isAnalyzing)
-
-                    TextField(
-                        String(localized: "Describe your meal...", comment: "FoodFinder input placeholder"),
-                        text: $state.foodDescription,
-                        axis: .vertical
-                    )
-                    .lineLimit(1 ... 3)
-                    .focused($isTextFieldFocused)
-                    .textFieldStyle(.plain)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 20)
-                            .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray6))
-                    )
-
-                    Button {
-                        isTextFieldFocused = false
-                        Task { await state.analyzeCurrentInput() }
-                    } label: {
-                        Group {
-                            if state.isAnalyzing {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            } else {
-                                Image(systemName: "sparkle.magnifyingglass")
+                            }
+                            Spacer()
+                            Button {
+                                state.discardCapturedImage()
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary)
                             }
                         }
-                        .frame(width: 36, height: 36)
-                        .background(
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            Color(red: 0.3411764706, green: 0.6666666667, blue: 0.9254901961),
-                                            Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                        )
-                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
                     }
-                    .disabled(!hasFoodFinderInput || state.isAnalyzing)
-                    .opacity(!hasFoodFinderInput || state.isAnalyzing ? 0.5 : 1)
+
+                    HStack(spacing: 8) {
+                        roundInputButton(systemImage: "camera.fill") {
+                            state.showCamera = true
+                        }
+                        .disabled(state.isAnalyzing)
+
+                        roundInputButton(systemImage: "photo.on.rectangle") {
+                            state.showPhotoPicker = true
+                        }
+                        .disabled(state.isAnalyzing)
+
+                        roundInputButton(systemImage: "barcode.viewfinder") {
+                            state.showBarcodeScanner = true
+                        }
+                        .disabled(state.isAnalyzing)
+
+                        roundInputButton(systemImage: state.isDictating ? "mic.fill" : "mic") {
+                            state.toggleDictation()
+                        }
+                        .foregroundStyle(state.isDictating ? .red : (colorScheme == .dark ? .white : .primary))
+                        .disabled(state.isAnalyzing)
+
+                        TextField(
+                            state.currentResult != nil
+                                ? String(localized: "Search ingredient...", comment: "FoodFinder ingredient search placeholder")
+                                : String(localized: "Describe your meal...", comment: "FoodFinder input placeholder"),
+                            text: $state.foodDescription,
+                            axis: .vertical
+                        )
+                        .lineLimit(1 ... 3)
+                        .focused($isTextFieldFocused)
+                        .textFieldStyle(.plain)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray6))
+                        )
+
+                        Button {
+                            isTextFieldFocused = false
+                            Task {
+                                if state.currentResult != nil {
+                                    await state.addIngredientFromCurrentInput()
+                                } else {
+                                    await state.analyzeCurrentInput()
+                                }
+                            }
+                        } label: {
+                            Group {
+                                if state.isAnalyzing {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                } else {
+                                    Image(systemName: state.currentResult != nil ? "plus.circle.fill" : "sparkle.magnifyingglass")
+                                }
+                            }
+                            .frame(width: 36, height: 36)
+                            .background(
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [
+                                                Color(red: 0.3411764706, green: 0.6666666667, blue: 0.9254901961),
+                                                Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
+                                            ],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                            )
+                            .foregroundStyle(.white)
+                        }
+                        .disabled(!hasFoodFinderInput || state.isAnalyzing)
+                        .opacity(!hasFoodFinderInput || state.isAnalyzing ? 0.5 : 1)
+                    }
+                    .padding(.horizontal, 12)
                 }
-                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
             }
-            .padding(.vertical, 8)
             .background(colorScheme == .dark ? Color.bgDarkBlue : Color.white)
         }
 
@@ -686,12 +813,6 @@ extension AIInsights {
                     )
                     .foregroundStyle(colorScheme == .dark ? .white : .primary)
             }
-        }
-
-        private func beginAddIngredient() {
-            ingredientPromptText = ""
-            ingredientPromptItemID = nil
-            showIngredientPrompt = true
         }
 
         private func beginIngredientEdit(_ item: FoodItem) {

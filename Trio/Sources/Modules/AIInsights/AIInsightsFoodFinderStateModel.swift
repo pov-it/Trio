@@ -467,10 +467,138 @@ extension AIInsights {
 
                 result.items.append(item)
                 storeUpdatedResult(result)
+                foodDescription = ""
             } catch let error as AIServiceAdapter.AIError {
                 errorMessage = error.errorDescription ?? error.localizedDescription
             } catch {
                 errorMessage = String(localized: "Error: \(error.localizedDescription)", comment: "AI error")
+            }
+        }
+
+        @MainActor
+        func addIngredientFromCurrentInput() async {
+            let description = foodDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let imageData = capturedImageData {
+                await addIngredientsFromImage(imageData, description: description)
+            } else {
+                await addIngredient(named: description)
+            }
+        }
+
+        @MainActor
+        func addIngredientsFromImage(_ imageData: Data, description: String = "") async {
+            guard currentResult != nil else { return }
+            guard provider != nil else {
+                errorMessage = String(localized: "AI Insights is not ready yet.", comment: "AI error")
+                return
+            }
+            guard !apiKey.isEmpty else {
+                errorMessage = String(localized: "API Key is missing. Configure it in AI Settings.", comment: "AI error")
+                return
+            }
+
+            isAnalyzing = true
+            errorMessage = nil
+            defer { isAnalyzing = false }
+
+            do {
+                let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+                let context = trimmedDescription.isEmpty ? "" : "\nUser context: \(trimmedDescription)"
+                let request = AIServiceAdapter.AIRequest(
+                    model: model,
+                    messages: [
+                        AIServiceAdapter.ChatMessagePayload(role: .system, content: foodFinderSystemPrompt),
+                        AIServiceAdapter.ChatMessagePayload(role: .user, content: "Analyze the food in this photo and return items to add to an existing meal.\(context)")
+                    ],
+                    temperature: 0.2,
+                    topP: 0.9,
+                    topK: nil,
+                    maxTokens: 2048,
+                    imageData: imageData,
+                    responseFormat: foodFinderResponseFormat
+                )
+
+                let response = try await AIServiceAdapter.send(
+                    request: request,
+                    provider: providerType,
+                    baseURL: baseURL,
+                    apiKey: apiKey
+                )
+
+                let parsed = parseFoodAnalysis(from: response.text)
+                guard !parsed.items.isEmpty else {
+                    errorMessage = String(localized: "No food items could be identified in the photo.", comment: "FoodFinder add from image error")
+                    return
+                }
+
+                guard var result = currentResult else { return }
+                result.items.append(contentsOf: parsed.items)
+                storeUpdatedResult(result)
+                foodDescription = ""
+                capturedImageData = nil
+
+            } catch let error as AIServiceAdapter.AIError {
+                errorMessage = error.errorDescription ?? error.localizedDescription
+            } catch {
+                errorMessage = String(localized: "Error: \(error.localizedDescription)", comment: "AI error")
+            }
+        }
+
+        @MainActor
+        func addIngredientFromBarcode(_ barcode: String) async {
+            guard var result = currentResult else { return }
+
+            isAnalyzing = true
+            errorMessage = nil
+            defer { isAnalyzing = false }
+
+            do {
+                guard var components = URLComponents(url: openFoodFactsProductURL(for: barcode), resolvingAgainstBaseURL: false) else {
+                    errorMessage = String(localized: "Invalid barcode.", comment: "Barcode error")
+                    return
+                }
+                components.queryItems = [
+                    URLQueryItem(name: "fields", value: "product_name,nutriments,serving_size,serving_quantity")
+                ]
+                guard let url = components.url else {
+                    errorMessage = String(localized: "Invalid OpenFoodFacts URL.", comment: "Barcode error")
+                    return
+                }
+
+                var urlRequest = URLRequest(url: url)
+                let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+                urlRequest.setValue("TrioAIInsights/\(appVersion) (https://github.com/pov-it/Trio)", forHTTPHeaderField: "User-Agent")
+                urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+
+                let (data, response) = try await URLSession.shared.data(for: urlRequest)
+                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      Int(doubleValue(json["status"])) == 1,
+                      let product = json["product"] as? [String: Any]
+                else {
+                    errorMessage = String(localized: "Product not found. Try the AI Camera instead.", comment: "Barcode error")
+                    return
+                }
+
+                let name = stringValue(product["product_name"], fallback: String(localized: "Unknown Product", comment: "Unknown barcode product"))
+                let serving = stringValue(product["serving_size"], fallback: String(localized: "1 serving", comment: "Default food serving"))
+                let nutriments = product["nutriments"] as? [String: Any] ?? [:]
+
+                let item = FoodItem(
+                    name: name,
+                    portion: serving,
+                    carbs: nutrientValue(["carbohydrates_serving", "carbohydrates_100g"], in: nutriments),
+                    fat: nutrientValue(["fat_serving", "fat_100g"], in: nutriments),
+                    protein: nutrientValue(["proteins_serving", "proteins_100g"], in: nutriments),
+                    fiber: nutrientValue(["fiber_serving", "fiber_100g"], in: nutriments),
+                    calories: nutrientValue(["energy-kcal_serving", "energy-kcal_100g"], in: nutriments)
+                )
+
+                result.items.append(item)
+                storeUpdatedResult(result)
+
+            } catch {
+                errorMessage = String(localized: "Network error looking up barcode: \(error.localizedDescription)", comment: "Barcode error")
             }
         }
 
