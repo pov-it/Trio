@@ -649,7 +649,7 @@ extension AIInsights {
                     text: draftBinding.portion
                 )
 
-                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 8, verticalSpacing: 6) {
+                VStack(spacing: 6) {
                     inlineMacroRow(label: String(localized: "Carbs", comment: "Carbs macro"), value: draftBinding.carbs, unit: "g", color: .blue)
                     inlineMacroRow(label: String(localized: "Fat", comment: "Fat macro"), value: draftBinding.fat, unit: "g", color: .yellow)
                     inlineMacroRow(label: String(localized: "Protein", comment: "Protein macro"), value: draftBinding.protein, unit: "g", color: .red)
@@ -713,12 +713,12 @@ extension AIInsights {
             }
         }
 
-        private func inlineMacroRow(label: String, value: Binding<Double>, unit: String, color: Color) -> GridRow {
-            GridRow {
+        private func inlineMacroRow(label: String, value: Binding<Double>, unit: String, color: Color) -> some View {
+            HStack(spacing: 8) {
                 Text(label)
                     .font(.caption)
                     .foregroundStyle(color)
-                    .gridColumnAlignment(.leading)
+                    .frame(width: 72, alignment: .leading)
                 TextField(label, value: value, format: .number.precision(.fractionLength(0 ... 1)))
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
@@ -729,6 +729,7 @@ extension AIInsights {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .frame(width: 36, alignment: .leading)
+                Spacer(minLength: 0)
             }
         }
 
