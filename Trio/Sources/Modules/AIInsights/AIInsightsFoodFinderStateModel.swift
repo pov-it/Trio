@@ -840,6 +840,14 @@ extension AIInsights {
                 result.items[idx].calories = baseValue
             }
 
+            // Atwater factors: kcal/g of carbs=4, fat=9, protein=4. When the
+            // user edits a macro, the calorie value is rederived so the row
+            // stays internally consistent without an extra "recompute" step.
+            if macro != .calories {
+                let item = result.items[idx]
+                result.items[idx].calories = 4 * item.carbs + 9 * item.fat + 4 * item.protein
+            }
+
             storeUpdatedResult(result)
         }
 

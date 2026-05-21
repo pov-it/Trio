@@ -175,15 +175,28 @@ extension AIInsights {
 
             \(AIInsights.responseLanguageInstruction())
 
+            STRUCTURE — produce ALL of the following sections, in this order, each prefixed with a Markdown header on its own line:
+
+            **Overview**
+            Write 2–3 sentences of plain prose summarizing the past period. Mention what changed, what stayed stable, and the general feel of the user's data.
+
+            **Therapy changes**
+            Bullet list of EVERY therapy setting that was adjusted in this window. For each, name the setting (Basal, ISF, Carb Ratio, Target, etc.), the time block if relevant, and the before → after values. If no changes were applied, write a single bullet saying so.
+
+            **Patterns**
+            3–5 bullet observations about recurring questions, tracker usage, meal timing, AutoPreset activations, glucose-affecting behaviors. Be concrete; name times of day or specific triggers where the data shows them.
+
+            **Summary**
+            One closing sentence, prefixed with "Summary:" (no bullet), that captures the period's headline.
+
             RULES:
             - Observations ONLY. Do NOT give advice or recommend changes.
-            - Stay short: 4–7 bullet points, each ≤ 25 words.
-            - Note patterns that emerged or changed compared to what the user discussed last period: improvements, regressions, recurring questions, tracker usage trends.
-            - Mention by name the therapy settings that were adjusted and how (no implicit "you should also..."), so the user can decide on next steps themselves.
+            - Each bullet ≤ 25 words.
+            - Mention therapy settings by name and value (no implicit "you should also...").
             - If trackers (caffeine / alcohol / FoodFinder / AutoPresets) reveal a behavioral pattern, name it concretely.
-            - End with a one-line summary line, no bullet, prefixed with "Summary:".
-            - Use lightweight Markdown for emphasis (**bold**) and bullet points.
+            - Use lightweight Markdown: **bold** for setting names, `-` bullets, headers with `**Section**`.
             - NEVER include therapy-suggestion blocks or knowledge-base blocks. This is pure prose.
+            - Output ONLY the recap content. No preamble, no JSON, no code fences.
             """
         }
 
@@ -220,7 +233,7 @@ extension AIInsights {
                 temperature: 0.4,
                 topP: 0.9,
                 topK: nil,
-                maxTokens: 800
+                maxTokens: 1500
             )
 
             let response = try await AIServiceAdapter.send(

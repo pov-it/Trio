@@ -12,16 +12,6 @@ extension AIInsights {
         @Environment(AppState.self) var appState
         @Environment(\.managedObjectContext) var moc
         @FocusState private var isTextFieldFocused: Bool
-        /// id of the ingredient whose inline edit panel is expanded.
-        @State private var expandedIngredientID: UUID?
-        /// Mutable working copy of the ingredient currently being edited inline.
-        @State private var editingDraft: FoodItem?
-        /// Tracks whether the user requested an AI re-analysis from the
-        /// inline edit panel; resyncs the draft once it completes.
-        @State private var awaitingReanalysisSync: Bool = false
-        /// Tap pen icon on totals card to flip macro rows into TextFields.
-        @State private var editingTotals: Bool = false
-        @State private var totalsDraft: MacroOverride = MacroOverride()
 
         @FetchRequest(
             entity: MealPresetStored.entity(),
@@ -62,21 +52,6 @@ extension AIInsights {
             }
             .simultaneousGesture(swipeBackGesture)
             .onAppear(perform: configureView)
-            .onChange(of: state.currentResult?.id) {
-                // Switching meal → close any open inline edit panel.
-                expandedIngredientID = nil
-                editingDraft = nil
-                editingTotals = false
-            }
-            .onChange(of: state.isAnalyzing) {
-                guard !state.isAnalyzing, awaitingReanalysisSync else { return }
-                awaitingReanalysisSync = false
-                if let id = expandedIngredientID,
-                   let refreshed = state.currentResult?.items.first(where: { $0.id == id })
-                {
-                    editingDraft = refreshed
-                }
-            }
             .fullScreenCover(isPresented: $state.showCamera) {
                 AIInsights.CameraCaptureView { imageData in
                     state.pendingImageForCrop = imageData
@@ -291,17 +266,10 @@ extension AIInsights {
             Section {
                 ForEach(result.items) { item in
                     foodItemRow(item)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6))
                         .swipeActions(edge: .trailing) {
                             Button(String(localized: "Delete", comment: "Delete food item"), systemImage: "trash", role: .destructive) {
                                 withAnimation { state.removeItem(item.id) }
                             }
-                        }
-                        .swipeActions(edge: .leading) {
-                            Button(String(localized: "Edit", comment: "Edit food item"), systemImage: "slider.horizontal.3") {
-                                beginInlineEdit(of: item)
-                            }
-                            .tint(.blue)
                         }
                 }
             } header: {
@@ -405,141 +373,116 @@ extension AIInsights {
                             .padding(.vertical, 2)
                             .background(Capsule().fill(Color.accentColor.opacity(0.15)))
                             .foregroundStyle(Color.accentColor)
-                    }
-                    Spacer()
-                    if editingTotals {
-                        if result.hasManualMacroOverride {
-                            Button {
-                                state.updateManualMacroOverride(nil)
-                                editingTotals = false
-                            } label: {
-                                Text(String(localized: "Reset", comment: "Reset manual totals button"))
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(.secondary)
-                        }
+                        Spacer()
                         Button {
-                            commitTotalsDraft()
+                            state.updateManualMacroOverride(nil)
                         } label: {
-                            Text(String(localized: "Done", comment: "Commit edits button"))
-                                .font(.subheadline.bold())
-                                .foregroundStyle(Color.accentColor)
+                            Text(String(localized: "Reset", comment: "Reset manual totals button"))
+                                .font(.caption)
                         }
                         .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
                     } else {
-                        Button {
-                            beginTotalsEdit(for: result)
-                        } label: {
-                            Image(systemName: "square.and.pencil")
-                                .foregroundStyle(Color.accentColor)
-                        }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel(String(localized: "Edit totals", comment: "Edit meal totals accessibility label"))
+                        Spacer()
                     }
                 }
                 .padding(.top, 11)
                 .padding(.bottom, 4)
 
                 Divider()
-                if editingTotals {
-                    macroEditRow(label: String(localized: "Carbs", comment: "Carbs macro"), value: $totalsDraft.carbs, fallback: result.totalCarbs, unit: "g")
-                    Divider()
-                    macroEditRow(label: String(localized: "Fat", comment: "Fat macro"), value: $totalsDraft.fat, fallback: result.totalFat, unit: "g")
-                    Divider()
-                    macroEditRow(label: String(localized: "Protein", comment: "Protein macro"), value: $totalsDraft.protein, fallback: result.totalProtein, unit: "g")
-                    Divider()
-                    macroEditRow(label: String(localized: "Fiber", comment: "Fiber macro"), value: $totalsDraft.fiber, fallback: result.totalFiber, unit: "g")
-                    Divider()
-                    macroEditRow(label: String(localized: "Calories", comment: "Calories label"), value: $totalsDraft.calories, fallback: result.totalCalories, unit: "kcal")
-                } else {
-                    macroSummaryRow(label: String(localized: "Carbs", comment: "Carbs macro"), value: result.totalCarbs, unit: "g")
-                    Divider()
-                    macroSummaryRow(label: String(localized: "Fat", comment: "Fat macro"), value: result.totalFat, unit: "g")
-                    Divider()
-                    macroSummaryRow(label: String(localized: "Protein", comment: "Protein macro"), value: result.totalProtein, unit: "g")
-                    Divider()
-                    macroSummaryRow(label: String(localized: "Fiber", comment: "Fiber macro"), value: result.totalFiber, unit: "g")
-                    Divider()
-                    macroSummaryRow(label: String(localized: "Calories", comment: "Calories label"), value: result.totalCalories, unit: "kcal")
-                }
+                totalsEditRow(
+                    label: String(localized: "Carbs", comment: "Carbs macro"),
+                    value: result.totalCarbs,
+                    unit: "g",
+                    onCommit: { commitTotal($0, for: \MacroOverride.carbs, in: result) }
+                )
+                Divider()
+                totalsEditRow(
+                    label: String(localized: "Fat", comment: "Fat macro"),
+                    value: result.totalFat,
+                    unit: "g",
+                    onCommit: { commitTotal($0, for: \MacroOverride.fat, in: result) }
+                )
+                Divider()
+                totalsEditRow(
+                    label: String(localized: "Protein", comment: "Protein macro"),
+                    value: result.totalProtein,
+                    unit: "g",
+                    onCommit: { commitTotal($0, for: \MacroOverride.protein, in: result) }
+                )
+                Divider()
+                totalsEditRow(
+                    label: String(localized: "Fiber", comment: "Fiber macro"),
+                    value: result.totalFiber,
+                    unit: "g",
+                    onCommit: { commitTotal($0, for: \MacroOverride.fiber, in: result) }
+                )
+                Divider()
+                totalsEditRow(
+                    label: String(localized: "Calories", comment: "Calories label"),
+                    value: result.totalCalories,
+                    unit: "kcal",
+                    onCommit: { commitTotal($0, for: \MacroOverride.calories, in: result) }
+                )
             }
             .padding(.horizontal)
             .background(
                 RoundedRectangle(cornerRadius: 12)
                     .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white)
             )
-            .overlay {
-                if editingTotals {
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(Color.accentColor, lineWidth: 1.5)
-                }
-            }
-            .animation(.easeInOut(duration: 0.2), value: editingTotals)
         }
 
-        private func macroSummaryRow(label: String, value: Double, unit: String) -> some View {
+        /// One row in the totals card: label on the left, a TextField on
+        /// the right styled to look like a regular value but with a subtle
+        /// dashed underline so the user can tell it's editable.
+        private func totalsEditRow(
+            label: String,
+            value: Double,
+            unit: String,
+            onCommit: @escaping (Double) -> Void
+        ) -> some View {
             HStack {
                 Text(label)
                 Spacer()
-                Text("\(String(format: "%.0f", value)) \(unit)")
-                    .foregroundColor(.secondary)
-            }
-            .font(.subheadline)
-            .padding(.vertical, 11)
-        }
-
-        /// Inline-editable variant of macroSummaryRow used while the user is
-        /// editing the meal totals. The bound value is `Optional<Double>` so
-        /// the user can clear a field; `fallback` is shown as placeholder.
-        private func macroEditRow(label: String, value: Binding<Double?>, fallback: Double, unit: String) -> some View {
-            HStack {
-                Text(label)
-                Spacer()
-                TextField(
-                    String(format: "%.0f", fallback),
-                    value: value,
-                    format: .number.precision(.fractionLength(0 ... 1))
+                EditableDoubleField(
+                    modelValue: value,
+                    unit: unit,
+                    color: .secondary,
+                    fieldWidth: 60,
+                    alignTrailing: true,
+                    onCommit: onCommit
                 )
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .frame(maxWidth: 70)
-                .foregroundColor(.primary)
-                Text(unit)
-                    .foregroundColor(.secondary)
-                    .frame(width: 36, alignment: .trailing)
             }
             .font(.subheadline)
             .padding(.vertical, 8)
         }
 
-        private func beginTotalsEdit(for result: FoodAnalysisResult) {
-            if let override = result.manualMacroOverride {
-                totalsDraft = override
-            } else {
-                totalsDraft = MacroOverride(
-                    carbs: result.totalCarbs,
-                    fat: result.totalFat,
-                    protein: result.totalProtein,
-                    fiber: result.totalFiber,
-                    calories: result.totalCalories
-                )
+        /// Commit one field of the manual totals override. Nil means: fall
+        /// back to summed items for that macro.
+        private func commitTotal(
+            _ newValue: Double,
+            for keyPath: WritableKeyPath<MacroOverride, Double?>,
+            in result: FoodAnalysisResult
+        ) {
+            var override = result.manualMacroOverride ?? MacroOverride()
+            // Treat values within 0.5 of the auto-summed total as "no
+            // change" so the override only gets created when the user
+            // actually deviates. This keeps the "edited" badge meaningful.
+            let autoTotal: Double
+            switch keyPath {
+            case \MacroOverride.carbs: autoTotal = result.items.reduce(0) { $0 + $1.adjustedCarbs }
+            case \MacroOverride.fat: autoTotal = result.items.reduce(0) { $0 + $1.adjustedFat }
+            case \MacroOverride.protein: autoTotal = result.items.reduce(0) { $0 + $1.adjustedProtein }
+            case \MacroOverride.fiber: autoTotal = result.items.reduce(0) { $0 + $1.adjustedFiber }
+            case \MacroOverride.calories: autoTotal = result.items.reduce(0) { $0 + $1.adjustedCalories }
+            default: autoTotal = 0
             }
-            editingTotals = true
-        }
-
-        private func commitTotalsDraft() {
-            // Only fields the user filled in remain in the override; nil
-            // fields fall back to the summed item totals.
-            let trimmed = MacroOverride(
-                carbs: totalsDraft.carbs.map { max(0, $0) },
-                fat: totalsDraft.fat.map { max(0, $0) },
-                protein: totalsDraft.protein.map { max(0, $0) },
-                fiber: totalsDraft.fiber.map { max(0, $0) },
-                calories: totalsDraft.calories.map { max(0, $0) }
-            )
-            state.updateManualMacroOverride(trimmed.isEmpty ? nil : trimmed)
-            editingTotals = false
+            if abs(newValue - autoTotal) < 0.5 {
+                override[keyPath: keyPath] = nil
+            } else {
+                override[keyPath: keyPath] = max(0, newValue)
+            }
+            state.updateManualMacroOverride(override.isEmpty ? nil : override)
         }
 
         private func mealIdentityCard(_ result: FoodAnalysisResult) -> some View {
@@ -578,13 +521,13 @@ extension AIInsights {
         }
 
         private func foodItemRow(_ item: FoodItem) -> some View {
-            let isExpanded = expandedIngredientID == item.id
-            return VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(item.name)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(2)
+                        EditableNameField(
+                            modelName: item.name,
+                            onCommit: { state.updateItemName(for: item.id, name: $0) }
+                        )
                         Text(item.portion)
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -597,162 +540,86 @@ extension AIInsights {
                 }
 
                 HStack(spacing: 14) {
-                    ingredientMetric(String(localized: "Carbs", comment: "Carbs macro"), value: item.adjustedCarbs, unit: "g", color: .blue)
-                    ingredientMetric(String(localized: "Fat", comment: "Fat macro"), value: item.adjustedFat, unit: "g", color: .yellow)
-                    ingredientMetric(String(localized: "Protein", comment: "Protein macro"), value: item.adjustedProtein, unit: "g", color: .red)
-                    ingredientMetric(String(localized: "Fiber", comment: "Fiber macro"), value: item.adjustedFiber, unit: "g", color: .green)
-                    ingredientMetric(String(localized: "Calories", comment: "Calories label"), value: item.adjustedCalories, unit: "kcal", color: .secondary)
-                }
-
-                if isExpanded {
-                    inlineIngredientEditor(for: item)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    editableIngredientMetric(
+                        label: String(localized: "Carbs", comment: "Carbs macro"),
+                        value: item.adjustedCarbs,
+                        unit: "g",
+                        color: .blue,
+                        onCommit: { state.updateMacro(for: item.id, macro: .carbs, adjustedValue: $0) }
+                    )
+                    editableIngredientMetric(
+                        label: String(localized: "Fat", comment: "Fat macro"),
+                        value: item.adjustedFat,
+                        unit: "g",
+                        color: .yellow,
+                        onCommit: { state.updateMacro(for: item.id, macro: .fat, adjustedValue: $0) }
+                    )
+                    editableIngredientMetric(
+                        label: String(localized: "Protein", comment: "Protein macro"),
+                        value: item.adjustedProtein,
+                        unit: "g",
+                        color: .red,
+                        onCommit: { state.updateMacro(for: item.id, macro: .protein, adjustedValue: $0) }
+                    )
+                    editableIngredientMetric(
+                        label: String(localized: "Fiber", comment: "Fiber macro"),
+                        value: item.adjustedFiber,
+                        unit: "g",
+                        color: .green,
+                        onCommit: { state.updateMacro(for: item.id, macro: .fiber, adjustedValue: $0) }
+                    )
+                    readOnlyIngredientMetric(
+                        label: String(localized: "Calories", comment: "Calories label"),
+                        value: item.adjustedCalories,
+                        unit: "kcal"
+                    )
                 }
             }
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(isExpanded
-                        ? Color.accentColor.opacity(colorScheme == .dark ? 0.10 : 0.06)
-                        : Color.clear)
-            )
-            .overlay {
-                if isExpanded {
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(Color.accentColor, lineWidth: 1.5)
-                }
-            }
-            .animation(.easeInOut(duration: 0.22), value: isExpanded)
+            .padding(.vertical, 6)
         }
 
-        // MARK: - Inline ingredient editor
-
-        @ViewBuilder
-        private func inlineIngredientEditor(for item: FoodItem) -> some View {
-            let draftBinding = Binding<FoodItem>(
-                get: { editingDraft ?? item },
-                set: { editingDraft = $0 }
-            )
-            VStack(alignment: .leading, spacing: 10) {
-                Divider()
-                Text(String(localized: "Edit ingredient", comment: "Inline ingredient editor header"))
-                    .font(.caption.bold())
-                    .foregroundStyle(Color.accentColor)
-
-                editorTextField(
-                    title: String(localized: "Name", comment: "Ingredient name field"),
-                    text: draftBinding.name
+        /// Two-line editable ingredient stat: value (TextField) above a label.
+        /// On commit the new adjusted value is forwarded to the state model.
+        private func editableIngredientMetric(
+            label: String,
+            value: Double,
+            unit: String,
+            color: Color,
+            onCommit: @escaping (Double) -> Void
+        ) -> some View {
+            VStack(alignment: .leading, spacing: 2) {
+                EditableDoubleField(
+                    modelValue: value,
+                    unit: unit,
+                    color: color,
+                    onCommit: onCommit
                 )
-
-                editorTextField(
-                    title: String(localized: "Portion", comment: "Ingredient portion field"),
-                    text: draftBinding.portion
-                )
-
-                VStack(spacing: 6) {
-                    inlineMacroRow(label: String(localized: "Carbs", comment: "Carbs macro"), value: draftBinding.carbs, unit: "g", color: .blue)
-                    inlineMacroRow(label: String(localized: "Fat", comment: "Fat macro"), value: draftBinding.fat, unit: "g", color: .yellow)
-                    inlineMacroRow(label: String(localized: "Protein", comment: "Protein macro"), value: draftBinding.protein, unit: "g", color: .red)
-                    inlineMacroRow(label: String(localized: "Fiber", comment: "Fiber macro"), value: draftBinding.fiber, unit: "g", color: .green)
-                    inlineMacroRow(label: String(localized: "Calories", comment: "Calories label"), value: draftBinding.calories, unit: "kcal", color: .secondary)
-                }
-                .padding(.top, 2)
-
-                HStack(spacing: 8) {
-                    Button {
-                        triggerInlineReanalysis(for: item, query: draftBinding.wrappedValue.name)
-                    } label: {
-                        HStack(spacing: 6) {
-                            if state.isAnalyzing && awaitingReanalysisSync {
-                                ProgressView()
-                                    .controlSize(.small)
-                                Text(String(localized: "Analyzing…", comment: "AI re-analysis spinner"))
-                            } else {
-                                Image(systemName: "sparkles")
-                                Text(String(localized: "Re-analyze with AI", comment: "Re-analyze ingredient button"))
-                            }
-                        }
-                        .font(.caption.bold())
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(state.isAnalyzing || draftBinding.wrappedValue.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                    Spacer()
-
-                    Button {
-                        endInlineEdit(cancel: true)
-                    } label: {
-                        Text(String(localized: "Cancel", comment: "Cancel button"))
-                            .font(.caption)
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(.secondary)
-
-                    Button {
-                        endInlineEdit(cancel: false)
-                    } label: {
-                        Text(String(localized: "Done", comment: "Commit edits button"))
-                            .font(.caption.bold())
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                }
-            }
-        }
-
-        private func editorTextField(title: String, text: Binding<String>) -> some View {
-            HStack(spacing: 8) {
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 64, alignment: .leading)
-                TextField(title, text: text)
-                    .font(.subheadline)
-                    .textFieldStyle(.roundedBorder)
-            }
-        }
-
-        private func inlineMacroRow(label: String, value: Binding<Double>, unit: String, color: Color) -> some View {
-            HStack(spacing: 8) {
                 Text(label)
-                    .font(.caption)
-                    .foregroundStyle(color)
-                    .frame(width: 72, alignment: .leading)
-                TextField(label, value: value, format: .number.precision(.fractionLength(0 ... 1)))
-                    .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.trailing)
-                    .font(.caption.monospacedDigit())
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 80)
-                Text(unit)
                     .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        /// Calories metric — read-only. Derived from carbs/fat/protein
+        /// automatically in the state model via Atwater factors.
+        private func readOnlyIngredientMetric(
+            label: String,
+            value: Double,
+            unit: String
+        ) -> some View {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(String(format: "%.0f", value)) \(unit)")
+                    .font(.caption.bold())
                     .foregroundStyle(.secondary)
-                    .frame(width: 36, alignment: .leading)
-                Spacer(minLength: 0)
+                    .lineLimit(1)
+                Text(label)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
             }
-        }
-
-        private func beginInlineEdit(of item: FoodItem) {
-            // Auto-collapse totals editor when opening an ingredient editor.
-            editingTotals = false
-            editingDraft = item
-            expandedIngredientID = item.id
-        }
-
-        private func endInlineEdit(cancel: Bool) {
-            if !cancel, let draft = editingDraft {
-                state.replaceItem(draft)
-            }
-            expandedIngredientID = nil
-            editingDraft = nil
-        }
-
-        private func triggerInlineReanalysis(for item: FoodItem, query: String) {
-            let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-            awaitingReanalysisSync = true
-            Task { await state.reanalyzeItem(item.id, query: trimmed) }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
 
         /// Portion editor: minus / "1.00×" multiplier / plus, with an
@@ -818,20 +685,6 @@ extension AIInsights {
             return Double(raw)
         }
 
-        private func ingredientMetric(_ label: String, value: Double, unit: String, color: Color) -> some View {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(String(format: "%.0f", value)) \(unit)")
-                    .font(.caption.bold())
-                    .foregroundStyle(color)
-                    .lineLimit(1)
-                Text(label)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-
         private func mealTitle(for result: FoodAnalysisResult) -> String {
             result.mealName?.trimmingCharacters(in: .whitespacesAndNewlines).aiInsightsNilIfEmpty
                 ?? result.mealDescription?.trimmingCharacters(in: .whitespacesAndNewlines).aiInsightsNilIfEmpty
@@ -842,46 +695,6 @@ extension AIInsights {
         private func mealPortion(for result: FoodAnalysisResult) -> String? {
             result.mealPortion?.trimmingCharacters(in: .whitespacesAndNewlines).aiInsightsNilIfEmpty
                 ?? (result.items.count == 1 ? result.items.first?.portion : nil)
-        }
-
-        private func macroEditor(
-            item: FoodItem,
-            macro: FoodMacro,
-            label: String,
-            value: Double,
-            unit: String,
-            color: Color
-        ) -> some View {
-            VStack(spacing: 2) {
-                HStack(spacing: 2) {
-                    TextField(
-                        label,
-                        value: Binding(
-                            get: { value },
-                            set: { state.updateMacro(for: item.id, macro: macro, adjustedValue: $0) }
-                        ),
-                        format: .number.precision(.fractionLength(0 ... 1))
-                    )
-                    .multilineTextAlignment(.center)
-                    .keyboardType(.decimalPad)
-                    .font(.caption.bold())
-                    .foregroundStyle(color)
-                    .frame(minWidth: 24)
-                    .textFieldStyle(.roundedBorder)
-
-                    Text(unit)
-                        .font(.caption2.bold())
-                        .foregroundStyle(color)
-                }
-                Text(label)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color(.systemGray6))
-            )
         }
 
         // MARK: - Frequent Meals (auto-promoted from usage frequency)
@@ -1251,6 +1064,127 @@ extension AIInsights {
 /// +/- multiplier control next to it. Owns its own text-state so the user
 /// can type freely; commit happens on focus loss, submit, or the keyboard
 /// Done button. Re-syncs from the model when not focused.
+/// Inline-editable text field that looks like regular text until tapped.
+/// Used for the ingredient name in `foodItemRow`.
+private struct EditableNameField: View {
+    let modelName: String
+    let onCommit: (String) -> Void
+
+    @State private var text: String = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("", text: $text)
+            .font(.subheadline.weight(.semibold))
+            .textFieldStyle(.plain)
+            .lineLimit(1)
+            .focused($focused)
+            .submitLabel(.done)
+            .onAppear { syncText() }
+            .onChange(of: modelName) {
+                if !focused { syncText() }
+            }
+            .onChange(of: focused) { if !focused { commit() } }
+            .onSubmit { focused = false }
+            .padding(.vertical, 1)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(focused ? Color.accentColor : Color.secondary.opacity(0.25))
+                    .frame(height: focused ? 1 : 0.5)
+                    .offset(y: 2)
+            }
+            .toolbar {
+                if focused {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button(String(localized: "Done", comment: "Dismiss keyboard")) {
+                            focused = false
+                        }
+                        .bold()
+                    }
+                }
+            }
+    }
+
+    private func syncText() { text = modelName }
+
+    private func commit() {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            text = modelName
+        } else if trimmed != modelName {
+            onCommit(trimmed)
+        }
+    }
+}
+
+/// Inline-editable numeric field with a unit suffix. Owns its own text
+/// state so the user can type freely; commit fires on focus loss / submit.
+/// Used for ingredient macros and meal totals.
+private struct EditableDoubleField: View {
+    let modelValue: Double
+    let unit: String
+    let color: Color
+    var fieldWidth: CGFloat = 44
+    var alignTrailing: Bool = false
+    let onCommit: (Double) -> Void
+
+    @State private var text: String = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 2) {
+            TextField("", text: $text)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(alignTrailing ? .trailing : .leading)
+                .font(.caption.bold())
+                .foregroundStyle(color)
+                .focused($focused)
+                .frame(width: fieldWidth)
+                .onAppear { syncText() }
+                .onChange(of: modelValue) {
+                    if !focused { syncText() }
+                }
+                .onChange(of: focused) { if !focused { commit() } }
+                .onSubmit { focused = false }
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(focused ? Color.accentColor : Color.secondary.opacity(0.25))
+                        .frame(height: focused ? 1 : 0.5)
+                        .offset(y: 2)
+                }
+
+            Text(unit)
+                .font(.caption2.bold())
+                .foregroundStyle(color)
+        }
+        .toolbar {
+            if focused {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button(String(localized: "Done", comment: "Dismiss keyboard")) {
+                        focused = false
+                    }
+                    .bold()
+                }
+            }
+        }
+    }
+
+    private func syncText() {
+        text = String(format: "%.0f", modelValue)
+    }
+
+    private func commit() {
+        let normalized = text.replacingOccurrences(of: ",", with: ".")
+        if let value = Double(normalized), value >= 0 {
+            onCommit(value)
+        } else {
+            syncText()
+        }
+    }
+}
+
 private struct LinkedGramsField: View {
     let modelGrams: Double
     let baseGrams: Double
