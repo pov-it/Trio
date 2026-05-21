@@ -25,6 +25,21 @@ extension AIInsights {
         var adjustedCalories: Double { calories * portionMultiplier }
     }
 
+    /// Per-meal override that lets the user dictate the total macros without
+    /// having to scale individual ingredients. Any field left nil falls back
+    /// to the sum of `items`.
+    struct MacroOverride: Codable, Equatable {
+        var carbs: Double?
+        var fat: Double?
+        var protein: Double?
+        var fiber: Double?
+        var calories: Double?
+
+        var isEmpty: Bool {
+            carbs == nil && fat == nil && protein == nil && fiber == nil && calories == nil
+        }
+    }
+
     struct FoodAnalysisResult: Identifiable, Codable {
         var id: UUID = UUID()
         var items: [FoodItem]
@@ -36,12 +51,17 @@ extension AIInsights {
         var mealName: String? = nil
         var mealPortion: String? = nil
         var confidence: Double? = nil
+        var manualMacroOverride: MacroOverride? = nil
 
-        var totalCarbs: Double { items.reduce(0) { $0 + $1.adjustedCarbs } }
-        var totalFat: Double { items.reduce(0) { $0 + $1.adjustedFat } }
-        var totalProtein: Double { items.reduce(0) { $0 + $1.adjustedProtein } }
-        var totalFiber: Double { items.reduce(0) { $0 + $1.adjustedFiber } }
-        var totalCalories: Double { items.reduce(0) { $0 + $1.adjustedCalories } }
+        var totalCarbs: Double { manualMacroOverride?.carbs ?? items.reduce(0) { $0 + $1.adjustedCarbs } }
+        var totalFat: Double { manualMacroOverride?.fat ?? items.reduce(0) { $0 + $1.adjustedFat } }
+        var totalProtein: Double { manualMacroOverride?.protein ?? items.reduce(0) { $0 + $1.adjustedProtein } }
+        var totalFiber: Double { manualMacroOverride?.fiber ?? items.reduce(0) { $0 + $1.adjustedFiber } }
+        var totalCalories: Double { manualMacroOverride?.calories ?? items.reduce(0) { $0 + $1.adjustedCalories } }
+
+        var hasManualMacroOverride: Bool {
+            !(manualMacroOverride?.isEmpty ?? true)
+        }
 
         enum FoodSource: String, Codable {
             case aiText
@@ -581,6 +601,27 @@ extension AIInsights {
                   let idx = result.items.firstIndex(where: { $0.id == itemId })
             else { return }
             result.items[idx].name = name
+            storeUpdatedResult(result)
+        }
+
+        /// Replace an entire ingredient with edited values from the macro-edit
+        /// modal. The replacement keeps the original id so swipes/IDs remain stable.
+        func replaceItem(_ item: FoodItem) {
+            guard var result = currentResult,
+                  let idx = result.items.firstIndex(where: { $0.id == item.id })
+            else { return }
+            result.items[idx] = item
+            storeUpdatedResult(result)
+        }
+
+        /// Set or clear the per-meal manual macro override.
+        func updateManualMacroOverride(_ override: MacroOverride?) {
+            guard var result = currentResult else { return }
+            if let override, !override.isEmpty {
+                result.manualMacroOverride = override
+            } else {
+                result.manualMacroOverride = nil
+            }
             storeUpdatedResult(result)
         }
 

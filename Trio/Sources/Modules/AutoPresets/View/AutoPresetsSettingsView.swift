@@ -20,7 +20,6 @@ struct AutoPresetsSettingsView: View {
 
     @State private var presets: [PresetRow] = []
     @State private var showingClearLogConfirm = false
-    @State private var refreshTrigger = UUID()
 
     var body: some View {
         Form {
@@ -32,14 +31,10 @@ struct AutoPresetsSettingsView: View {
             timingSection
             recentActivitySection
         }
-        .id(refreshTrigger)
         .navigationTitle(String(localized: "AutoPresets"))
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await loadPresets()
-        }
-        .onReceive(coordinator.objectWillChange) { _ in
-            refreshTrigger = UUID()
         }
     }
 

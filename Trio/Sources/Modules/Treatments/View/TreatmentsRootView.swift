@@ -19,7 +19,6 @@ extension Treatments {
 
         @State var state = StateModel()
 
-        @State private var showPresetSheet = false
         @State private var autofocus: Bool = true
         @State private var calculatorDetent = PresentationDetent.large
         @State private var pushed: Bool = false
@@ -409,22 +408,12 @@ extension Treatments {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        Button(action: {
-                            showFoodFinder = true
-                        }, label: {
-                            Image(systemName: "fork.knife.circle")
-                        })
-                        .accessibilityLabel(String(localized: "FoodFinder", comment: "FoodFinder toolbar button"))
-
-                        if state.displayPresets {
-                            Button(action: {
-                                showPresetSheet = true
-                            }, label: {
-                                Label(String(localized: "Presets", comment: "Meal presets button"), systemImage: "plus")
-                            })
-                        }
-                    }
+                    Button(action: {
+                        showFoodFinder = true
+                    }, label: {
+                        Image(systemName: "fork.knife.circle")
+                    })
+                    .accessibilityLabel(String(localized: "FoodFinder", comment: "FoodFinder toolbar button"))
                 }
             })
             .onAppear {
@@ -448,11 +437,6 @@ extension Treatments {
             }
             .sheet(isPresented: $state.showInfo) {
                 PopupView(state: state)
-            }
-            .sheet(isPresented: $showPresetSheet, onDismiss: {
-                showPresetSheet = false
-            }) {
-                MealPresetView(state: state)
             }
             .sheet(isPresented: $showFoodFinder, onDismiss: {
                 Task { await state.applyFoodFinderHandoffIfNeeded() }
