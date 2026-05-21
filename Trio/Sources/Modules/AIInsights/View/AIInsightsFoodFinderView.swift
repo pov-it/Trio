@@ -12,8 +12,16 @@ extension AIInsights {
         @Environment(AppState.self) var appState
         @Environment(\.managedObjectContext) var moc
         @FocusState private var isTextFieldFocused: Bool
-        @State private var editingItem: FoodItem?
+        /// id of the ingredient whose inline edit panel is expanded.
+        @State private var expandedIngredientID: UUID?
+        /// Mutable working copy of the ingredient currently being edited inline.
+        @State private var editingDraft: FoodItem?
+        /// Tracks whether the user requested an AI re-analysis from the
+        /// inline edit panel; resyncs the draft once it completes.
+        @State private var awaitingReanalysisSync: Bool = false
+        /// Tap pen icon on totals card to flip macro rows into TextFields.
         @State private var editingTotals: Bool = false
+        @State private var totalsDraft: MacroOverride = MacroOverride()
 
         @FetchRequest(
             entity: MealPresetStored.entity(),
@@ -22,17 +30,54 @@ extension AIInsights {
 
 
         var body: some View {
-            rootContent
-                .navigationDestination(isPresented: Binding(
-                    get: { state.currentResult != nil },
-                    set: { isPresented in
-                        if !isPresented { state.currentResult = nil }
+            VStack(spacing: 0) {
+                contentArea
+                foodInputBar
+            }
+            .background(appState.trioBackgroundColor(for: colorScheme))
+            .navigationTitle(currentNavTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(state.currentResult != nil)
+            .toolbar {
+                if state.currentResult != nil {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            state.clearResult()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "chevron.backward")
+                                Text(String(localized: "FoodFinder", comment: "Nav title"))
+                            }
+                        }
                     }
-                )) {
-                    mealDetailScreen
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            state.clearResult()
+                        } label: {
+                            Text(String(localized: "New", comment: "New analysis button"))
+                                .font(.subheadline)
+                        }
+                    }
                 }
-                .onAppear(perform: configureView)
-                .fullScreenCover(isPresented: $state.showCamera) {
+            }
+            .simultaneousGesture(swipeBackGesture)
+            .onAppear(perform: configureView)
+            .onChange(of: state.currentResult?.id) {
+                // Switching meal → close any open inline edit panel.
+                expandedIngredientID = nil
+                editingDraft = nil
+                editingTotals = false
+            }
+            .onChange(of: state.isAnalyzing) {
+                guard !state.isAnalyzing, awaitingReanalysisSync else { return }
+                awaitingReanalysisSync = false
+                if let id = expandedIngredientID,
+                   let refreshed = state.currentResult?.items.first(where: { $0.id == id })
+                {
+                    editingDraft = refreshed
+                }
+            }
+            .fullScreenCover(isPresented: $state.showCamera) {
                 AIInsights.CameraCaptureView { imageData in
                     state.pendingImageForCrop = imageData
                 }
@@ -78,24 +123,52 @@ extension AIInsights {
                     .ignoresSafeArea()
                 }
             }
-            .sheet(item: $editingItem) { item in
-                IngredientEditSheet(
-                    initialItem: item,
-                    onSave: { updated in state.replaceItem(updated) },
-                    onReanalyze: { query in
-                        Task { await state.reanalyzeItem(item.id, query: query) }
-                    }
-                )
+        }
+
+        // MARK: - Content area + transitions
+
+        private var currentNavTitle: String {
+            if let result = state.currentResult {
+                return mealTitle(for: result)
             }
-            .sheet(isPresented: $editingTotals) {
+            return String(localized: "FoodFinder", comment: "Nav title")
+        }
+
+        @ViewBuilder
+        private var contentArea: some View {
+            ZStack {
                 if let result = state.currentResult {
-                    TotalsEditSheet(
-                        result: result,
-                        onSave: { override in state.updateManualMacroOverride(override) }
-                    )
+                    mealDetailScreen(for: result)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .move(edge: .trailing).combined(with: .opacity)
+                        ))
+                } else {
+                    rootContent
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .leading).combined(with: .opacity),
+                            removal: .move(edge: .leading).combined(with: .opacity)
+                        ))
                 }
             }
+            .animation(.easeInOut(duration: 0.28), value: state.currentResult?.id)
         }
+
+        /// Edge-pan back gesture: starting near the left edge and dragging
+        /// right closes the meal detail. Approximates the standard iOS
+        /// swipe-back behavior without depending on a navigation push.
+        private var swipeBackGesture: some Gesture {
+            DragGesture(minimumDistance: 20, coordinateSpace: .global)
+                .onEnded { value in
+                    guard state.currentResult != nil else { return }
+                    guard value.startLocation.x < 40 else { return }
+                    guard value.translation.width > 80,
+                          abs(value.translation.height) < 120
+                    else { return }
+                    state.clearResult()
+                }
+        }
+
 
         // MARK: - Root content (default FoodFinder page)
 
@@ -125,45 +198,19 @@ extension AIInsights {
             .scrollContentBackground(.hidden)
             .background(appState.trioBackgroundColor(for: colorScheme))
             .scrollDismissesKeyboard(.interactively)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                // Only show the input bar at the root when no meal is active.
-                // Otherwise SwiftUI is in the middle of pushing the meal detail
-                // and we'd briefly render the "Adding to..." context here.
-                if state.currentResult == nil {
-                    foodInputBar
-                }
-            }
-            .navigationTitle(String(localized: "FoodFinder", comment: "Nav title"))
-            .navigationBarTitleDisplayMode(.inline)
         }
 
-        // MARK: - Meal detail screen (pushed onto nav stack)
+        // MARK: - Meal detail screen (in-place swap, not nav push)
 
-        @ViewBuilder private var mealDetailScreen: some View {
-            if let result = state.currentResult {
-                List {
-                    resultSections(result)
-                }
-                .listStyle(.insetGrouped)
-                .scrollContentBackground(.hidden)
-                .background(appState.trioBackgroundColor(for: colorScheme))
-                .scrollDismissesKeyboard(.interactively)
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    foodInputBar
-                }
-                .navigationTitle(mealTitle(for: result))
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            state.clearResult()
-                        } label: {
-                            Text(String(localized: "New", comment: "New analysis button"))
-                                .font(.subheadline)
-                        }
-                    }
-                }
+        @ViewBuilder
+        private func mealDetailScreen(for result: FoodAnalysisResult) -> some View {
+            List {
+                resultSections(result)
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(appState.trioBackgroundColor(for: colorScheme))
+            .scrollDismissesKeyboard(.interactively)
         }
 
         // MARK: - Empty State
@@ -244,6 +291,7 @@ extension AIInsights {
             Section {
                 ForEach(result.items) { item in
                     foodItemRow(item)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6))
                         .swipeActions(edge: .trailing) {
                             Button(String(localized: "Delete", comment: "Delete food item"), systemImage: "trash", role: .destructive) {
                                 withAnimation { state.removeItem(item.id) }
@@ -251,7 +299,7 @@ extension AIInsights {
                         }
                         .swipeActions(edge: .leading) {
                             Button(String(localized: "Edit", comment: "Edit food item"), systemImage: "slider.horizontal.3") {
-                                editingItem = item
+                                beginInlineEdit(of: item)
                             }
                             .tint(.blue)
                         }
@@ -265,12 +313,16 @@ extension AIInsights {
                     state.sendToBolusCalculator(openBolusCalculator: onHandoffComplete == nil)
                     onHandoffComplete?()
                 } label: {
-                    Label(String(localized: "Use in Bolus Calculator", comment: "FoodFinder bolus handoff button"), systemImage: "arrow.forward.circle.fill")
-                        .frame(maxWidth: .infinity)
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.forward.circle.fill")
+                        Text(String(localized: "Use in Bolus Calculator", comment: "FoodFinder bolus handoff button"))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .multilineTextAlignment(.center)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .disabled(result.items.isEmpty)
+                .disabled(result.items.isEmpty || state.isAnalyzing)
 
                 if let error = state.errorMessage {
                     HStack {
@@ -355,34 +407,75 @@ extension AIInsights {
                             .foregroundStyle(Color.accentColor)
                     }
                     Spacer()
-                    Button {
-                        editingTotals = true
-                    } label: {
-                        Image(systemName: "square.and.pencil")
-                            .foregroundStyle(Color.accentColor)
+                    if editingTotals {
+                        if result.hasManualMacroOverride {
+                            Button {
+                                state.updateManualMacroOverride(nil)
+                                editingTotals = false
+                            } label: {
+                                Text(String(localized: "Reset", comment: "Reset manual totals button"))
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.secondary)
+                        }
+                        Button {
+                            commitTotalsDraft()
+                        } label: {
+                            Text(String(localized: "Done", comment: "Commit edits button"))
+                                .font(.subheadline.bold())
+                                .foregroundStyle(Color.accentColor)
+                        }
+                        .buttonStyle(.borderless)
+                    } else {
+                        Button {
+                            beginTotalsEdit(for: result)
+                        } label: {
+                            Image(systemName: "square.and.pencil")
+                                .foregroundStyle(Color.accentColor)
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(String(localized: "Edit totals", comment: "Edit meal totals accessibility label"))
                     }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel(String(localized: "Edit totals", comment: "Edit meal totals accessibility label"))
                 }
                 .padding(.top, 11)
                 .padding(.bottom, 4)
 
                 Divider()
-                macroSummaryRow(label: String(localized: "Carbs", comment: "Carbs macro"), value: result.totalCarbs, unit: "g")
-                Divider()
-                macroSummaryRow(label: String(localized: "Fat", comment: "Fat macro"), value: result.totalFat, unit: "g")
-                Divider()
-                macroSummaryRow(label: String(localized: "Protein", comment: "Protein macro"), value: result.totalProtein, unit: "g")
-                Divider()
-                macroSummaryRow(label: String(localized: "Fiber", comment: "Fiber macro"), value: result.totalFiber, unit: "g")
-                Divider()
-                macroSummaryRow(label: String(localized: "Calories", comment: "Calories label"), value: result.totalCalories, unit: "kcal")
+                if editingTotals {
+                    macroEditRow(label: String(localized: "Carbs", comment: "Carbs macro"), value: $totalsDraft.carbs, fallback: result.totalCarbs, unit: "g")
+                    Divider()
+                    macroEditRow(label: String(localized: "Fat", comment: "Fat macro"), value: $totalsDraft.fat, fallback: result.totalFat, unit: "g")
+                    Divider()
+                    macroEditRow(label: String(localized: "Protein", comment: "Protein macro"), value: $totalsDraft.protein, fallback: result.totalProtein, unit: "g")
+                    Divider()
+                    macroEditRow(label: String(localized: "Fiber", comment: "Fiber macro"), value: $totalsDraft.fiber, fallback: result.totalFiber, unit: "g")
+                    Divider()
+                    macroEditRow(label: String(localized: "Calories", comment: "Calories label"), value: $totalsDraft.calories, fallback: result.totalCalories, unit: "kcal")
+                } else {
+                    macroSummaryRow(label: String(localized: "Carbs", comment: "Carbs macro"), value: result.totalCarbs, unit: "g")
+                    Divider()
+                    macroSummaryRow(label: String(localized: "Fat", comment: "Fat macro"), value: result.totalFat, unit: "g")
+                    Divider()
+                    macroSummaryRow(label: String(localized: "Protein", comment: "Protein macro"), value: result.totalProtein, unit: "g")
+                    Divider()
+                    macroSummaryRow(label: String(localized: "Fiber", comment: "Fiber macro"), value: result.totalFiber, unit: "g")
+                    Divider()
+                    macroSummaryRow(label: String(localized: "Calories", comment: "Calories label"), value: result.totalCalories, unit: "kcal")
+                }
             }
             .padding(.horizontal)
             .background(
                 RoundedRectangle(cornerRadius: 12)
                     .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white)
             )
+            .overlay {
+                if editingTotals {
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Color.accentColor, lineWidth: 1.5)
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: editingTotals)
         }
 
         private func macroSummaryRow(label: String, value: Double, unit: String) -> some View {
@@ -394,6 +487,59 @@ extension AIInsights {
             }
             .font(.subheadline)
             .padding(.vertical, 11)
+        }
+
+        /// Inline-editable variant of macroSummaryRow used while the user is
+        /// editing the meal totals. The bound value is `Optional<Double>` so
+        /// the user can clear a field; `fallback` is shown as placeholder.
+        private func macroEditRow(label: String, value: Binding<Double?>, fallback: Double, unit: String) -> some View {
+            HStack {
+                Text(label)
+                Spacer()
+                TextField(
+                    String(format: "%.0f", fallback),
+                    value: value,
+                    format: .number.precision(.fractionLength(0 ... 1))
+                )
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .frame(maxWidth: 70)
+                .foregroundColor(.primary)
+                Text(unit)
+                    .foregroundColor(.secondary)
+                    .frame(width: 36, alignment: .trailing)
+            }
+            .font(.subheadline)
+            .padding(.vertical, 8)
+        }
+
+        private func beginTotalsEdit(for result: FoodAnalysisResult) {
+            if let override = result.manualMacroOverride {
+                totalsDraft = override
+            } else {
+                totalsDraft = MacroOverride(
+                    carbs: result.totalCarbs,
+                    fat: result.totalFat,
+                    protein: result.totalProtein,
+                    fiber: result.totalFiber,
+                    calories: result.totalCalories
+                )
+            }
+            editingTotals = true
+        }
+
+        private func commitTotalsDraft() {
+            // Only fields the user filled in remain in the override; nil
+            // fields fall back to the summed item totals.
+            let trimmed = MacroOverride(
+                carbs: totalsDraft.carbs.map { max(0, $0) },
+                fat: totalsDraft.fat.map { max(0, $0) },
+                protein: totalsDraft.protein.map { max(0, $0) },
+                fiber: totalsDraft.fiber.map { max(0, $0) },
+                calories: totalsDraft.calories.map { max(0, $0) }
+            )
+            state.updateManualMacroOverride(trimmed.isEmpty ? nil : trimmed)
+            editingTotals = false
         }
 
         private func mealIdentityCard(_ result: FoodAnalysisResult) -> some View {
@@ -432,7 +578,8 @@ extension AIInsights {
         }
 
         private func foodItemRow(_ item: FoodItem) -> some View {
-            VStack(alignment: .leading, spacing: 12) {
+            let isExpanded = expandedIngredientID == item.id
+            return VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.name)
@@ -456,29 +603,170 @@ extension AIInsights {
                     ingredientMetric(String(localized: "Fiber", comment: "Fiber macro"), value: item.adjustedFiber, unit: "g", color: .green)
                     ingredientMetric(String(localized: "Calories", comment: "Calories label"), value: item.adjustedCalories, unit: "kcal", color: .secondary)
                 }
+
+                if isExpanded {
+                    inlineIngredientEditor(for: item)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
-            .padding(.vertical, 6)
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isExpanded
+                        ? Color.accentColor.opacity(colorScheme == .dark ? 0.10 : 0.06)
+                        : Color.clear)
+            )
+            .overlay {
+                if isExpanded {
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Color.accentColor, lineWidth: 1.5)
+                }
+            }
+            .animation(.easeInOut(duration: 0.22), value: isExpanded)
         }
 
-        /// Compact portion editor: minus / editable grams (or "x.xx×") / plus.
-        /// Tries to extract grams from `item.portion` (e.g. "500g cooked"); if found,
-        /// renders a numeric TextField for direct gram entry. Otherwise falls back to
-        /// the multiplier display. +/- step is 0.25× either way.
+        // MARK: - Inline ingredient editor
+
+        @ViewBuilder
+        private func inlineIngredientEditor(for item: FoodItem) -> some View {
+            let draftBinding = Binding<FoodItem>(
+                get: { editingDraft ?? item },
+                set: { editingDraft = $0 }
+            )
+            VStack(alignment: .leading, spacing: 10) {
+                Divider()
+                Text(String(localized: "Edit ingredient", comment: "Inline ingredient editor header"))
+                    .font(.caption.bold())
+                    .foregroundStyle(Color.accentColor)
+
+                editorTextField(
+                    title: String(localized: "Name", comment: "Ingredient name field"),
+                    text: draftBinding.name
+                )
+
+                editorTextField(
+                    title: String(localized: "Portion", comment: "Ingredient portion field"),
+                    text: draftBinding.portion
+                )
+
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 8, verticalSpacing: 6) {
+                    inlineMacroRow(label: String(localized: "Carbs", comment: "Carbs macro"), value: draftBinding.carbs, unit: "g", color: .blue)
+                    inlineMacroRow(label: String(localized: "Fat", comment: "Fat macro"), value: draftBinding.fat, unit: "g", color: .yellow)
+                    inlineMacroRow(label: String(localized: "Protein", comment: "Protein macro"), value: draftBinding.protein, unit: "g", color: .red)
+                    inlineMacroRow(label: String(localized: "Fiber", comment: "Fiber macro"), value: draftBinding.fiber, unit: "g", color: .green)
+                    inlineMacroRow(label: String(localized: "Calories", comment: "Calories label"), value: draftBinding.calories, unit: "kcal", color: .secondary)
+                }
+                .padding(.top, 2)
+
+                HStack(spacing: 8) {
+                    Button {
+                        triggerInlineReanalysis(for: item, query: draftBinding.wrappedValue.name)
+                    } label: {
+                        HStack(spacing: 6) {
+                            if state.isAnalyzing && awaitingReanalysisSync {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text(String(localized: "Analyzing…", comment: "AI re-analysis spinner"))
+                            } else {
+                                Image(systemName: "sparkles")
+                                Text(String(localized: "Re-analyze with AI", comment: "Re-analyze ingredient button"))
+                            }
+                        }
+                        .font(.caption.bold())
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(state.isAnalyzing || draftBinding.wrappedValue.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Spacer()
+
+                    Button {
+                        endInlineEdit(cancel: true)
+                    } label: {
+                        Text(String(localized: "Cancel", comment: "Cancel button"))
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+
+                    Button {
+                        endInlineEdit(cancel: false)
+                    } label: {
+                        Text(String(localized: "Done", comment: "Commit edits button"))
+                            .font(.caption.bold())
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+            }
+        }
+
+        private func editorTextField(title: String, text: Binding<String>) -> some View {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 64, alignment: .leading)
+                TextField(title, text: text)
+                    .font(.subheadline)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+
+        private func inlineMacroRow(label: String, value: Binding<Double>, unit: String, color: Color) -> GridRow {
+            GridRow {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(color)
+                    .gridColumnAlignment(.leading)
+                TextField(label, value: value, format: .number.precision(.fractionLength(0 ... 1)))
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .font(.caption.monospacedDigit())
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 80)
+                Text(unit)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, alignment: .leading)
+            }
+        }
+
+        private func beginInlineEdit(of item: FoodItem) {
+            // Auto-collapse totals editor when opening an ingredient editor.
+            editingTotals = false
+            editingDraft = item
+            expandedIngredientID = item.id
+        }
+
+        private func endInlineEdit(cancel: Bool) {
+            if !cancel, let draft = editingDraft {
+                state.replaceItem(draft)
+            }
+            expandedIngredientID = nil
+            editingDraft = nil
+        }
+
+        private func triggerInlineReanalysis(for item: FoodItem, query: String) {
+            let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            awaitingReanalysisSync = true
+            Task { await state.reanalyzeItem(item.id, query: trimmed) }
+        }
+
+        /// Portion editor: minus / "1.00×" multiplier / plus, with an
+        /// optional separate grams field on the right if the original portion
+        /// description contained a gram value. Both controls map to the same
+        /// underlying `portionMultiplier`, so editing grams keeps the
+        /// multiplier in sync and vice versa.
         @ViewBuilder
         private func portionControl(for item: FoodItem) -> some View {
-            if let base = portionGramsFromString(item.portion) {
-                PortionGramsControl(
-                    modelGrams: base * item.portionMultiplier,
-                    baseGrams: base,
-                    onCommit: { newGrams in
-                        let multiplier = max(0.1, newGrams / base)
-                        state.updatePortion(for: item.id, multiplier: multiplier)
-                    }
-                )
-            } else {
+            let base = portionGramsFromString(item.portion)
+            HStack(spacing: 8) {
                 HStack(spacing: 4) {
                     Button {
-                        state.updatePortion(for: item.id, multiplier: item.portionMultiplier - 0.25)
+                        let new = max(0.1, item.portionMultiplier - 0.25)
+                        state.updatePortion(for: item.id, multiplier: new)
                     } label: {
                         Image(systemName: "minus.circle")
                             .foregroundColor(.secondary)
@@ -486,9 +774,9 @@ extension AIInsights {
                     .buttonStyle(.borderless)
                     .contentShape(Rectangle())
 
-                    Text(String(format: "%.2fx", item.portionMultiplier))
+                    Text(String(format: "%.2f×", item.portionMultiplier))
                         .font(.caption.monospacedDigit())
-                        .frame(width: 42)
+                        .frame(width: 46)
 
                     Button {
                         state.updatePortion(for: item.id, multiplier: item.portionMultiplier + 0.25)
@@ -498,6 +786,17 @@ extension AIInsights {
                     }
                     .buttonStyle(.borderless)
                     .contentShape(Rectangle())
+                }
+
+                if let base {
+                    LinkedGramsField(
+                        modelGrams: base * item.portionMultiplier,
+                        baseGrams: base,
+                        onCommit: { newGrams in
+                            let multiplier = max(0.1, newGrams / base)
+                            state.updatePortion(for: item.id, multiplier: multiplier)
+                        }
+                    )
                 }
             }
         }
@@ -786,7 +1085,10 @@ extension AIInsights {
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
                     .padding(.bottom, 4)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .bottom).combined(with: .opacity).combined(with: .scale(scale: 0.85, anchor: .bottom)),
+                        removal: .move(edge: .bottom).combined(with: .opacity)
+                    ))
                 }
 
                 VStack(spacing: 6) {
@@ -905,7 +1207,7 @@ extension AIInsights {
                 .padding(.vertical, 8)
             }
             .background(colorScheme == .dark ? Color.bgDarkBlue : Color.white)
-            .animation(.easeInOut(duration: 0.25), value: state.currentResult?.id)
+            .animation(.spring(response: 0.45, dampingFraction: 0.72), value: state.currentResult?.id)
         }
 
         private var hasFoodFinderInput: Bool {
@@ -941,248 +1243,14 @@ extension AIInsights {
     }
 }
 
-// MARK: - Ingredient Edit Sheet
-
-private struct IngredientEditSheet: View {
-    let initialItem: AIInsights.FoodItem
-    let onSave: (AIInsights.FoodItem) -> Void
-    let onReanalyze: (String) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(AppState.self) private var appState
-
-    @State private var name: String = ""
-    @State private var portion: String = ""
-    @State private var carbs: Double = 0
-    @State private var fat: Double = 0
-    @State private var protein: Double = 0
-    @State private var fiber: Double = 0
-    @State private var calories: Double = 0
-    @FocusState private var focusedField: Field?
-
-    private enum Field: Hashable {
-        case name, portion, carbs, fat, protein, fiber, calories
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section(header: Text(String(localized: "Ingredient", comment: "Edit ingredient section header"))) {
-                    TextField(
-                        String(localized: "Name", comment: "Ingredient name field"),
-                        text: $name
-                    )
-                    .focused($focusedField, equals: .name)
-
-                    TextField(
-                        String(localized: "Portion description", comment: "Ingredient portion field"),
-                        text: $portion
-                    )
-                    .focused($focusedField, equals: .portion)
-                }
-
-                Section(
-                    header: Text(String(localized: "Macros (per base portion)", comment: "Edit ingredient macros section header")),
-                    footer: Text(String(localized: "These values are per the base portion shown above. Use the +/- buttons in the ingredient row to scale.", comment: "Edit ingredient macros footer"))
-                ) {
-                    macroField(label: String(localized: "Carbs", comment: "Carbs macro"), value: $carbs, unit: "g", field: .carbs)
-                    macroField(label: String(localized: "Fat", comment: "Fat macro"), value: $fat, unit: "g", field: .fat)
-                    macroField(label: String(localized: "Protein", comment: "Protein macro"), value: $protein, unit: "g", field: .protein)
-                    macroField(label: String(localized: "Fiber", comment: "Fiber macro"), value: $fiber, unit: "g", field: .fiber)
-                    macroField(label: String(localized: "Calories", comment: "Calories label"), value: $calories, unit: "kcal", field: .calories)
-                }
-
-                Section {
-                    Button {
-                        let query = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !query.isEmpty else { return }
-                        onReanalyze(query)
-                        dismiss()
-                    } label: {
-                        Label(
-                            String(localized: "Re-analyze with AI", comment: "Re-analyze ingredient button"),
-                            systemImage: "sparkles"
-                        )
-                    }
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background(appState.trioBackgroundColor(for: colorScheme))
-            .navigationTitle(String(localized: "Edit Ingredient", comment: "Edit ingredient sheet title"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(String(localized: "Cancel", comment: "Cancel button")) { dismiss() }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(String(localized: "Save", comment: "Save button")) {
-                        commit()
-                        dismiss()
-                    }
-                    .bold()
-                }
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button(String(localized: "Done", comment: "Dismiss keyboard")) { focusedField = nil }.bold()
-                }
-            }
-            .onAppear {
-                name = initialItem.name
-                portion = initialItem.portion
-                carbs = initialItem.carbs
-                fat = initialItem.fat
-                protein = initialItem.protein
-                fiber = initialItem.fiber
-                calories = initialItem.calories
-            }
-        }
-    }
-
-    private func macroField(label: String, value: Binding<Double>, unit: String, field: Field) -> some View {
-        HStack {
-            Text(label)
-            Spacer()
-            TextField(label, value: value, format: .number.precision(.fractionLength(0 ... 1)))
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .focused($focusedField, equals: field)
-                .frame(maxWidth: 80)
-            Text(unit)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .frame(width: 36, alignment: .leading)
-        }
-    }
-
-    private func commit() {
-        var updated = initialItem
-        updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? initialItem.name
-            : name
-        updated.portion = portion
-        updated.carbs = max(0, carbs)
-        updated.fat = max(0, fat)
-        updated.protein = max(0, protein)
-        updated.fiber = max(0, fiber)
-        updated.calories = max(0, calories)
-        onSave(updated)
-    }
-}
-
-// MARK: - Totals Edit Sheet
-
-private struct TotalsEditSheet: View {
-    let result: AIInsights.FoodAnalysisResult
-    let onSave: (AIInsights.MacroOverride?) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(AppState.self) private var appState
-
-    @State private var carbs: Double = 0
-    @State private var fat: Double = 0
-    @State private var protein: Double = 0
-    @State private var fiber: Double = 0
-    @State private var calories: Double = 0
-    @State private var overrideEnabled: Bool = false
-    @FocusState private var focusedField: Field?
-
-    private enum Field: Hashable {
-        case carbs, fat, protein, fiber, calories
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section(
-                    footer: Text(String(localized: "Disable to fall back to the sum of ingredient macros.", comment: "Totals override footer"))
-                ) {
-                    Toggle(String(localized: "Override totals", comment: "Manual totals override toggle"), isOn: $overrideEnabled)
-                }
-
-                Section(header: Text(String(localized: "Meal Totals", comment: "Totals edit section header"))) {
-                    totalsField(label: String(localized: "Carbs", comment: "Carbs macro"), value: $carbs, unit: "g", field: .carbs)
-                    totalsField(label: String(localized: "Fat", comment: "Fat macro"), value: $fat, unit: "g", field: .fat)
-                    totalsField(label: String(localized: "Protein", comment: "Protein macro"), value: $protein, unit: "g", field: .protein)
-                    totalsField(label: String(localized: "Fiber", comment: "Fiber macro"), value: $fiber, unit: "g", field: .fiber)
-                    totalsField(label: String(localized: "Calories", comment: "Calories label"), value: $calories, unit: "kcal", field: .calories)
-                }
-                .disabled(!overrideEnabled)
-            }
-            .scrollContentBackground(.hidden)
-            .background(appState.trioBackgroundColor(for: colorScheme))
-            .navigationTitle(String(localized: "Edit Totals", comment: "Edit totals sheet title"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(String(localized: "Cancel", comment: "Cancel button")) { dismiss() }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(String(localized: "Save", comment: "Save button")) {
-                        commit()
-                        dismiss()
-                    }
-                    .bold()
-                }
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button(String(localized: "Done", comment: "Dismiss keyboard")) { focusedField = nil }.bold()
-                }
-            }
-            .onAppear {
-                let existing = result.manualMacroOverride
-                carbs = existing?.carbs ?? result.totalCarbs
-                fat = existing?.fat ?? result.totalFat
-                protein = existing?.protein ?? result.totalProtein
-                fiber = existing?.fiber ?? result.totalFiber
-                calories = existing?.calories ?? result.totalCalories
-                overrideEnabled = result.hasManualMacroOverride
-            }
-        }
-    }
-
-    private func totalsField(label: String, value: Binding<Double>, unit: String, field: Field) -> some View {
-        HStack {
-            Text(label)
-            Spacer()
-            TextField(label, value: value, format: .number.precision(.fractionLength(0 ... 1)))
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .focused($focusedField, equals: field)
-                .frame(maxWidth: 80)
-            Text(unit)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .frame(width: 36, alignment: .leading)
-        }
-    }
-
-    private func commit() {
-        guard overrideEnabled else {
-            onSave(nil)
-            return
-        }
-        let override = AIInsights.MacroOverride(
-            carbs: max(0, carbs),
-            fat: max(0, fat),
-            protein: max(0, protein),
-            fiber: max(0, fiber),
-            calories: max(0, calories)
-        )
-        onSave(override)
-    }
-}
 
 // MARK: - Flow Layout (for example food chips)
 
-/// Compact portion editor: minus / editable grams field / plus, with a
-/// keyboard Done button so the user can commit explicitly. The +/- buttons
-/// operate on the currently-displayed grams (including any uncommitted typed
-/// value), so typing "300" and tapping + adds a step to 300 — not to the
-/// pre-edit value.
-private struct PortionGramsControl: View {
+/// Grams TextField linked to the same underlying `portionMultiplier` as the
+/// +/- multiplier control next to it. Owns its own text-state so the user
+/// can type freely; commit happens on focus loss, submit, or the keyboard
+/// Done button. Re-syncs from the model when not focused.
+private struct LinkedGramsField: View {
     let modelGrams: Double
     let baseGrams: Double
     let onCommit: (Double) -> Void
@@ -1190,83 +1258,49 @@ private struct PortionGramsControl: View {
     @State private var text: String = ""
     @FocusState private var focused: Bool
 
-    private var displayedGrams: Double {
-        let normalized = text.replacingOccurrences(of: ",", with: ".")
-        if let g = Double(normalized), g > 0 { return g }
-        return modelGrams
-    }
-
-    private var step: Double {
-        max(1, baseGrams * 0.25)
-    }
-
     var body: some View {
-        HStack(spacing: 4) {
-            Button {
-                let newGrams = max(baseGrams * 0.1, displayedGrams - step)
-                text = formatted(newGrams)
-                onCommit(newGrams)
-            } label: {
-                Image(systemName: "minus.circle")
-                    .foregroundColor(.secondary)
+        TextField("", text: $text)
+            .keyboardType(.decimalPad)
+            .multilineTextAlignment(.center)
+            .font(.caption.monospacedDigit())
+            .focused($focused)
+            .frame(width: 60)
+            .onAppear { syncText() }
+            .onChange(of: modelGrams) {
+                if !focused { syncText() }
             }
-            .buttonStyle(.borderless)
-            .contentShape(Rectangle())
-
-            TextField("", text: $text)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.center)
-                .font(.caption.monospacedDigit())
-                .focused($focused)
-                .frame(width: 64)
-                .onAppear { syncText() }
-                .onChange(of: modelGrams) {
-                    if !focused { syncText() }
-                }
-                .onChange(of: focused) {
-                    if !focused { commit() }
-                }
-                .onSubmit { commit() }
-                .padding(.vertical, 2)
-                .padding(.horizontal, 4)
-                .background(
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(Color.secondary.opacity(0.4), lineWidth: 0.5)
-                )
-                .overlay(alignment: .trailing) {
-                    Text("g")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .padding(.trailing, 2)
-                        .opacity(focused ? 0 : 1)
-                }
-                .toolbar {
-                    if focused {
-                        ToolbarItemGroup(placement: .keyboard) {
-                            Spacer()
-                            Button(String(localized: "Done", comment: "Dismiss keyboard")) {
-                                focused = false
-                            }
-                            .bold()
+            .onChange(of: focused) {
+                if !focused { commit() }
+            }
+            .onSubmit { commit() }
+            .padding(.vertical, 3)
+            .padding(.horizontal, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(focused ? Color.accentColor : Color.secondary.opacity(0.4), lineWidth: focused ? 1 : 0.5)
+            )
+            .overlay(alignment: .trailing) {
+                Text("g")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .padding(.trailing, 3)
+                    .opacity(focused ? 0 : 1)
+            }
+            .toolbar {
+                if focused {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button(String(localized: "Done", comment: "Dismiss keyboard")) {
+                            focused = false
                         }
+                        .bold()
                     }
                 }
-
-            Button {
-                let newGrams = displayedGrams + step
-                text = formatted(newGrams)
-                onCommit(newGrams)
-            } label: {
-                Image(systemName: "plus.circle")
-                    .foregroundColor(.secondary)
             }
-            .buttonStyle(.borderless)
-            .contentShape(Rectangle())
-        }
     }
 
     private func syncText() {
-        text = formatted(modelGrams)
+        text = String(format: "%.0f", modelGrams)
     }
 
     private func commit() {
@@ -1276,10 +1310,6 @@ private struct PortionGramsControl: View {
         } else {
             syncText()
         }
-    }
-
-    private func formatted(_ grams: Double) -> String {
-        String(format: "%.0f", grams)
     }
 }
 
