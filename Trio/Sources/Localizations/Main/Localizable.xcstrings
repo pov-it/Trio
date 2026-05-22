@@ -129160,6 +129160,39 @@
         }
       }
     },
+    "Nutrition": {
+      "comment": "FoodFinder nutrition section",
+      "localizations": {
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voedingswaarden"
+          }
+        }
+      }
+    },
+    "Portion": {
+      "comment": "Food item portion field",
+      "localizations": {
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Portie"
+          }
+        }
+      }
+    },
+    "These values apply to the currently selected portion multiplier.": {
+      "comment": "FoodFinder edit ingredient footer",
+      "localizations": {
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deze waarden gelden voor de momenteel gekozen portiefactor."
+          }
+        }
+      }
+    },
     "Ingredients": {
       "comment": "FoodFinder ingredients section",
       "localizations": {

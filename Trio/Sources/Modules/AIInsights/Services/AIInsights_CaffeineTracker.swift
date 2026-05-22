@@ -254,14 +254,21 @@ final class AIInsights_CaffeineTracker: ObservableObject, @unchecked Sendable {
 
     // MARK: - Prompt Context
 
-    func buildCaffeinePromptContext(at now: Date = Date()) -> String {
+    func buildCaffeinePromptContext(at now: Date = Date(), lookbackHours: Double = 24) -> String {
         let state = currentState(at: now)
-        guard state.entriesLast24h > 0 else {
-            return "## Caffeine Intake\n- No caffeine entries logged in the last 24h. (Caffeine tracking is available; the user may not have logged anything yet.)\n"
+        let cutoff = now.addingTimeInterval(-lookbackHours * 3600)
+        let recent = entries.filter { $0.timestamp >= cutoff }
+        let windowLabel = lookbackHours >= 48
+            ? String(format: "last %.0f days", lookbackHours / 24)
+            : String(format: "last %.0f hours", lookbackHours)
+
+        guard !recent.isEmpty else {
+            return "## Caffeine Intake\n- No caffeine entries logged in the \(windowLabel). (Caffeine tracking is available; the user may not have logged anything yet.)\n"
         }
 
         var ctx = "## Caffeine Intake\n"
         ctx += "- Current estimated caffeine level: \(String(format: "%.0f", state.currentLevelMg)) mg\n"
+        ctx += "- Total caffeine in the \(windowLabel): \(String(format: "%.0f", recent.reduce(0) { $0 + $1.milligrams })) mg (\(recent.count) intake(s))\n"
         ctx += "- Total caffeine last 24h: \(String(format: "%.0f", state.totalMgLast24h)) mg (\(state.entriesLast24h) intake(s))\n"
         if let lastTime = state.lastIntakeTime {
             let minutesAgo = Int(now.timeIntervalSince(lastTime) / 60)
@@ -279,9 +286,9 @@ final class AIInsights_CaffeineTracker: ObservableObject, @unchecked Sendable {
             ctx += "** MODERATE CAFFEINE: May modestly raise glucose and blunt insulin response, especially with meals taken within the next 2-3h. **\n"
         }
 
-        let recent = entries.filter { $0.timestamp >= now.addingTimeInterval(-24 * 3600) }
         if !recent.isEmpty {
             let formatter = DateFormatter()
+            formatter.dateStyle = lookbackHours > 48 ? .short : .none
             formatter.timeStyle = .short
             ctx += "- Recent entries: "
             ctx += recent.prefix(5)

@@ -307,24 +307,27 @@ extension AIInsights {
         /// Build a chat prompt section describing recent FoodFinder analyses.
         /// Always returns a section header so the AI knows FoodFinder data
         /// exists, even when the user hasn't logged anything recently.
-        static func buildMealPromptContext(at now: Date = Date()) -> String {
-            let cutoff = now.addingTimeInterval(-48 * 3600)
+        static func buildMealPromptContext(at now: Date = Date(), lookbackHours: Double = 48) -> String {
+            let cutoff = now.addingTimeInterval(-lookbackHours * 3600)
+            let windowLabel = lookbackHours >= 48
+                ? String(format: "last %.0f days", lookbackHours / 24)
+                : String(format: "last %.0f hours", lookbackHours)
             let recent = loadStoredRecentResults()
                 .filter { $0.timestamp >= cutoff }
                 .sorted { $0.timestamp > $1.timestamp }
 
             guard !recent.isEmpty else {
-                return "## Recent Meals (FoodFinder)\n- No meals analyzed in the last 48h. (FoodFinder is available; the user can describe meals or scan barcodes to log carbs/fat/protein.)\n"
+                return "## Recent Meals (FoodFinder)\n- No meals analyzed in the \(windowLabel). (FoodFinder is available; the user can describe meals or scan barcodes to log carbs/fat/protein.)\n"
             }
 
             let formatter = DateFormatter()
-            formatter.dateStyle = .none
+            formatter.dateStyle = lookbackHours > 48 ? .short : .none
             formatter.timeStyle = .short
             let dayFormatter = DateFormatter()
             dayFormatter.dateFormat = "EEE"
 
             var ctx = "## Recent Meals (FoodFinder)\n"
-            ctx += "Last \(recent.count) meal analysis(es) from the past 48h:\n"
+            ctx += "Last \(recent.count) meal analysis(es) from the \(windowLabel):\n"
             for result in recent.prefix(8) {
                 let when = "\(dayFormatter.string(from: result.timestamp)) \(formatter.string(from: result.timestamp))"
                 let name = result.mealName?.trimmingCharacters(in: .whitespacesAndNewlines).aiInsightsNilIfEmpty

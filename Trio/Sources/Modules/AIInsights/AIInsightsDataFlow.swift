@@ -28,15 +28,17 @@ enum AIInsights {
     """
 
     static func responseLanguageInstruction() -> String {
-        let appLanguage = Bundle.main.preferredLocalizations.first
-            ?? Locale.preferredLanguages.first
+        let preferredIdentifier = Locale.preferredLanguages.first
+            ?? Bundle.main.preferredLocalizations.first
             ?? Locale.current.languageCode
             ?? "en"
-        let englishLanguageName = Locale(identifier: "en").localizedString(forIdentifier: appLanguage)
-            ?? Locale(identifier: "en").localizedString(forLanguageCode: appLanguage)
-            ?? appLanguage
-        let localLanguageName = Locale.current.localizedString(forIdentifier: appLanguage)
-            ?? Locale.current.localizedString(forLanguageCode: appLanguage)
+        let preferredLocale = Locale(identifier: preferredIdentifier)
+        let appLanguage = preferredLocale.languageCode ?? preferredIdentifier
+        let englishLanguageName = Locale(identifier: "en").localizedString(forLanguageCode: appLanguage)
+            ?? Locale(identifier: "en").localizedString(forIdentifier: preferredIdentifier)
+            ?? preferredIdentifier
+        let localLanguageName = Locale.current.localizedString(forLanguageCode: appLanguage)
+            ?? Locale.current.localizedString(forIdentifier: preferredIdentifier)
             ?? englishLanguageName
         let languageDescription = englishLanguageName == localLanguageName
             ? englishLanguageName
@@ -45,7 +47,7 @@ enum AIInsights {
         return """
         Response language:
         - Keep these system instructions, JSON keys, enum values, and code-like identifiers in English.
-        - Write user-visible answers, reasoning fields, summaries, and card text in the user's current app language: \(languageDescription) (\(appLanguage)).
+        - Write user-visible answers, reasoning fields, summaries, and card text in the user's current app language: \(languageDescription) (\(preferredIdentifier)).
         - If the user explicitly asks for a different language, follow that request for prose only.
         """
     }
