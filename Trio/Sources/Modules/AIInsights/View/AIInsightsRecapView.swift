@@ -366,7 +366,7 @@ extension AIInsights {
             )
 
             let units = provider.units.rawValue
-            let hourly = stats.hourlyGlucoseAverage.filter { $0.count > 0 }
+            let hourly = stats.hourlyGlucoseAverage
             let highestHours = hourly
                 .sorted { $0.average > $1.average }
                 .prefix(4)
