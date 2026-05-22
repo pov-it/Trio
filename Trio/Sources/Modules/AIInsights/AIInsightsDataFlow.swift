@@ -28,12 +28,26 @@ enum AIInsights {
     """
 
     static func responseLanguageInstruction() -> String {
-        let identifier = Locale.current.identifier
-        let languageCode = Locale.current.languageCode ?? "en"
-        let language = Locale.current.localizedString(forIdentifier: identifier)
-            ?? Locale.current.localizedString(forLanguageCode: languageCode)
-            ?? "the user's app language"
-        return "Respond in \(language) (\(identifier)). Match the user's app language for all prose. Keep JSON keys in English when JSON is requested."
+        let appLanguage = Bundle.main.preferredLocalizations.first
+            ?? Locale.preferredLanguages.first
+            ?? Locale.current.languageCode
+            ?? "en"
+        let englishLanguageName = Locale(identifier: "en").localizedString(forIdentifier: appLanguage)
+            ?? Locale(identifier: "en").localizedString(forLanguageCode: appLanguage)
+            ?? appLanguage
+        let localLanguageName = Locale.current.localizedString(forIdentifier: appLanguage)
+            ?? Locale.current.localizedString(forLanguageCode: appLanguage)
+            ?? englishLanguageName
+        let languageDescription = englishLanguageName == localLanguageName
+            ? englishLanguageName
+            : "\(englishLanguageName) / \(localLanguageName)"
+
+        return """
+        Response language:
+        - Keep these system instructions, JSON keys, enum values, and code-like identifiers in English.
+        - Write user-visible answers, reasoning fields, summaries, and card text in the user's current app language: \(languageDescription) (\(appLanguage)).
+        - If the user explicitly asks for a different language, follow that request for prose only.
+        """
     }
 
     static func migratingSystemPrompt(_ prompt: String) -> String {

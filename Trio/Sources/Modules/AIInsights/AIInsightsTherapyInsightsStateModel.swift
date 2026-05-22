@@ -353,6 +353,8 @@ extension AIInsights {
 
             \(AIInsights.responseLanguageInstruction())
 
+            The prompt and safety instructions are written in English on purpose. Do not infer the response language from the instruction language.
+
             OUTPUT FORMAT - respond ONLY with a valid JSON object:
             {
               "suggestions": [
@@ -376,7 +378,7 @@ extension AIInsights {
             - If data is insufficient (<3 days or sparse CGM coverage), respond with {"suggestions":[],"overallAssessment":"Insufficient data."}
             - Return zero suggestions if the actual data does not justify a therapy setting change
             - Do not use generic diabetes ranges. Use only the user's actual Trio data and settings.
-            - Generate "reasoning" and "overallAssessment" in the user's app language.
+            - Generate all user-visible JSON string values, including "reasoning" and "overallAssessment", in the response language above.
             - Keep "settingType" values exactly as the allowed English enum values so the app can apply them.
             - Confidence should be 0.0-1.0 based on data quality and pattern strength
             - Include reasoning that references specific data points

@@ -65786,6 +65786,17 @@
         }
       }
     },
+    "Collapse the full recommendation text.": {
+      "comment": "Collapse therapy insight accessibility hint",
+      "localizations": {
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verberg de volledige aanbevelingstekst."
+          }
+        }
+      }
+    },
     "Contact Image": {
       "localizations": {
         "bg": {
@@ -189208,6 +189219,17 @@
         }
       }
     },
+    "Read more": {
+      "comment": "Expand therapy insight card",
+      "localizations": {
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meer tonen"
+          }
+        }
+      }
+    },
     "Return to Normal": {
       "extractionState": "manual",
       "localizations": {
@@ -203561,6 +203583,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Alles tonen"
+          }
+        }
+      }
+    },
+    "Show less": {
+      "comment": "Collapse therapy insight card",
+      "localizations": {
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Minder tonen"
+          }
+        }
+      }
+    },
+    "Show the full recommendation text.": {
+      "comment": "Expand therapy insight accessibility hint",
+      "localizations": {
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toon de volledige aanbevelingstekst."
           }
         }
       }

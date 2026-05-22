@@ -94,6 +94,31 @@ extension AIInsights {
             }
         }
 
+        private static func addTemperaturePreferredSampling(
+            from request: AIRequest,
+            to body: inout [String: Any],
+            topPKey: String
+        ) {
+            if let temp = request.temperature {
+                body["temperature"] = temp
+            } else if let topP = request.topP {
+                body[topPKey] = topP
+            }
+        }
+
+        private static func addAnthropicSampling(
+            from request: AIRequest,
+            to body: inout [String: Any]
+        ) {
+            if let temp = request.temperature {
+                body["temperature"] = temp
+                return
+            }
+
+            if let topP = request.topP { body["top_p"] = topP }
+            if let topK = request.topK { body["top_k"] = topK }
+        }
+
         // MARK: - Test Connection
 
         static func testConnection(
@@ -269,8 +294,7 @@ extension AIInsights {
                 "model": request.model,
                 "messages": messagesPayload
             ]
-            if let temp = request.temperature { body["temperature"] = temp }
-            if let topP = request.topP { body["top_p"] = topP }
+            addTemperaturePreferredSampling(from: request, to: &body, topPKey: "top_p")
             if let maxTokens = request.maxTokens { body["max_tokens"] = maxTokens }
             if let responseFormat = request.responseFormat { body["response_format"] = responseFormat }
 
@@ -336,9 +360,27 @@ extension AIInsights {
             let systemMessages = request.messages.filter { $0.role == .system }
             let chatMessages = request.messages.filter { $0.role != .system }
 
-            var messagesPayload: [[String: String]] = []
+            var messagesPayload: [[String: Any]] = []
             for msg in chatMessages {
-                messagesPayload.append(["role": msg.role.rawValue, "content": msg.content])
+                if msg.role == .user, let imgData = request.imageData {
+                    let contentBlocks: [[String: Any]] = [
+                        [
+                            "type": "image",
+                            "source": [
+                                "type": "base64",
+                                "media_type": "image/jpeg",
+                                "data": imgData.base64EncodedString()
+                            ]
+                        ],
+                        [
+                            "type": "text",
+                            "text": msg.content
+                        ]
+                    ]
+                    messagesPayload.append(["role": msg.role.rawValue, "content": contentBlocks])
+                } else {
+                    messagesPayload.append(["role": msg.role.rawValue, "content": msg.content])
+                }
             }
 
             var body: [String: Any] = [
@@ -350,9 +392,7 @@ extension AIInsights {
             if let systemContent = systemMessages.first?.content {
                 body["system"] = systemContent
             }
-            if let temp = request.temperature { body["temperature"] = temp }
-            if let topP = request.topP { body["top_p"] = topP }
-            if let topK = request.topK { body["top_k"] = topK }
+            addAnthropicSampling(from: request, to: &body)
 
             urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -374,10 +414,15 @@ extension AIInsights {
 
             // Parse Anthropic response
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let contentArray = json["content"] as? [[String: Any]],
-                  let firstBlock = contentArray.first,
-                  let text = firstBlock["text"] as? String
+                  let contentArray = json["content"] as? [[String: Any]]
             else {
+                throw AIError.parsingError("Could not parse Anthropic response")
+            }
+
+            let text = contentArray
+                .compactMap { $0["text"] as? String }
+                .joined(separator: "\n")
+            guard !text.isEmpty else {
                 throw AIError.parsingError("Could not parse Anthropic response")
             }
 

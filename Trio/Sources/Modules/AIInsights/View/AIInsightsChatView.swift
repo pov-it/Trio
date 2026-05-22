@@ -855,10 +855,11 @@ private struct ChatTherapySuggestionCard: View {
                 valueColumn(title: String(localized: "Proposed", comment: "Proposed setting value"), value: suggestion.proposedValue)
             }
 
-            Text(suggestion.reasoning)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .lineLimit(isExpanded ? nil : 3)
+            ChatExpandableReasoningText(
+                text: suggestion.reasoning,
+                collapsedLineLimit: 4,
+                isExpanded: $isExpanded
+            )
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -973,6 +974,46 @@ private struct ChatTherapySuggestionCard: View {
     }
 }
 
+private struct ChatExpandableReasoningText: View {
+    let text: String
+    let collapsedLineLimit: Int
+    @Binding var isExpanded: Bool
+
+    private var shouldShowToggle: Bool {
+        text.count > 110 || text.contains("\n")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(text)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(isExpanded ? nil : collapsedLineLimit)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if shouldShowToggle {
+                Button {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(
+                            isExpanded
+                                ? String(localized: "Show less", comment: "Collapse therapy insight card")
+                                : String(localized: "Read more", comment: "Expand therapy insight card")
+                        )
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    }
+                    .font(.caption2.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+            }
+        }
+    }
+}
+
 private struct ChatAdjustmentSuggestionCard: View {
     let suggestion: AIInsights.AdjustmentSuggestion
     let units: GlucoseUnits
@@ -1041,10 +1082,11 @@ private struct ChatAdjustmentSuggestionCard: View {
                 Spacer(minLength: 0)
             }
 
-            Text(suggestion.reasoning)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .lineLimit(isExpanded ? nil : 3)
+            ChatExpandableReasoningText(
+                text: suggestion.reasoning,
+                collapsedLineLimit: 4,
+                isExpanded: $isExpanded
+            )
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
