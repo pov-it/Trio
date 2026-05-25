@@ -12,6 +12,8 @@ extension AIInsights {
         @Environment(AppState.self) var appState
         @Environment(\.managedObjectContext) var moc
         @FocusState private var isTextFieldFocused: Bool
+        @State private var isEditingTotals = false
+        @State private var editingFoodItem: FoodItem?
 
         @FetchRequest(
             entity: MealPresetStored.entity(),
@@ -96,6 +98,12 @@ extension AIInsights {
                         }
                     )
                     .ignoresSafeArea()
+                }
+            }
+            .sheet(item: $editingFoodItem) { item in
+                FoodItemEditSheet(item: item) { updatedItem in
+                    state.replaceItem(updatedItem)
+                    editingFoodItem = nil
                 }
             }
         }
@@ -266,6 +274,12 @@ extension AIInsights {
             Section {
                 ForEach(result.items) { item in
                     foodItemRow(item)
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            Button(String(localized: "Edit", comment: "Edit food item"), systemImage: "pencil") {
+                                editingFoodItem = item
+                            }
+                            .tint(.blue)
+                        }
                         .swipeActions(edge: .trailing) {
                             Button(String(localized: "Delete", comment: "Delete food item"), systemImage: "trash", role: .destructive) {
                                 withAnimation { state.removeItem(item.id) }
@@ -373,7 +387,9 @@ extension AIInsights {
                             .padding(.vertical, 2)
                             .background(Capsule().fill(Color.accentColor.opacity(0.15)))
                             .foregroundStyle(Color.accentColor)
-                        Spacer()
+                    }
+                    Spacer()
+                    if result.hasManualMacroOverride {
                         Button {
                             state.updateManualMacroOverride(nil)
                         } label: {
@@ -382,46 +398,62 @@ extension AIInsights {
                         }
                         .buttonStyle(.borderless)
                         .foregroundStyle(.secondary)
-                    } else {
-                        Spacer()
                     }
+                    Button {
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+                            isEditingTotals.toggle()
+                        }
+                    } label: {
+                        Text(
+                            isEditingTotals
+                                ? String(localized: "Done", comment: "Done editing")
+                                : String(localized: "Edit", comment: "Edit totals")
+                        )
+                        .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.borderless)
                 }
                 .padding(.top, 11)
                 .padding(.bottom, 4)
 
                 Divider()
-                totalsEditRow(
+                totalsRow(
                     label: String(localized: "Carbs", comment: "Carbs macro"),
                     value: result.totalCarbs,
                     unit: "g",
+                    color: .blue,
                     onCommit: { commitTotal($0, for: \MacroOverride.carbs, in: result) }
                 )
                 Divider()
-                totalsEditRow(
+                totalsRow(
                     label: String(localized: "Fat", comment: "Fat macro"),
                     value: result.totalFat,
                     unit: "g",
+                    color: .yellow,
                     onCommit: { commitTotal($0, for: \MacroOverride.fat, in: result) }
                 )
                 Divider()
-                totalsEditRow(
+                totalsRow(
                     label: String(localized: "Protein", comment: "Protein macro"),
                     value: result.totalProtein,
                     unit: "g",
+                    color: .red,
                     onCommit: { commitTotal($0, for: \MacroOverride.protein, in: result) }
                 )
                 Divider()
-                totalsEditRow(
+                totalsRow(
                     label: String(localized: "Fiber", comment: "Fiber macro"),
                     value: result.totalFiber,
                     unit: "g",
+                    color: .green,
                     onCommit: { commitTotal($0, for: \MacroOverride.fiber, in: result) }
                 )
                 Divider()
-                totalsEditRow(
+                totalsRow(
                     label: String(localized: "Calories", comment: "Calories label"),
                     value: result.totalCalories,
                     unit: "kcal",
+                    color: .secondary,
                     onCommit: { commitTotal($0, for: \MacroOverride.calories, in: result) }
                 )
             }
@@ -432,26 +464,30 @@ extension AIInsights {
             )
         }
 
-        /// One row in the totals card: label on the left, a TextField on
-        /// the right styled to look like a regular value but with a subtle
-        /// dashed underline so the user can tell it's editable.
-        private func totalsEditRow(
+        private func totalsRow(
             label: String,
             value: Double,
             unit: String,
+            color: Color,
             onCommit: @escaping (Double) -> Void
         ) -> some View {
             HStack {
                 Text(label)
                 Spacer()
-                EditableDoubleField(
-                    modelValue: value,
-                    unit: unit,
-                    color: .secondary,
-                    fieldWidth: 60,
-                    alignTrailing: true,
-                    onCommit: onCommit
-                )
+                if isEditingTotals {
+                    EditableDoubleField(
+                        modelValue: value,
+                        unit: unit,
+                        color: color,
+                        fieldWidth: 60,
+                        alignTrailing: true,
+                        onCommit: onCommit
+                    )
+                } else {
+                    Text("\(String(format: "%.0f", value)) \(unit)")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(color)
+                }
             }
             .font(.subheadline)
             .padding(.vertical, 8)
@@ -524,10 +560,10 @@ extension AIInsights {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        EditableNameField(
-                            modelName: item.name,
-                            onCommit: { state.updateItemName(for: item.id, name: $0) }
-                        )
+                        Text(item.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                            .lineLimit(2)
                         Text(item.portion)
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -540,38 +576,35 @@ extension AIInsights {
                 }
 
                 HStack(spacing: 14) {
-                    editableIngredientMetric(
+                    readOnlyIngredientMetric(
                         label: String(localized: "Carbs", comment: "Carbs macro"),
                         value: item.adjustedCarbs,
                         unit: "g",
-                        color: .blue,
-                        onCommit: { state.updateMacro(for: item.id, macro: .carbs, adjustedValue: $0) }
+                        color: .blue
                     )
-                    editableIngredientMetric(
+                    readOnlyIngredientMetric(
                         label: String(localized: "Fat", comment: "Fat macro"),
                         value: item.adjustedFat,
                         unit: "g",
-                        color: .yellow,
-                        onCommit: { state.updateMacro(for: item.id, macro: .fat, adjustedValue: $0) }
+                        color: .yellow
                     )
-                    editableIngredientMetric(
+                    readOnlyIngredientMetric(
                         label: String(localized: "Protein", comment: "Protein macro"),
                         value: item.adjustedProtein,
                         unit: "g",
-                        color: .red,
-                        onCommit: { state.updateMacro(for: item.id, macro: .protein, adjustedValue: $0) }
+                        color: .red
                     )
-                    editableIngredientMetric(
+                    readOnlyIngredientMetric(
                         label: String(localized: "Fiber", comment: "Fiber macro"),
                         value: item.adjustedFiber,
                         unit: "g",
-                        color: .green,
-                        onCommit: { state.updateMacro(for: item.id, macro: .fiber, adjustedValue: $0) }
+                        color: .green
                     )
                     readOnlyIngredientMetric(
                         label: String(localized: "Calories", comment: "Calories label"),
                         value: item.adjustedCalories,
-                        unit: "kcal"
+                        unit: "kcal",
+                        color: .secondary
                     )
                 }
             }
@@ -607,12 +640,13 @@ extension AIInsights {
         private func readOnlyIngredientMetric(
             label: String,
             value: Double,
-            unit: String
+            unit: String,
+            color: Color
         ) -> some View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(String(format: "%.0f", value)) \(unit)")
                     .font(.caption.bold())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(color)
                     .lineLimit(1)
                 Text(label)
                     .font(.caption2)
@@ -1059,6 +1093,109 @@ extension AIInsights {
 
 
 // MARK: - Flow Layout (for example food chips)
+
+private struct FoodItemEditSheet: View {
+    let item: AIInsights.FoodItem
+    let onSave: (AIInsights.FoodItem) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var portion: String
+    @State private var carbs: String
+    @State private var fat: String
+    @State private var protein: String
+    @State private var fiber: String
+    @State private var calories: String
+
+    init(item: AIInsights.FoodItem, onSave: @escaping (AIInsights.FoodItem) -> Void) {
+        self.item = item
+        self.onSave = onSave
+        _name = State(initialValue: item.name)
+        _portion = State(initialValue: item.portion)
+        _carbs = State(initialValue: Self.format(item.adjustedCarbs))
+        _fat = State(initialValue: Self.format(item.adjustedFat))
+        _protein = State(initialValue: Self.format(item.adjustedProtein))
+        _fiber = State(initialValue: Self.format(item.adjustedFiber))
+        _calories = State(initialValue: Self.format(item.adjustedCalories))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField(String(localized: "Name", comment: "Food item name field"), text: $name)
+                    TextField(String(localized: "Portion", comment: "Food item portion field"), text: $portion)
+                } header: {
+                    Text(String(localized: "Ingredient", comment: "FoodFinder ingredient section"))
+                }
+
+                Section {
+                    macroField(String(localized: "Carbs", comment: "Carbs macro"), text: $carbs, unit: "g")
+                    macroField(String(localized: "Fat", comment: "Fat macro"), text: $fat, unit: "g")
+                    macroField(String(localized: "Protein", comment: "Protein macro"), text: $protein, unit: "g")
+                    macroField(String(localized: "Fiber", comment: "Fiber macro"), text: $fiber, unit: "g")
+                    macroField(String(localized: "Calories", comment: "Calories label"), text: $calories, unit: "kcal")
+                } header: {
+                    Text(String(localized: "Nutrition", comment: "FoodFinder nutrition section"))
+                } footer: {
+                    Text(String(localized: "These values apply to the currently selected portion multiplier.", comment: "FoodFinder edit ingredient footer"))
+                }
+            }
+            .navigationTitle(String(localized: "Edit Ingredient", comment: "FoodFinder edit ingredient alert"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "Cancel", comment: "Cancel button")) {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(String(localized: "Save", comment: "Save button")) {
+                        onSave(updatedItem)
+                        dismiss()
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+
+    private var updatedItem: AIInsights.FoodItem {
+        let multiplier = max(item.portionMultiplier, 0.25)
+        return AIInsights.FoodItem(
+            id: item.id,
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            portion: portion.trimmingCharacters(in: .whitespacesAndNewlines).aiInsightsNilIfEmpty ?? item.portion,
+            carbs: max(0, decimalValue(carbs)) / multiplier,
+            fat: max(0, decimalValue(fat)) / multiplier,
+            protein: max(0, decimalValue(protein)) / multiplier,
+            fiber: max(0, decimalValue(fiber)) / multiplier,
+            calories: max(0, decimalValue(calories)) / multiplier,
+            portionMultiplier: item.portionMultiplier
+        )
+    }
+
+    private func macroField(_ label: String, text: Binding<String>, unit: String) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            TextField("0", text: text)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 80)
+            Text(unit)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func decimalValue(_ raw: String) -> Double {
+        Double(raw.replacingOccurrences(of: ",", with: ".")) ?? 0
+    }
+
+    private static func format(_ value: Double) -> String {
+        String(format: "%.0f", value)
+    }
+}
 
 /// Grams TextField linked to the same underlying `portionMultiplier` as the
 /// +/- multiplier control next to it. Owns its own text-state so the user

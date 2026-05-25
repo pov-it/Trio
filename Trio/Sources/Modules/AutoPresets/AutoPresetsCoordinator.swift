@@ -104,8 +104,11 @@ final class AutoPresetsCoordinator: ObservableObject, @unchecked Sendable {
     /// Build a chat prompt section describing recent AutoPresets activations.
     /// Helps the AI link sport/exercise moments to glucose patterns. Always
     /// emits a header so the AI knows this data source exists.
-    func buildAutoPresetsPromptContext(at now: Date = Date()) -> String {
-        let cutoff = now.addingTimeInterval(-48 * 3600)
+    func buildAutoPresetsPromptContext(at now: Date = Date(), lookbackHours: Double = 48) -> String {
+        let cutoff = now.addingTimeInterval(-lookbackHours * 3600)
+        let windowLabel = lookbackHours >= 48
+            ? String(format: "last %.0f days", lookbackHours / 24)
+            : String(format: "last %.0f hours", lookbackHours)
         let recent = settings.recentActivityLog
             .filter { $0.date >= cutoff }
             .sorted { $0.date > $1.date }
@@ -123,12 +126,12 @@ final class AutoPresetsCoordinator: ObservableObject, @unchecked Sendable {
         ctx += "\n"
 
         guard !recent.isEmpty else {
-            ctx += "- No activations in the last 48h.\n"
+            ctx += "- No activations in the \(windowLabel).\n"
             return ctx
         }
 
         let formatter = DateFormatter()
-        formatter.dateStyle = .none
+        formatter.dateStyle = lookbackHours > 48 ? .short : .none
         formatter.timeStyle = .short
         let dayFormatter = DateFormatter()
         dayFormatter.dateFormat = "EEE"
@@ -138,7 +141,7 @@ final class AutoPresetsCoordinator: ObservableObject, @unchecked Sendable {
         let activations = recent.filter { $0.event == .presetActivated }
         let deactivations = recent.filter { $0.event == .presetDeactivated }
 
-        ctx += "- Recent activations (\(activations.count) in last 48h):\n"
+        ctx += "- Recent activations (\(activations.count) in the \(windowLabel)):\n"
         for entry in activations.prefix(10) {
             let when = "\(dayFormatter.string(from: entry.date)) \(formatter.string(from: entry.date))"
             let activity = entry.activityType?.displayName ?? "Unknown"

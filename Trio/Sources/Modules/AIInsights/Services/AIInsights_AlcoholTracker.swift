@@ -329,13 +329,20 @@ final class AIInsights_AlcoholTracker: ObservableObject, @unchecked Sendable {
 
     // MARK: - Prompt context
 
-    func buildAlcoholPromptContext(at now: Date = Date()) -> String {
+    func buildAlcoholPromptContext(at now: Date = Date(), lookbackHours: Double = 24) -> String {
         let state = currentState(at: now)
-        guard state.entriesLast24h > 0 else {
-            return "## Alcohol Intake\n- No alcohol entries logged in the last 24h. (Alcohol tracking is available; the user may not have logged anything yet.)\n"
+        let cutoff = now.addingTimeInterval(-lookbackHours * 3600)
+        let recent = entries.filter { $0.timestamp >= cutoff }
+        let windowLabel = lookbackHours >= 48
+            ? String(format: "last %.0f days", lookbackHours / 24)
+            : String(format: "last %.0f hours", lookbackHours)
+
+        guard !recent.isEmpty else {
+            return "## Alcohol Intake\n- No alcohol entries logged in the \(windowLabel). (Alcohol tracking is available; the user may not have logged anything yet.)\n"
         }
 
         var ctx = "## Alcohol Intake\n"
+        ctx += "- Total drinks in the \(windowLabel): \(formatDrinks(recent.reduce(0) { $0 + $1.standardDrinks })) (\(recent.count) entry/entries)\n"
         ctx += "- Total drinks last 24h: \(formatDrinks(state.drinksLast24h)) (\(state.entriesLast24h) entry/entries)\n"
         ctx += "- Estimated remaining: \(formatDrinks(state.currentDrinks)) standard drinks\n"
         if let lastTime = state.lastIntakeTime {
@@ -351,9 +358,9 @@ final class AIInsights_AlcoholTracker: ObservableObject, @unchecked Sendable {
             ctx += "** LATE-HYPO RISK: Alcohol consumed within last 12h blocks hepatic gluconeogenesis. Overnight and post-meal hypo risk is elevated. Consider raising target / reducing basal during this window. **\n"
         }
 
-        let recent = entries.filter { $0.timestamp >= now.addingTimeInterval(-24 * 3600) }
         if !recent.isEmpty {
             let formatter = DateFormatter()
+            formatter.dateStyle = lookbackHours > 48 ? .short : .none
             formatter.timeStyle = .short
             ctx += "- Recent entries: "
             ctx += recent.prefix(5)

@@ -257,7 +257,8 @@ extension AIInsights {
                 provider: providerType,
                 apiKey: apiKey,
                 baseURL: baseURL,
-                model: model
+                model: model,
+                clinicalContext: await buildMonthlyClinicalContext()
             )
             // Always allow manual generation — cadence depends on whether we have
             // recent applied changes (weekly) or not (monthly).
@@ -289,7 +290,8 @@ extension AIInsights {
                 provider: providerType,
                 apiKey: apiKey,
                 baseURL: baseURL,
-                model: model
+                model: model,
+                clinicalContext: await buildMonthlyClinicalContext()
             )
             do {
                 if try await PeriodicRecapService.shared.generateRecapIfDue(
@@ -309,6 +311,96 @@ extension AIInsights {
                   let saved = try? JSONDecoder().decode([ChatConversation].self, from: data)
             else { return [] }
             return saved
+        }
+
+        private func buildMonthlyClinicalContext() async -> String {
+            let startDate = Date().addingTimeInterval(-30 * 24 * 3600)
+            async let glucoseTask = provider.fetchGlucose(since: startDate)
+            async let carbsTask = provider.fetchCarbs(since: startDate)
+            async let basalProfileTask = provider.getBasalProfile()
+            async let isfTask = provider.getISF()
+            async let crTask = provider.getCR()
+            async let targetTask = provider.getTarget()
+            async let isfDescriptionTask = provider.getISFDescription()
+            async let crDescriptionTask = provider.getCRDescription()
+            async let targetDescriptionTask = provider.getTargetDescription()
+
+            let (
+                glucose,
+                carbs,
+                basalProfile,
+                isf,
+                cr,
+                target,
+                isfDescription,
+                crDescription,
+                targetDescription
+            ) = await (
+                glucoseTask,
+                carbsTask,
+                basalProfileTask,
+                isfTask,
+                crTask,
+                targetTask,
+                isfDescriptionTask,
+                crDescriptionTask,
+                targetDescriptionTask
+            )
+
+            let stats = DataAggregator.aggregate(
+                glucose: glucose,
+                carbs: carbs,
+                basalProfile: basalProfile,
+                isf: isf,
+                cr: cr,
+                target: target,
+                isfDescription: isfDescription,
+                crDescription: crDescription,
+                targetDescription: targetDescription,
+                units: provider.units,
+                iob: provider.currentIOB,
+                cob: nil,
+                periodDays: 30,
+                lowThreshold: provider.settings.low,
+                highThreshold: provider.settings.high
+            )
+
+            let units = provider.units.rawValue
+            let hourly = stats.hourlyGlucoseAverage
+            let highestHours = hourly
+                .sorted { $0.average > $1.average }
+                .prefix(4)
+                .map { String(format: "%02d:00 avg %.1f %@", $0.hour, $0.average, units) }
+                .joined(separator: "; ")
+            let lowestHours = hourly
+                .sorted { $0.average < $1.average }
+                .prefix(4)
+                .map { String(format: "%02d:00 avg %.1f %@", $0.hour, $0.average, units) }
+                .joined(separator: "; ")
+
+            return """
+
+            ### Glucose, carbs, and therapy snapshot:
+            - CGM readings: \(stats.glucoseReadings.count)
+            - Average glucose: \(String(format: "%.1f", stats.averageGlucose)) \(units)
+            - Std Dev: \(String(format: "%.1f", stats.glucoseStdDev)) \(units)
+            - TIR: \(String(format: "%.1f", stats.tir.timeInRange))%
+            - Time Below Low: \(String(format: "%.1f", stats.tir.timeBelowLow))%
+            - Time Above High: \(String(format: "%.1f", stats.tir.timeAboveHigh))%
+            - GMI: \(String(format: "%.1f", stats.gmi))%
+            - Carb entries: \(stats.carbEntries)
+            - Average daily carbs: \(String(format: "%.0f", stats.averageDailyCarbs)) g
+            - Highest average hours: \(highestHours.aiInsightsNilIfEmpty ?? "not enough hourly data")
+            - Lowest average hours: \(lowestHours.aiInsightsNilIfEmpty ?? "not enough hourly data")
+            - Detected glucose patterns: \(stats.detectedPatterns.map(\.rawValue).joined(separator: ", ").aiInsightsNilIfEmpty ?? "none")
+
+            ### Current therapy settings:
+            - Basal Profile: \(stats.currentBasalProfile)
+            - ISF: \(stats.currentISF)
+            - Carb Ratio: \(stats.currentCR)
+            - Target: \(stats.currentTarget)
+
+            """
         }
     }
 }

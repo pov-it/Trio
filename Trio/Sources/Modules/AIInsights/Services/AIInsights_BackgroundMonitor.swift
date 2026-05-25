@@ -197,6 +197,8 @@ extension AIInsights {
             let prompt = """
             You are a diabetes management assistant. Give a BRIEF (1-2 sentence) actionable insight.
 
+            \(AIInsights.responseLanguageInstruction())
+
             DETECTED PATTERN: \(alertNames)
             RECENT READINGS (\(unitsStr)): \(recentValues)
 

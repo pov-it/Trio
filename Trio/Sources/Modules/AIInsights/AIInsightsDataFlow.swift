@@ -28,12 +28,28 @@ enum AIInsights {
     """
 
     static func responseLanguageInstruction() -> String {
-        let identifier = Locale.current.identifier
-        let languageCode = Locale.current.languageCode ?? "en"
-        let language = Locale.current.localizedString(forIdentifier: identifier)
-            ?? Locale.current.localizedString(forLanguageCode: languageCode)
-            ?? "the user's app language"
-        return "Respond in \(language) (\(identifier)). Match the user's app language for all prose. Keep JSON keys in English when JSON is requested."
+        let preferredIdentifier = Locale.preferredLanguages.first
+            ?? Bundle.main.preferredLocalizations.first
+            ?? Locale.current.languageCode
+            ?? "en"
+        let preferredLocale = Locale(identifier: preferredIdentifier)
+        let appLanguage = preferredLocale.languageCode ?? preferredIdentifier
+        let englishLanguageName = Locale(identifier: "en").localizedString(forLanguageCode: appLanguage)
+            ?? Locale(identifier: "en").localizedString(forIdentifier: preferredIdentifier)
+            ?? preferredIdentifier
+        let localLanguageName = Locale.current.localizedString(forLanguageCode: appLanguage)
+            ?? Locale.current.localizedString(forIdentifier: preferredIdentifier)
+            ?? englishLanguageName
+        let languageDescription = englishLanguageName == localLanguageName
+            ? englishLanguageName
+            : "\(englishLanguageName) / \(localLanguageName)"
+
+        return """
+        Response language:
+        - Keep these system instructions, JSON keys, enum values, and code-like identifiers in English.
+        - Write user-visible answers, reasoning fields, summaries, and card text in the user's current app language: \(languageDescription) (\(preferredIdentifier)).
+        - If the user explicitly asks for a different language, follow that request for prose only.
+        """
     }
 
     static func migratingSystemPrompt(_ prompt: String) -> String {

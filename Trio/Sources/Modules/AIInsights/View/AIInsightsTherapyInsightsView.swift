@@ -511,10 +511,11 @@ private struct SuggestionRow: View {
             }
 
             // Reasoning
-            Text(suggestion.reasoning)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .lineLimit(isExpanded ? nil : 4)
+            ExpandableReasoningText(
+                text: suggestion.reasoning,
+                collapsedLineLimit: 5,
+                isExpanded: $isExpanded
+            )
 
         }
         .padding(12)
@@ -638,10 +639,11 @@ private struct HistoryRecordRow: View {
                     .foregroundStyle(statusColor)
             }
 
-            Text(record.suggestion.reasoning)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .lineLimit(isExpanded ? nil : 2)
+            ExpandableReasoningText(
+                text: record.suggestion.reasoning,
+                collapsedLineLimit: 3,
+                isExpanded: $isExpanded
+            )
         }
         .padding(12)
         .background(
@@ -690,5 +692,50 @@ private struct HistoryRecordRow: View {
             return String(localized: "\(hours) h", comment: "Relative time hours")
         }
         return date.formatted(.dateTime.month().day().hour().minute())
+    }
+}
+
+private struct ExpandableReasoningText: View {
+    let text: String
+    let collapsedLineLimit: Int
+    @Binding var isExpanded: Bool
+
+    private var shouldShowToggle: Bool {
+        text.count > 120 || text.contains("\n")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(text)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(isExpanded ? nil : collapsedLineLimit)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if shouldShowToggle {
+                Button {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(
+                            isExpanded
+                                ? String(localized: "Show less", comment: "Collapse therapy insight card")
+                                : String(localized: "Read more", comment: "Expand therapy insight card")
+                        )
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    }
+                    .font(.caption2.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .accessibilityHint(
+                    isExpanded
+                        ? Text(String(localized: "Collapse the full recommendation text.", comment: "Collapse therapy insight accessibility hint"))
+                        : Text(String(localized: "Show the full recommendation text.", comment: "Expand therapy insight accessibility hint"))
+                )
+            }
+        }
     }
 }

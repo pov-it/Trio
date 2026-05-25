@@ -106,14 +106,19 @@ extension AIInsights {
             let apiKey: String
             let baseURL: String
             let model: String
+            let clinicalContext: String
         }
 
         /// Build the AI prompt body (without the system message) using last-30-day
         /// data. The chat conversations + therapy changes + tracker context are
         /// included so the AI can spot patterns it would not see otherwise.
-        private func buildContext(conversations: [ChatConversation], now: Date) -> String {
+        private func buildContext(conversations: [ChatConversation], now: Date, clinicalContext: String) -> String {
             let cutoff = now.addingTimeInterval(-Self.monthlyInterval)
             var ctx = "## PERIODIC RECAP CONTEXT (last 30 days)\n\n"
+
+            if !clinicalContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                ctx += clinicalContext + "\n"
+            }
 
             // 1. Therapy changes
             let history = AIInsights.SuggestionHistoryStore.load()
@@ -126,7 +131,7 @@ extension AIInsights {
                 formatter.dateStyle = .short
                 for record in history.prefix(15) {
                     let when = formatter.string(from: record.appliedAt)
-                    let setting = record.suggestion.settingType.localizedTitle
+                    let setting = record.suggestion.settingType.rawValue
                     let tb = record.suggestion.timeBlock
                     let before = record.suggestion.currentValue
                     let after = record.suggestion.proposedValue
@@ -156,15 +161,15 @@ extension AIInsights {
             ctx += "\n"
 
             // 3. Trackers
-            let caffeine = AIInsights_CaffeineTracker.shared.buildCaffeinePromptContext(at: now)
+            let caffeine = AIInsights_CaffeineTracker.shared.buildCaffeinePromptContext(at: now, lookbackHours: 24 * 30)
             if !caffeine.isEmpty { ctx += caffeine + "\n" }
-            let alcohol = AIInsights_AlcoholTracker.shared.buildAlcoholPromptContext(at: now)
+            let alcohol = AIInsights_AlcoholTracker.shared.buildAlcoholPromptContext(at: now, lookbackHours: 24 * 30)
             if !alcohol.isEmpty { ctx += alcohol + "\n" }
-            let meals = AIInsights.FoodFinderStateModel.buildMealPromptContext(at: now)
+            let meals = AIInsights.FoodFinderStateModel.buildMealPromptContext(at: now, lookbackHours: 24 * 30)
             if !meals.isEmpty { ctx += meals + "\n" }
 
             // 4. AutoPresets
-            ctx += AutoPresetsCoordinator.shared.buildAutoPresetsPromptContext(at: now)
+            ctx += AutoPresetsCoordinator.shared.buildAutoPresetsPromptContext(at: now, lookbackHours: 24 * 30)
 
             return ctx
         }
@@ -175,10 +180,23 @@ extension AIInsights {
 
             \(AIInsights.responseLanguageInstruction())
 
+            The instruction language is English by design. Do not answer in Dutch unless the response-language instruction says the user's current app language is Dutch.
+
+            The recap must read like a complete, coherent month report, not like a clipped note. Use full sentences and never end mid-value, mid-time-block, or mid-sentence.
+
             STRUCTURE — produce ALL of the following sections, in this order, each prefixed with a Markdown header on its own line:
 
             **Overview**
             Write 2–3 sentences of plain prose summarizing the past period. Mention what changed, what stayed stable, and the general feel of the user's data.
+
+            **Glucose and carbs**
+            Bullet list of concrete glucose statistics, time-of-day patterns, carb logging, and meal observations from FoodFinder.
+
+            **Therapy settings and changes**
+            Bullet list of the current therapy setting snapshot and every therapy setting adjusted in this window. For changes, name the setting, time block, and before -> after values.
+
+            **Food, caffeine, alcohol, and activity**
+            Bullet list of concrete behavioral/context patterns from FoodFinder, caffeine, alcohol, and AutoPresets. State when a data source had no entries.
 
             **Therapy changes**
             Bullet list of EVERY therapy setting that was adjusted in this window. For each, name the setting (Basal, ISF, Carb Ratio, Target, etc.), the time block if relevant, and the before → after values. If no changes were applied, write a single bullet saying so.
@@ -192,6 +210,7 @@ extension AIInsights {
             RULES:
             - Observations ONLY. Do NOT give advice or recommend changes.
             - Each bullet ≤ 25 words.
+            - Use complete sentences. Do not output fragments.
             - Mention therapy settings by name and value (no implicit "you should also...").
             - If trackers (caffeine / alcohol / FoodFinder / AutoPresets) reveal a behavioral pattern, name it concretely.
             - Use lightweight Markdown: **bold** for setting names, `-` bullets, headers with `**Section**`.
@@ -222,7 +241,11 @@ extension AIInsights {
             at now: Date = Date()
         ) async throws -> RecapEntry {
             let systemPrompt = buildSystemPrompt(cadence: cadence)
-            let userContext = buildContext(conversations: conversations, now: now)
+            let userContext = buildContext(
+                conversations: conversations,
+                now: now,
+                clinicalContext: config.clinicalContext
+            )
 
             let request = AIServiceAdapter.AIRequest(
                 model: config.model,
@@ -233,7 +256,7 @@ extension AIInsights {
                 temperature: 0.4,
                 topP: 0.9,
                 topK: nil,
-                maxTokens: 1500
+                maxTokens: 4096
             )
 
             let response = try await AIServiceAdapter.send(
@@ -242,6 +265,10 @@ extension AIInsights {
                 baseURL: config.baseURL,
                 apiKey: config.apiKey
             )
+            let recapBody = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard recapBody.count >= 120 else {
+                throw AIServiceAdapter.AIError.parsingError("The generated recap was incomplete. Please try again.")
+            }
 
             let cutoff = now.addingTimeInterval(-Self.monthlyInterval)
             let appliedCount = AIInsights.SuggestionHistoryStore.load()
@@ -258,7 +285,7 @@ extension AIInsights {
             let entry = RecapEntry(
                 date: now,
                 title: title,
-                body: response.text,
+                body: recapBody,
                 cadence: cadence,
                 appliedSuggestionCount: appliedCount
             )
