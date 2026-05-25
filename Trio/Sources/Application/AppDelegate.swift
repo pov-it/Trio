@@ -23,6 +23,18 @@ class AppDelegate: NSObject, UIApplicationDelegate, ObservableObject, UNUserNoti
         // Resume AutoPresets monitoring if the user previously enabled it.
         AutoPresetsCoordinator.shared.startIfConfigured()
 
+        // Telemetry: record this cold launch into the sliding 7-day window. If
+        // consent is set and the build SHA changed since the last successful
+        // send, fire an immediate ping — the 24h scheduler can't notice a
+        // build update on its own. Then arm the recurring 24h timer.
+        TelemetryClient.shared.recordColdLaunch()
+        Task.detached {
+            if TelemetryClient.shared.buildShaChangedSinceLastSend() {
+                await TelemetryClient.shared.maybeSend()
+            }
+            TelemetryClient.shared.scheduleRecurring()
+        }
+
         return true
     }
 
