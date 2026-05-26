@@ -75,6 +75,7 @@ struct AIInsightsCaffeineLogView: View {
             currentLevelSection
             logEntrySection
             recentEntriesSection
+            autoOverrideSection
         }
         .navigationTitle(String(localized: "Caffeine Tracker", comment: "Caffeine tracker nav title"))
         .navigationBarTitleDisplayMode(.inline)
@@ -391,6 +392,30 @@ struct AIInsightsCaffeineLogView: View {
     }
 
     // MARK: - Helpers
+
+    @ViewBuilder
+    private var autoOverrideSection: some View {
+        Section(
+            header: Text(String(localized: "Automation", comment: "Caffeine automation section header")),
+            footer: Text(String(localized: "Configure which override preset Trio applies automatically when you log caffeine. Acute caffeine intake reduces insulin sensitivity for a few hours.", comment: "Caffeine automation footer"))
+        ) {
+            NavigationLink {
+                AutoPresetsSettingsView()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "slider.horizontal.3")
+                        .foregroundStyle(.tint)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(localized: "Auto-Override Settings", comment: "Open AutoPresets row label"))
+                            .font(.subheadline)
+                        Text(String(localized: "Caffeine, alcohol, and activity presets", comment: "Open AutoPresets row caption"))
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
+    }
 
     private func gaugeColor(_ mg: Double) -> Color {
         if mg < 100 { return .green }

@@ -165,6 +165,11 @@ final class AIInsights_AlcoholTracker: ObservableObject, @unchecked Sendable {
         manual.append(AIInsightsAlcoholEntry(timestamp: timestamp, standardDrinks: standardDrinks, source: source))
         saveManualEntries(manual)
         rebuildMergedEntries()
+        // Alcohol-induced delayed hypoglycemia → schedule the configured
+        // override preset after the user-configured delay (default 90 min,
+        // based on Turner 2001 / Richardson 2005 timing). No-op when the
+        // feature is disabled in Settings or the drink is below threshold.
+        AutoPresetsCoordinator.shared.scheduleAlcoholOverride(units: standardDrinks, at: timestamp)
     }
 
     func removeEntry(_ entry: AIInsightsAlcoholEntry) {

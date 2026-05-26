@@ -45,6 +45,7 @@ struct AIInsightsAlcoholLogView: View {
             statusSection
             logEntrySection
             recentEntriesSection
+            autoOverrideSection
         }
         .navigationTitle(String(localized: "Alcohol Tracker", comment: "Alcohol tracker nav title"))
         .navigationBarTitleDisplayMode(.inline)
@@ -411,6 +412,30 @@ struct AIInsightsAlcoholLogView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button(String(localized: "Cancel", comment: "Cancel button")) { editingEntry = nil }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var autoOverrideSection: some View {
+        Section(
+            header: Text(String(localized: "Automation", comment: "Alcohol automation section header")),
+            footer: Text(String(localized: "Configure which override preset Trio schedules automatically when you log a drink. Alcohol impairs gluconeogenesis and can cause delayed hypoglycemia hours later.", comment: "Alcohol automation footer"))
+        ) {
+            NavigationLink {
+                AutoPresetsSettingsView()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "slider.horizontal.3")
+                        .foregroundStyle(.tint)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(localized: "Auto-Override Settings", comment: "Open AutoPresets row label"))
+                            .font(.subheadline)
+                        Text(String(localized: "Caffeine, alcohol, and activity presets", comment: "Open AutoPresets row caption"))
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
         }

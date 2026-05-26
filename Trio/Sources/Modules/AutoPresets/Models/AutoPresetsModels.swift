@@ -91,6 +91,11 @@ enum AutoPresetsLogEvent: String, Codable {
     case delayedHypoScheduled
     case delayedHypoActivated
     case delayedHypoExpired
+    case caffeineOverrideActivated
+    case caffeineOverrideExpired
+    case alcoholOverrideScheduled
+    case alcoholOverrideActivated
+    case alcoholOverrideExpired
 
     var iconName: String {
         switch self {
@@ -102,6 +107,11 @@ enum AutoPresetsLogEvent: String, Codable {
         case .delayedHypoScheduled: return "clock.badge.exclamationmark"
         case .delayedHypoActivated: return "shield.lefthalf.filled"
         case .delayedHypoExpired: return "shield"
+        case .caffeineOverrideActivated: return "cup.and.saucer.fill"
+        case .caffeineOverrideExpired: return "cup.and.saucer"
+        case .alcoholOverrideScheduled: return "wineglass"
+        case .alcoholOverrideActivated: return "wineglass.fill"
+        case .alcoholOverrideExpired: return "wineglass"
         }
     }
 
@@ -115,6 +125,11 @@ enum AutoPresetsLogEvent: String, Codable {
         case .delayedHypoScheduled: return String(localized: "Delayed-Hypo Scheduled")
         case .delayedHypoActivated: return String(localized: "Delayed-Hypo Active")
         case .delayedHypoExpired: return String(localized: "Delayed-Hypo Ended")
+        case .caffeineOverrideActivated: return String(localized: "Caffeine Override Active")
+        case .caffeineOverrideExpired: return String(localized: "Caffeine Override Ended")
+        case .alcoholOverrideScheduled: return String(localized: "Alcohol Override Scheduled")
+        case .alcoholOverrideActivated: return String(localized: "Alcohol Override Active")
+        case .alcoholOverrideExpired: return String(localized: "Alcohol Override Ended")
         }
     }
 }
@@ -180,6 +195,33 @@ struct AutoPresetsSettings: Codable, Equatable {
     /// (swimming, strength, yoga).
     var enableHealthKitWorkouts: Bool
 
+    // MARK: - Caffeine auto-override (Layer A)
+    /// When true, logging a caffeine entry above the threshold immediately
+    /// activates the configured override preset for `caffeineOverrideDuration`.
+    /// Backed by Shi 2017 / Whitehead 2013: acute caffeine reduces insulin
+    /// sensitivity in a 2-4h window post-ingestion.
+    var caffeineOverrideEnabled: Bool
+    /// `OverrideStored.id` of the preset to apply.
+    var caffeineOverridePresetID: String?
+    /// How long the caffeine-triggered preset stays active. Default 3h.
+    var caffeineOverrideDuration: TimeInterval
+    /// Minimum mg per entry that triggers an override (skip tiny doses).
+    var caffeineOverrideThresholdMg: Double
+
+    // MARK: - Alcohol auto-override (Layer A)
+    /// When true, logging an alcohol entry schedules a delayed override to
+    /// compensate for impaired gluconeogenesis (Turner 2001, Richardson 2005).
+    var alcoholOverrideEnabled: Bool
+    /// `OverrideStored.id` of the preset to apply.
+    var alcoholOverridePresetID: String?
+    /// Delay between logging and override activation. Default 90 min based on
+    /// observed timing of delayed alcohol-induced hypoglycemia.
+    var alcoholOverrideDelay: TimeInterval
+    /// How long the alcohol-triggered preset stays active. Default 6h.
+    var alcoholOverrideDuration: TimeInterval
+    /// Minimum standard drinks that triggers an override.
+    var alcoholOverrideThresholdUnits: Double
+
     init(
         isEnabled: Bool = false,
         supportedActivityTypes: Set<AutoPresetsActivityType> = [.walking],
@@ -195,7 +237,16 @@ struct AutoPresetsSettings: Codable, Equatable {
         delayedHypoPresetDuration: TimeInterval = 60 * 60,
         useHeartRateSignal: Bool = false,
         heartRateThresholdBpm: Double = 120,
-        enableHealthKitWorkouts: Bool = false
+        enableHealthKitWorkouts: Bool = false,
+        caffeineOverrideEnabled: Bool = false,
+        caffeineOverridePresetID: String? = nil,
+        caffeineOverrideDuration: TimeInterval = 3 * 3600,
+        caffeineOverrideThresholdMg: Double = 100,
+        alcoholOverrideEnabled: Bool = false,
+        alcoholOverridePresetID: String? = nil,
+        alcoholOverrideDelay: TimeInterval = 90 * 60,
+        alcoholOverrideDuration: TimeInterval = 6 * 3600,
+        alcoholOverrideThresholdUnits: Double = 1.0
     ) {
         self.isEnabled = isEnabled
         self.supportedActivityTypes = supportedActivityTypes
@@ -212,6 +263,15 @@ struct AutoPresetsSettings: Codable, Equatable {
         self.useHeartRateSignal = useHeartRateSignal
         self.heartRateThresholdBpm = heartRateThresholdBpm
         self.enableHealthKitWorkouts = enableHealthKitWorkouts
+        self.caffeineOverrideEnabled = caffeineOverrideEnabled
+        self.caffeineOverridePresetID = caffeineOverridePresetID
+        self.caffeineOverrideDuration = caffeineOverrideDuration
+        self.caffeineOverrideThresholdMg = caffeineOverrideThresholdMg
+        self.alcoholOverrideEnabled = alcoholOverrideEnabled
+        self.alcoholOverridePresetID = alcoholOverridePresetID
+        self.alcoholOverrideDelay = alcoholOverrideDelay
+        self.alcoholOverrideDuration = alcoholOverrideDuration
+        self.alcoholOverrideThresholdUnits = alcoholOverrideThresholdUnits
     }
 
     // Custom decoder so older persisted settings (without the new fields)
@@ -233,6 +293,15 @@ struct AutoPresetsSettings: Codable, Equatable {
         useHeartRateSignal = try c.decodeIfPresent(Bool.self, forKey: .useHeartRateSignal) ?? false
         heartRateThresholdBpm = try c.decodeIfPresent(Double.self, forKey: .heartRateThresholdBpm) ?? 120
         enableHealthKitWorkouts = try c.decodeIfPresent(Bool.self, forKey: .enableHealthKitWorkouts) ?? false
+        caffeineOverrideEnabled = try c.decodeIfPresent(Bool.self, forKey: .caffeineOverrideEnabled) ?? false
+        caffeineOverridePresetID = try c.decodeIfPresent(String.self, forKey: .caffeineOverridePresetID)
+        caffeineOverrideDuration = try c.decodeIfPresent(TimeInterval.self, forKey: .caffeineOverrideDuration) ?? (3 * 3600)
+        caffeineOverrideThresholdMg = try c.decodeIfPresent(Double.self, forKey: .caffeineOverrideThresholdMg) ?? 100
+        alcoholOverrideEnabled = try c.decodeIfPresent(Bool.self, forKey: .alcoholOverrideEnabled) ?? false
+        alcoholOverridePresetID = try c.decodeIfPresent(String.self, forKey: .alcoholOverridePresetID)
+        alcoholOverrideDelay = try c.decodeIfPresent(TimeInterval.self, forKey: .alcoholOverrideDelay) ?? (90 * 60)
+        alcoholOverrideDuration = try c.decodeIfPresent(TimeInterval.self, forKey: .alcoholOverrideDuration) ?? (6 * 3600)
+        alcoholOverrideThresholdUnits = try c.decodeIfPresent(Double.self, forKey: .alcoholOverrideThresholdUnits) ?? 1.0
     }
 
     func presetId(for activity: AutoPresetsActivityType) -> String? {

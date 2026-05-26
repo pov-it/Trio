@@ -161,6 +161,10 @@ final class AIInsights_CaffeineTracker: ObservableObject, @unchecked Sendable {
         manual.append(AIInsightsCaffeineEntry(timestamp: timestamp, milligrams: milligrams, source: source))
         saveManualEntries(manual)
         rebuildMergedEntries()
+        // If the user opted in via Settings → AutoPresets → Caffeine, ask the
+        // coordinator to apply the configured override preset for the
+        // sensitivity-reduction window. No-op when disabled or below threshold.
+        AutoPresetsCoordinator.shared.scheduleCaffeineOverride(mg: milligrams, at: timestamp)
     }
 
     func removeEntry(_ entry: AIInsightsCaffeineEntry) {

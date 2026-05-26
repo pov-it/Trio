@@ -157,6 +157,44 @@ final class AutoPresetsCoordinator: ObservableObject, @unchecked Sendable {
                 ctx += "  • \(when) — \(activity) (preset: \(preset))\n"
             }
         }
+
+        // Tracker-driven auto-override status — helps the AI know whether to
+        // recommend enabling these features when patterns suggest they'd help.
+        ctx += "- Caffeine auto-override: "
+        if settings.caffeineOverrideEnabled {
+            ctx += String(
+                format: "enabled (threshold %.0f mg, duration %.0fh)\n",
+                settings.caffeineOverrideThresholdMg,
+                settings.caffeineOverrideDuration / 3600
+            )
+        } else {
+            ctx += "disabled (configurable in Settings → Features → AutoPresets)\n"
+        }
+        ctx += "- Alcohol auto-override: "
+        if settings.alcoholOverrideEnabled {
+            ctx += String(
+                format: "enabled (threshold %.1f drinks, delay %.0fmin, duration %.0fh)\n",
+                settings.alcoholOverrideThresholdUnits,
+                settings.alcoholOverrideDelay / 60,
+                settings.alcoholOverrideDuration / 3600
+            )
+        } else {
+            ctx += "disabled (configurable in Settings → Features → AutoPresets)\n"
+        }
+        // Also include the most-recent tracker-driven activations so the AI
+        // can correlate them with glucose excursions in the period.
+        let trackerEvents = recent.filter {
+            $0.event == .caffeineOverrideActivated
+                || $0.event == .alcoholOverrideActivated
+                || $0.event == .alcoholOverrideScheduled
+        }
+        if !trackerEvents.isEmpty {
+            ctx += "- Tracker-driven overrides in the \(windowLabel):\n"
+            for entry in trackerEvents.prefix(8) {
+                let when = "\(dayFormatter.string(from: entry.date)) \(formatter.string(from: entry.date))"
+                ctx += "  • \(when) — \(entry.event.displayName) (preset: \(entry.presetName ?? "—"))\n"
+            }
+        }
         return ctx
     }
 
@@ -351,6 +389,232 @@ final class AutoPresetsCoordinator: ObservableObject, @unchecked Sendable {
     private func cancelDelayedHypoSchedule() {
         delayedHypoActivateTimer?.invalidate()
         delayedHypoActivateTimer = nil
+    }
+
+    // MARK: - Caffeine auto-override
+    //
+    // Activated immediately when a caffeine entry above the threshold is logged
+    // — the literature (Shi 2017 meta-analysis; Whitehead 2013 systematic
+    // review) shows insulin-sensitivity reduction in the 2-4h post-ingestion
+    // window, with a ~14-37% drop in T2D and ~15% in healthy subjects, so a
+    // 3h ON-window with a slightly-more-aggressive preset is a reasonable
+    // first-cut compensation.
+
+    private var caffeineActivateTimer: Timer?
+    private var caffeineDeactivateTimer: Timer?
+    private var caffeineURI: String? {
+        get { UserDefaults.standard.string(forKey: "AutoPresets_caffeineURI") }
+        set { UserDefaults.standard.set(newValue, forKey: "AutoPresets_caffeineURI") }
+    }
+
+    /// Called by `AIInsights_CaffeineTracker` after a new entry is logged.
+    /// Activates the configured override preset (immediate) and schedules a
+    /// deactivation timer.
+    func scheduleCaffeineOverride(mg: Double, at timestamp: Date = Date()) {
+        guard settings.caffeineOverrideEnabled,
+              let presetID = settings.caffeineOverridePresetID,
+              !presetID.isEmpty,
+              mg >= settings.caffeineOverrideThresholdMg
+        else { return }
+
+        let duration = settings.caffeineOverrideDuration
+        activateTrackerPreset(
+            presetID: presetID,
+            uriKeyPath: \.caffeineURI,
+            activateEvent: .caffeineOverrideActivated,
+            duration: duration
+        ) { [weak self] in
+            self?.deactivateCaffeineOverride()
+        }
+    }
+
+    private func deactivateCaffeineOverride() {
+        caffeineDeactivateTimer?.invalidate()
+        caffeineDeactivateTimer = nil
+        deactivateTrackerPreset(
+            uri: caffeineURI,
+            event: .caffeineOverrideExpired
+        ) { [weak self] in self?.caffeineURI = nil }
+    }
+
+    // MARK: - Alcohol auto-override
+    //
+    // Scheduled with a delay (default 90 min) because alcohol hypoglycemia
+    // is delayed — Turner 2001 (ADA Diabetes Care) shows post-breakfast
+    // hypo's the morning after evening drinking, Richardson 2005 documents
+    // a 24h risk window. The mechanism is impaired gluconeogenesis (48g
+    // alcohol ≈ 45% drop in hepatic glucose production), so the preset
+    // should reduce insulin and raise target.
+
+    private var alcoholActivateTimer: Timer?
+    private var alcoholDeactivateTimer: Timer?
+    private var alcoholURI: String? {
+        get { UserDefaults.standard.string(forKey: "AutoPresets_alcoholURI") }
+        set { UserDefaults.standard.set(newValue, forKey: "AutoPresets_alcoholURI") }
+    }
+
+    /// Called by `AIInsights_AlcoholTracker` after a new drink is logged.
+    /// Schedules a delayed activation + later deactivation timer.
+    func scheduleAlcoholOverride(units: Double, at timestamp: Date = Date()) {
+        guard settings.alcoholOverrideEnabled,
+              let presetID = settings.alcoholOverridePresetID,
+              !presetID.isEmpty,
+              units >= settings.alcoholOverrideThresholdUnits
+        else { return }
+
+        // Cancel any pending alcohol activation so a quick refill resets the
+        // clock rather than stacking timers.
+        alcoholActivateTimer?.invalidate()
+
+        let delay = settings.alcoholOverrideDelay
+        let duration = settings.alcoholOverrideDuration
+        storage.addLogEntry(event: .alcoholOverrideScheduled, activityType: nil, presetName: nil)
+        os_log("Scheduled alcohol override in %.0fs (units=%.1f, presetID=%{public}@)",
+               log: log, type: .info, delay, units, presetID)
+
+        let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.activateTrackerPreset(
+                presetID: presetID,
+                uriKeyPath: \.alcoholURI,
+                activateEvent: .alcoholOverrideActivated,
+                duration: duration
+            ) { [weak self] in
+                self?.deactivateAlcoholOverride()
+            }
+        }
+        alcoholActivateTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func deactivateAlcoholOverride() {
+        alcoholDeactivateTimer?.invalidate()
+        alcoholDeactivateTimer = nil
+        deactivateTrackerPreset(
+            uri: alcoholURI,
+            event: .alcoholOverrideExpired
+        ) { [weak self] in self?.alcoholURI = nil }
+    }
+
+    // MARK: - Generic tracker-preset activation
+    //
+    // Used by both caffeine and alcohol code paths above. Same shape as the
+    // delayed-hypo activator but parameterized so the two trackers can share
+    // the CoreData plumbing.
+
+    private func activateTrackerPreset(
+        presetID: String,
+        uriKeyPath: ReferenceWritableKeyPath<AutoPresetsCoordinator, String?>,
+        activateEvent: AutoPresetsLogEvent,
+        duration: TimeInterval,
+        scheduleDeactivate: @escaping () -> Void
+    ) {
+        Task { [weak self] in
+            guard let self else { return }
+            let context = CoreDataStack.shared.newTaskContext()
+            await context.perform {
+                let request: NSFetchRequest<OverrideStored> = OverrideStored.fetchRequest()
+                request.predicate = NSPredicate(format: "id == %@ AND isPreset == YES", presetID)
+                request.fetchLimit = 1
+                guard let preset = try? context.fetch(request).first else {
+                    os_log("Tracker preset id=%{public}@ not found", log: self.log, type: .error, presetID)
+                    return
+                }
+
+                // Skip if a non-AutoPresets override is already active so we
+                // never overwrite a user-initiated override.
+                let activeRequest: NSFetchRequest<OverrideStored> = OverrideStored.fetchRequest()
+                activeRequest.predicate = NSPredicate(format: "enabled == YES")
+                let active = (try? context.fetch(activeRequest)) ?? []
+                let ourURIs: [String] = [
+                    self.activatedOverrideURI,
+                    self.delayedHypoURI,
+                    self.caffeineURI,
+                    self.alcoholURI
+                ].compactMap { $0 }
+                let foreignActive = active.contains {
+                    !ourURIs.contains($0.objectID.uriRepresentation().absoluteString)
+                }
+                guard !foreignActive else {
+                    os_log("Skipping tracker preset: foreign override active",
+                           log: self.log, type: .info)
+                    return
+                }
+
+                preset.enabled = true
+                preset.date = Date()
+                preset.isUploadedToNS = false
+
+                do {
+                    if context.hasChanges { try context.save() }
+                    self[keyPath: uriKeyPath] = preset.objectID.uriRepresentation().absoluteString
+                    self.storage.addLogEntry(event: activateEvent, activityType: nil, presetName: preset.name)
+                    os_log("Tracker preset %{public}@ activated (event=%{public}@)",
+                           log: self.log, type: .info, preset.name ?? "?", activateEvent.rawValue)
+                } catch {
+                    os_log("Tracker preset activation failed: %{public}@",
+                           log: self.log, type: .error, error.localizedDescription)
+                    return
+                }
+            }
+
+            await MainActor.run {
+                let timer = Timer(timeInterval: duration, repeats: false) { _ in
+                    scheduleDeactivate()
+                }
+                if activateEvent == .caffeineOverrideActivated {
+                    self.caffeineDeactivateTimer = timer
+                } else if activateEvent == .alcoholOverrideActivated {
+                    self.alcoholDeactivateTimer = timer
+                }
+                RunLoop.main.add(timer, forMode: .common)
+            }
+        }
+    }
+
+    private func deactivateTrackerPreset(
+        uri uriString: String?,
+        event: AutoPresetsLogEvent,
+        clearURI: @escaping () -> Void
+    ) {
+        guard let uriString,
+              let url = URL(string: uriString),
+              let objectID = CoreDataStack.shared.persistentContainer.persistentStoreCoordinator
+                  .managedObjectID(forURIRepresentation: url)
+        else {
+            clearURI()
+            return
+        }
+
+        Task { [weak self] in
+            guard let self else { return }
+            let context = CoreDataStack.shared.newTaskContext()
+            await context.perform {
+                guard let preset = try? context.existingObject(with: objectID) as? OverrideStored,
+                      preset.enabled
+                else {
+                    clearURI()
+                    return
+                }
+                let run = OverrideRunStored(context: context)
+                run.id = UUID()
+                run.name = preset.name
+                run.startDate = preset.date ?? .distantPast
+                run.endDate = Date()
+                run.target = NSDecimalNumber(value: preset.target?.doubleValue ?? 0)
+                run.override = preset
+                run.isUploadedToNS = false
+                preset.enabled = false
+                do {
+                    if context.hasChanges { try context.save() }
+                    clearURI()
+                    self.storage.addLogEntry(event: event, activityType: nil, presetName: preset.name)
+                } catch {
+                    os_log("Tracker preset deactivation failed: %{public}@",
+                           log: self.log, type: .error, error.localizedDescription)
+                }
+            }
+        }
     }
 
     // MARK: - Override activation (CoreData)
