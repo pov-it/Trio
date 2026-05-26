@@ -408,8 +408,11 @@ final class AutoPresetsCoordinator: ObservableObject, @unchecked Sendable {
     }
 
     /// Called by `AIInsights_CaffeineTracker` after a new entry is logged.
-    /// Activates the configured override preset (immediate) and schedules a
-    /// deactivation timer.
+    /// First-time: activates the configured preset and schedules a deactivate
+    /// timer. Re-logged while already active: extends the active window from
+    /// "now" by `caffeineOverrideDuration` so the override doesn't expire
+    /// early — fixes the prior bug where the original deactivate timer cut
+    /// a refreshed window short.
     func scheduleCaffeineOverride(mg: Double, at timestamp: Date = Date()) {
         guard settings.caffeineOverrideEnabled,
               let presetID = settings.caffeineOverridePresetID,
@@ -418,6 +421,25 @@ final class AutoPresetsCoordinator: ObservableObject, @unchecked Sendable {
         else { return }
 
         let duration = settings.caffeineOverrideDuration
+
+        // Fast path: we already have a live caffeine override. Extend the
+        // deactivate timer instead of re-running the full activation. This
+        // keeps the preset on continuously without a CoreData round-trip.
+        if isOurOverrideStillActive(uri: caffeineURI) {
+            refreshDeactivateTimer(
+                for: \.caffeineDeactivateTimer,
+                duration: duration,
+                deactivate: { [weak self] in self?.deactivateCaffeineOverride() }
+            )
+            storage.addLogEntry(event: .caffeineOverrideRefreshed, activityType: nil, presetName: nil)
+            os_log("Caffeine override extended for another %.0fs (mg=%.0f)",
+                   log: log, type: .info, duration, mg)
+            return
+        }
+
+        // Either first activation, or our URI is stale (preset disabled
+        // externally). Clear stale URI before reactivating fresh.
+        if caffeineURI != nil { caffeineURI = nil }
         activateTrackerPreset(
             presetID: presetID,
             uriKeyPath: \.caffeineURI,
@@ -454,7 +476,11 @@ final class AutoPresetsCoordinator: ObservableObject, @unchecked Sendable {
     }
 
     /// Called by `AIInsights_AlcoholTracker` after a new drink is logged.
-    /// Schedules a delayed activation + later deactivation timer.
+    /// Three code paths:
+    ///   1. Override already running → extend deactivate timer, no new delay.
+    ///   2. Activation already scheduled but not yet fired → reset the delay
+    ///      timer from the new drink time (latest drink defines onset).
+    ///   3. Otherwise → schedule fresh with `alcoholOverrideDelay`.
     func scheduleAlcoholOverride(units: Double, at timestamp: Date = Date()) {
         guard settings.alcoholOverrideEnabled,
               let presetID = settings.alcoholOverridePresetID,
@@ -462,12 +488,27 @@ final class AutoPresetsCoordinator: ObservableObject, @unchecked Sendable {
               units >= settings.alcoholOverrideThresholdUnits
         else { return }
 
-        // Cancel any pending alcohol activation so a quick refill resets the
-        // clock rather than stacking timers.
+        let duration = settings.alcoholOverrideDuration
+
+        // Case 1: override already running. Extend deactivate timer only.
+        if isOurOverrideStillActive(uri: alcoholURI) {
+            refreshDeactivateTimer(
+                for: \.alcoholDeactivateTimer,
+                duration: duration,
+                deactivate: { [weak self] in self?.deactivateAlcoholOverride() }
+            )
+            storage.addLogEntry(event: .alcoholOverrideRefreshed, activityType: nil, presetName: nil)
+            os_log("Alcohol override extended for another %.0fs (units=%.1f)",
+                   log: log, type: .info, duration, units)
+            return
+        }
+
+        // Cases 2 & 3: not running yet — (re)schedule with delay.
+        if alcoholURI != nil { alcoholURI = nil }
         alcoholActivateTimer?.invalidate()
+        alcoholDeactivateTimer?.invalidate()
 
         let delay = settings.alcoholOverrideDelay
-        let duration = settings.alcoholOverrideDuration
         storage.addLogEntry(event: .alcoholOverrideScheduled, activityType: nil, presetName: nil)
         os_log("Scheduled alcohol override in %.0fs (units=%.1f, presetID=%{public}@)",
                log: log, type: .info, delay, units, presetID)
@@ -494,6 +535,41 @@ final class AutoPresetsCoordinator: ObservableObject, @unchecked Sendable {
             uri: alcoholURI,
             event: .alcoholOverrideExpired
         ) { [weak self] in self?.alcoholURI = nil }
+    }
+
+    // MARK: - Refresh helpers
+
+    /// True when the stored URI still points to an enabled `OverrideStored`
+    /// preset. False when the URI is nil, points to a deleted/disabled
+    /// object, or the preset has been turned off (e.g. user toggled another
+    /// preset in the UI, which disables ours).
+    private func isOurOverrideStillActive(uri uriString: String?) -> Bool {
+        guard let uriString,
+              let url = URL(string: uriString),
+              let objectID = CoreDataStack.shared.persistentContainer
+                  .persistentStoreCoordinator.managedObjectID(forURIRepresentation: url)
+        else { return false }
+        let ctx = CoreDataStack.shared.persistentContainer.viewContext
+        guard let preset = try? ctx.existingObject(with: objectID) as? OverrideStored else {
+            return false
+        }
+        return preset.enabled
+    }
+
+    /// Cancel the existing deactivate timer and schedule a fresh one
+    /// `duration` seconds from now. Used when the same tracker (caffeine or
+    /// alcohol) fires again while its override is still live — the prior
+    /// timer would otherwise expire on its original deadline and cut the
+    /// refreshed window short.
+    private func refreshDeactivateTimer(
+        for keyPath: ReferenceWritableKeyPath<AutoPresetsCoordinator, Timer?>,
+        duration: TimeInterval,
+        deactivate: @escaping () -> Void
+    ) {
+        self[keyPath: keyPath]?.invalidate()
+        let timer = Timer(timeInterval: duration, repeats: false) { _ in deactivate() }
+        self[keyPath: keyPath] = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     // MARK: - Generic tracker-preset activation
@@ -559,6 +635,14 @@ final class AutoPresetsCoordinator: ObservableObject, @unchecked Sendable {
             }
 
             await MainActor.run {
+                // Invalidate any prior deactivate timer for this category so a
+                // refreshed window doesn't get cut short by the old deadline.
+                if activateEvent == .caffeineOverrideActivated {
+                    self.caffeineDeactivateTimer?.invalidate()
+                } else if activateEvent == .alcoholOverrideActivated {
+                    self.alcoholDeactivateTimer?.invalidate()
+                }
+
                 let timer = Timer(timeInterval: duration, repeats: false) { _ in
                     scheduleDeactivate()
                 }

@@ -92,9 +92,11 @@ enum AutoPresetsLogEvent: String, Codable {
     case delayedHypoActivated
     case delayedHypoExpired
     case caffeineOverrideActivated
+    case caffeineOverrideRefreshed
     case caffeineOverrideExpired
     case alcoholOverrideScheduled
     case alcoholOverrideActivated
+    case alcoholOverrideRefreshed
     case alcoholOverrideExpired
 
     var iconName: String {
@@ -108,9 +110,11 @@ enum AutoPresetsLogEvent: String, Codable {
         case .delayedHypoActivated: return "shield.lefthalf.filled"
         case .delayedHypoExpired: return "shield"
         case .caffeineOverrideActivated: return "cup.and.saucer.fill"
+        case .caffeineOverrideRefreshed: return "arrow.clockwise.circle.fill"
         case .caffeineOverrideExpired: return "cup.and.saucer"
         case .alcoholOverrideScheduled: return "wineglass"
         case .alcoholOverrideActivated: return "wineglass.fill"
+        case .alcoholOverrideRefreshed: return "arrow.clockwise.circle.fill"
         case .alcoholOverrideExpired: return "wineglass"
         }
     }
@@ -126,9 +130,11 @@ enum AutoPresetsLogEvent: String, Codable {
         case .delayedHypoActivated: return String(localized: "Delayed-Hypo Active")
         case .delayedHypoExpired: return String(localized: "Delayed-Hypo Ended")
         case .caffeineOverrideActivated: return String(localized: "Caffeine Override Active")
+        case .caffeineOverrideRefreshed: return String(localized: "Caffeine Override Extended")
         case .caffeineOverrideExpired: return String(localized: "Caffeine Override Ended")
         case .alcoholOverrideScheduled: return String(localized: "Alcohol Override Scheduled")
         case .alcoholOverrideActivated: return String(localized: "Alcohol Override Active")
+        case .alcoholOverrideRefreshed: return String(localized: "Alcohol Override Extended")
         case .alcoholOverrideExpired: return String(localized: "Alcohol Override Ended")
         }
     }
