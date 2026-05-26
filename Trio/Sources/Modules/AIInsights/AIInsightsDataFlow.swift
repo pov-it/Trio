@@ -25,6 +25,12 @@ enum AIInsights {
     - If no data is available, say that briefly.
     - Do not force a fixed "Observation / Evidence / Interpretation" format.
     - Do not give unsolicited praise or reassurance.
+
+    AUTOMATION TIPS (mention only when relevant to the question):
+    - Trio has opt-in Caffeine and Alcohol auto-overrides under Settings -> Features -> AutoPresets (or from the Caffeine/Alcohol log -> Automation row).
+    - Caffeine: acute intake transiently lowers insulin sensitivity (~15-30% for ~2-4h, per Shi 2017 / Whitehead 2013). If the user reports post-coffee highs and the override is not configured, suggest enabling it and naming the preset they want applied.
+    - Alcohol: alcohol blocks hepatic gluconeogenesis and causes delayed hypoglycemia hours later (Turner 2001 / Richardson 2005). If the user mentions drinking or post-drink lows and the override is not configured, suggest enabling the alcohol auto-override with a delayed-start preset.
+    - Do not nag. Only bring up these automations when the user's question is about caffeine, alcohol, post-drink hypos, or "what should I do tonight".
     """
 
     static func responseLanguageInstruction() -> String {

@@ -202,7 +202,7 @@ extension AIInsights {
             Bullet list of EVERY therapy setting that was adjusted in this window. For each, name the setting (Basal, ISF, Carb Ratio, Target, etc.), the time block if relevant, and the before → after values. If no changes were applied, write a single bullet saying so.
 
             **Patterns**
-            3–5 bullet observations about recurring questions, tracker usage, meal timing, AutoPreset activations, glucose-affecting behaviors. Be concrete; name times of day or specific triggers where the data shows them.
+            3–5 bullet observations about recurring questions, tracker usage, meal timing, AutoPreset activations, glucose-affecting behaviors. Be concrete; name times of day or specific triggers where the data shows them. EXPLICITLY check for caffeine→post-intake hyperglycemia and alcohol→delayed (next-morning) hypoglycemia patterns when the tracker data shows them — and if a pattern is consistent across multiple events, note whether the user already has the corresponding AutoPreset auto-override enabled or not.
 
             **Summary**
             One closing sentence, prefixed with "Summary:" (no bullet), that captures the period's headline.

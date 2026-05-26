@@ -28,6 +28,8 @@ struct AutoPresetsSettingsView: View {
             healthKitWorkoutsSection
             detectionSignalsSection
             postActivitySection
+            caffeineOverrideSection
+            alcoholOverrideSection
             timingSection
             recentActivitySection
         }
@@ -178,6 +180,109 @@ struct AutoPresetsSettingsView: View {
                             Text(row.name).tag(Optional<String>.some(row.id))
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // MARK: - Section: Caffeine override (Layer A)
+
+    @ViewBuilder
+    private var caffeineOverrideSection: some View {
+        Section(
+            header: Text(String(localized: "Caffeine Auto-Override")),
+            footer: Text(String(localized: "Activate an override preset automatically when caffeine is logged. Acute caffeine intake reduces insulin sensitivity by ~15-30% for ~2-4h (Shi 2017; Whitehead 2013), so pair this with a slightly more aggressive override."))
+        ) {
+            Toggle(isOn: caffeineOverrideEnabledBinding) {
+                Label(String(localized: "Apply override on caffeine"), systemImage: "cup.and.saucer.fill")
+            }
+
+            if coordinator.settings.caffeineOverrideEnabled {
+                Picker(
+                    String(localized: "Override Preset"),
+                    selection: caffeineOverridePresetBinding
+                ) {
+                    Text(String(localized: "None")).tag(Optional<String>.none)
+                    ForEach(presets) { row in
+                        Text(row.name).tag(Optional<String>.some(row.id))
+                    }
+                }
+
+                Picker(
+                    String(localized: "Minimum Dose"),
+                    selection: caffeineThresholdBinding
+                ) {
+                    Text(String(localized: "30 mg (small tea)")).tag(Double(30))
+                    Text(String(localized: "60 mg (espresso)")).tag(Double(60))
+                    Text(String(localized: "100 mg (filter coffee)")).tag(Double(100))
+                    Text(String(localized: "200 mg (large coffee)")).tag(Double(200))
+                }
+
+                Picker(
+                    String(localized: "Active Duration"),
+                    selection: caffeineDurationBinding
+                ) {
+                    Text(String(localized: "1 h")).tag(TimeInterval(3600))
+                    Text(String(localized: "2 h")).tag(TimeInterval(2 * 3600))
+                    Text(String(localized: "3 h")).tag(TimeInterval(3 * 3600))
+                    Text(String(localized: "4 h")).tag(TimeInterval(4 * 3600))
+                }
+            }
+        }
+    }
+
+    // MARK: - Section: Alcohol override (Layer A)
+
+    @ViewBuilder
+    private var alcoholOverrideSection: some View {
+        Section(
+            header: Text(String(localized: "Alcohol Auto-Override")),
+            footer: Text(String(localized: "Schedule a delayed override preset when alcohol is logged. Alcohol impairs hepatic gluconeogenesis (≈45% drop with 48g ethanol), with hypoglycemia risk peaking hours later (Turner 2001; Richardson 2005)."))
+        ) {
+            Toggle(isOn: alcoholOverrideEnabledBinding) {
+                Label(String(localized: "Apply override on alcohol"), systemImage: "wineglass.fill")
+            }
+
+            if coordinator.settings.alcoholOverrideEnabled {
+                Picker(
+                    String(localized: "Override Preset"),
+                    selection: alcoholOverridePresetBinding
+                ) {
+                    Text(String(localized: "None")).tag(Optional<String>.none)
+                    ForEach(presets) { row in
+                        Text(row.name).tag(Optional<String>.some(row.id))
+                    }
+                }
+
+                Picker(
+                    String(localized: "Minimum Drinks"),
+                    selection: alcoholThresholdBinding
+                ) {
+                    Text(String(localized: "0.5 drinks")).tag(Double(0.5))
+                    Text(String(localized: "1.0 drinks")).tag(Double(1.0))
+                    Text(String(localized: "1.5 drinks")).tag(Double(1.5))
+                    Text(String(localized: "2.0 drinks")).tag(Double(2.0))
+                }
+
+                Picker(
+                    String(localized: "Activation Delay"),
+                    selection: alcoholDelayBinding
+                ) {
+                    Text(String(localized: "30 min")).tag(TimeInterval(30 * 60))
+                    Text(String(localized: "60 min")).tag(TimeInterval(60 * 60))
+                    Text(String(localized: "90 min")).tag(TimeInterval(90 * 60))
+                    Text(String(localized: "2 h")).tag(TimeInterval(120 * 60))
+                    Text(String(localized: "3 h")).tag(TimeInterval(180 * 60))
+                }
+
+                Picker(
+                    String(localized: "Active Duration"),
+                    selection: alcoholDurationBinding
+                ) {
+                    Text(String(localized: "3 h")).tag(TimeInterval(3 * 3600))
+                    Text(String(localized: "6 h")).tag(TimeInterval(6 * 3600))
+                    Text(String(localized: "8 h")).tag(TimeInterval(8 * 3600))
+                    Text(String(localized: "12 h")).tag(TimeInterval(12 * 3600))
                 }
             }
         }
@@ -366,6 +471,73 @@ struct AutoPresetsSettingsView: View {
         Binding(
             get: { coordinator.settings.delayedHypoPresetDuration },
             set: { newVal in coordinator.updateSettings { $0.delayedHypoPresetDuration = newVal } }
+        )
+    }
+
+    // MARK: - Caffeine bindings
+
+    private var caffeineOverrideEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { coordinator.settings.caffeineOverrideEnabled },
+            set: { v in coordinator.updateSettings { $0.caffeineOverrideEnabled = v } }
+        )
+    }
+
+    private var caffeineOverridePresetBinding: Binding<String?> {
+        Binding(
+            get: { coordinator.settings.caffeineOverridePresetID },
+            set: { v in coordinator.updateSettings { $0.caffeineOverridePresetID = v } }
+        )
+    }
+
+    private var caffeineDurationBinding: Binding<TimeInterval> {
+        Binding(
+            get: { coordinator.settings.caffeineOverrideDuration },
+            set: { v in coordinator.updateSettings { $0.caffeineOverrideDuration = v } }
+        )
+    }
+
+    private var caffeineThresholdBinding: Binding<Double> {
+        Binding(
+            get: { coordinator.settings.caffeineOverrideThresholdMg },
+            set: { v in coordinator.updateSettings { $0.caffeineOverrideThresholdMg = v } }
+        )
+    }
+
+    // MARK: - Alcohol bindings
+
+    private var alcoholOverrideEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { coordinator.settings.alcoholOverrideEnabled },
+            set: { v in coordinator.updateSettings { $0.alcoholOverrideEnabled = v } }
+        )
+    }
+
+    private var alcoholOverridePresetBinding: Binding<String?> {
+        Binding(
+            get: { coordinator.settings.alcoholOverridePresetID },
+            set: { v in coordinator.updateSettings { $0.alcoholOverridePresetID = v } }
+        )
+    }
+
+    private var alcoholDelayBinding: Binding<TimeInterval> {
+        Binding(
+            get: { coordinator.settings.alcoholOverrideDelay },
+            set: { v in coordinator.updateSettings { $0.alcoholOverrideDelay = v } }
+        )
+    }
+
+    private var alcoholDurationBinding: Binding<TimeInterval> {
+        Binding(
+            get: { coordinator.settings.alcoholOverrideDuration },
+            set: { v in coordinator.updateSettings { $0.alcoholOverrideDuration = v } }
+        )
+    }
+
+    private var alcoholThresholdBinding: Binding<Double> {
+        Binding(
+            get: { coordinator.settings.alcoholOverrideThresholdUnits },
+            set: { v in coordinator.updateSettings { $0.alcoholOverrideThresholdUnits = v } }
         )
     }
 
