@@ -132,11 +132,7 @@ extension AIInsights {
                     cadenceChip(entry.cadence)
                 }
 
-                Text(Self.markdownAttributed(entry.body))
-                    .font(.subheadline)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+                recapBody(entry.body)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 if entry.appliedSuggestionCount > 0 {
@@ -215,13 +211,149 @@ extension AIInsights {
             )
         }
 
-        /// Convert the AI-produced body into an AttributedString so basic
-        /// Markdown like **bold**, *italic*, and bullet lists render properly.
-        /// Falls back to plain text if parsing fails.
-        private static func markdownAttributed(_ body: String) -> AttributedString {
-            (try? AttributedString(markdown: body, options: .init(
-                interpretedSyntax: .inlineOnlyPreservingWhitespace
-            ))) ?? AttributedString(body)
+        /// Render the (sanitized) recap body as a sequence of blocks —
+        /// section headers, bullet lists, and prose paragraphs — so we get
+        /// proper visual structure instead of a wall of inline markdown.
+        @ViewBuilder
+        private func recapBody(_ raw: String) -> some View {
+            // Re-sanitize on display so older entries persisted before the
+            // sanitizer existed also render cleanly.
+            let cleaned = PeriodicRecapService.sanitizeRecapBody(raw)
+            let blocks = RecapBlock.parse(cleaned)
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(blocks.indices, id: \.self) { idx in
+                    recapBlockView(blocks[idx])
+                }
+            }
+            .textSelection(.enabled)
+        }
+
+        @ViewBuilder
+        private func recapBlockView(_ block: RecapBlock) -> some View {
+            switch block {
+            case let .header(title):
+                Text(Self.inlineMarkdown(title))
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.top, 2)
+            case let .bullets(items):
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(items.indices, id: \.self) { i in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("•")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text(Self.inlineMarkdown(items[i]))
+                                .font(.subheadline)
+                                .lineSpacing(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+            case let .summary(text):
+                Text(Self.inlineMarkdown(text))
+                    .font(.subheadline.italic())
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+                    .fixedSize(horizontal: false, vertical: true)
+            case let .prose(text):
+                Text(Self.inlineMarkdown(text))
+                    .font(.subheadline)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+
+        /// Best-effort inline markdown rendering — bolds and italics but no
+        /// blocks. Block layout is handled by the parser above.
+        private static func inlineMarkdown(_ text: String) -> AttributedString {
+            (try? AttributedString(
+                markdown: text,
+                options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+            )) ?? AttributedString(text)
+        }
+    }
+
+    // MARK: - Recap block parser
+
+    /// One logical block of recap content. The recap body is rendered as a
+    /// vertical stack of these.
+    enum RecapBlock {
+        case header(String)        // **Section**
+        case bullets([String])     // consecutive `- ...` lines
+        case summary(String)       // line starting with "Summary:"
+        case prose(String)         // free-form paragraph
+
+        /// Split a sanitized body into blocks.
+        static func parse(_ body: String) -> [RecapBlock] {
+            var blocks: [RecapBlock] = []
+            let lines = body.components(separatedBy: .newlines)
+            var i = 0
+            while i < lines.count {
+                let line = lines[i].trimmingCharacters(in: .whitespaces)
+                if line.isEmpty { i += 1; continue }
+
+                // Header: line starts AND ends with `**`, optional trailing `:`
+                if isHeaderLine(line) {
+                    let stripped = line
+                        .replacingOccurrences(of: "**", with: "")
+                        .trimmingCharacters(in: CharacterSet(charactersIn: " :"))
+                    blocks.append(.header(stripped))
+                    i += 1
+                    continue
+                }
+
+                // Summary: one-shot line
+                if line.lowercased().hasPrefix("summary:") {
+                    let rest = String(line.dropFirst("summary:".count))
+                        .trimmingCharacters(in: .whitespaces)
+                    blocks.append(.summary("Summary: \(rest)"))
+                    i += 1
+                    continue
+                }
+
+                // Bullet block: consecutive lines starting with "- " or "* "
+                if line.hasPrefix("- ") || line.hasPrefix("* ") {
+                    var bullets: [String] = []
+                    while i < lines.count {
+                        let l = lines[i].trimmingCharacters(in: .whitespaces)
+                        if l.hasPrefix("- ") {
+                            bullets.append(String(l.dropFirst(2)).trimmingCharacters(in: .whitespaces))
+                            i += 1
+                        } else if l.hasPrefix("* ") {
+                            bullets.append(String(l.dropFirst(2)).trimmingCharacters(in: .whitespaces))
+                            i += 1
+                        } else {
+                            break
+                        }
+                    }
+                    if !bullets.isEmpty {
+                        blocks.append(.bullets(bullets))
+                    }
+                    continue
+                }
+
+                // Prose paragraph: collect contiguous non-empty non-special lines.
+                var paragraphLines: [String] = []
+                while i < lines.count {
+                    let l = lines[i].trimmingCharacters(in: .whitespaces)
+                    if l.isEmpty { break }
+                    if isHeaderLine(l) || l.hasPrefix("- ") || l.hasPrefix("* ")
+                        || l.lowercased().hasPrefix("summary:")
+                    { break }
+                    paragraphLines.append(l)
+                    i += 1
+                }
+                if !paragraphLines.isEmpty {
+                    blocks.append(.prose(paragraphLines.joined(separator: " ")))
+                }
+            }
+            return blocks
+        }
+
+        private static func isHeaderLine(_ s: String) -> Bool {
+            s.hasPrefix("**") && (s.hasSuffix("**") || s.hasSuffix("**:"))
         }
     }
 

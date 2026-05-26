@@ -209,13 +209,19 @@ extension AIInsights {
 
             RULES:
             - Observations ONLY. Do NOT give advice or recommend changes.
-            - Each bullet ≤ 25 words.
-            - Use complete sentences. Do not output fragments.
+            - Each bullet ≤ 25 words. Use complete sentences. Do not output fragments.
             - Mention therapy settings by name and value (no implicit "you should also...").
             - If trackers (caffeine / alcohol / FoodFinder / AutoPresets) reveal a behavioral pattern, name it concretely.
             - Use lightweight Markdown: **bold** for setting names, `-` bullets, headers with `**Section**`.
             - NEVER include therapy-suggestion blocks or knowledge-base blocks. This is pure prose.
-            - Output ONLY the recap content. No preamble, no JSON, no code fences.
+
+            OUTPUT FORMAT — CRITICAL:
+            - Output ONLY the final recap. No preamble, no JSON, no code fences.
+            - Do NOT show your reasoning, drafts, self-checks, or planning steps.
+            - Do NOT include word counts like "(20 words)" or annotations like "-> ...".
+            - Do NOT include lines such as "Review against Rules", "Self-check", "Draft:", "Final draft", "Check:", "Observations ONLY?", "Each bullet <= 25 words?", or any other meta-commentary on the rules above.
+            - Do NOT restate or reference the structure/rules in the output.
+            - The first character of your response must be the `**Overview**` header. The last line must be the `Summary:` line.
             """
         }
 
@@ -265,7 +271,8 @@ extension AIInsights {
                 baseURL: config.baseURL,
                 apiKey: config.apiKey
             )
-            let recapBody = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawText = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let recapBody = Self.sanitizeRecapBody(rawText)
             guard recapBody.count >= 120 else {
                 throw AIServiceAdapter.AIError.parsingError("The generated recap was incomplete. Please try again.")
             }
@@ -295,6 +302,133 @@ extension AIInsights {
             save(history)
             markLastRecap(now)
             return entry
+        }
+
+        // MARK: - Sanitization
+
+        /// Strip chain-of-thought / self-review artifacts from the raw AI
+        /// output so the persisted recap is the clean final report only.
+        ///
+        /// Targets observed Gemini/OpenAI failure modes:
+        ///   - Word-count annotations: "(20 words)", "(19 words) ->"
+        ///   - Meta headers: "Review against Rules:", "Final draft:",
+        ///     "Self-check:", "Draft:", "Check:"
+        ///   - Self-Q&A: "Observations ONLY? Yes.", "Each bullet <= 25 words?"
+        ///   - Preamble before the first `**Section**` header
+        ///   - Stray empty bullets like "* " or "- "
+        ///   - Triple+ blank lines collapsed to a single blank
+        static func sanitizeRecapBody(_ raw: String) -> String {
+            // Normalize bullet markers: the prompt asks for `-`, but the LLM
+            // often emits `*`. Convert leading `* ` into `- ` so downstream
+            // markdown rendering is consistent.
+            var text = raw
+            // Drop fenced code blocks if any leaked in
+            text = text.replacingOccurrences(
+                of: "```[a-zA-Z]*\\n",
+                with: "",
+                options: .regularExpression
+            )
+            text = text.replacingOccurrences(of: "```", with: "")
+
+            // Phrases that mark a line as meta-commentary (case-insensitive)
+            let metaContains: [String] = [
+                "review against rules",
+                "self-check",
+                "observations only?",
+                "<=25 words", "<= 25 words", "25 words?",
+                "each bullet", "each bullet <=",
+                "final draft", "draft:",
+                "no advice.",
+                "rules check", "rule check",
+                "scratchpad", "scratch pad",
+                "(words)"
+            ]
+
+            // Regex for parenthetical word counts: "(20 words)" or "(20 word)"
+            let wordCountRegex = try? NSRegularExpression(
+                pattern: #"\(\s*\d+\s*words?\s*\)"#,
+                options: [.caseInsensitive]
+            )
+
+            var lines = text.components(separatedBy: .newlines)
+
+            // 1. Drop lines that look like meta-commentary
+            lines = lines.compactMap { (line: String) -> String? in
+                var trimmed = line.trimmingCharacters(in: .whitespaces)
+                // Drop pure word-count annotations
+                if let regex = wordCountRegex {
+                    let range = NSRange(trimmed.startIndex..<trimmed.endIndex, in: trimmed)
+                    let stripped = regex.stringByReplacingMatches(
+                        in: trimmed,
+                        options: [],
+                        range: range,
+                        withTemplate: ""
+                    ).trimmingCharacters(in: .whitespaces)
+                    // If after removing the annotation the line is now empty
+                    // or just an arrow / punctuation, drop it.
+                    if stripped.isEmpty
+                        || stripped == "->"
+                        || stripped == "→"
+                        || stripped.allSatisfy({ "-> →•*-:".contains($0) })
+                    {
+                        return nil
+                    }
+                    trimmed = stripped
+                }
+                // Drop bullet lines whose content is meta-commentary
+                let lower = trimmed.lowercased()
+                for phrase in metaContains where lower.contains(phrase) {
+                    return nil
+                }
+                // Drop "* Summary" or "* Draft" style leftover headers
+                if lower.hasPrefix("* draft") || lower.hasPrefix("- draft")
+                    || lower.hasPrefix("* review") || lower.hasPrefix("- review")
+                    || lower.hasPrefix("* check") || lower.hasPrefix("- check")
+                {
+                    return nil
+                }
+                // Drop empty bullets like "* " / "- "
+                if lower == "*" || lower == "-" || lower == "* " || lower == "- " {
+                    return nil
+                }
+                return trimmed.isEmpty ? "" : trimmed
+            }
+
+            // 2. Drop any preamble before the first **Overview** (or any
+            //    `**...**` header) — if such a header exists.
+            if let firstHeaderIdx = lines.firstIndex(where: { line in
+                let s = line.trimmingCharacters(in: .whitespaces)
+                return s.hasPrefix("**") && s.hasSuffix("**") && s.count >= 6
+            }) {
+                lines = Array(lines[firstHeaderIdx...])
+            }
+
+            // 3. Normalize `*` bullets to `-`
+            lines = lines.map { line -> String in
+                let s = line
+                // Only transform leading `*` followed by space (not the `**bold**` markers).
+                if s.hasPrefix("* ") {
+                    return "- " + s.dropFirst(2)
+                }
+                return s
+            }
+
+            // 4. Collapse 3+ consecutive blank lines down to one blank line.
+            var collapsed: [String] = []
+            var blankRun = 0
+            for line in lines {
+                if line.isEmpty {
+                    blankRun += 1
+                    if blankRun <= 1 { collapsed.append(line) }
+                } else {
+                    blankRun = 0
+                    collapsed.append(line)
+                }
+            }
+
+            return collapsed
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
     }
 }

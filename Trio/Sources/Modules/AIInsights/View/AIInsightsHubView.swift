@@ -104,16 +104,6 @@ extension AIInsights {
                             destination: AnyView(AIInsightsAlcoholLogView())
                         )
 
-                        HubMenuCard(
-                            icon: "figure.walk.motion",
-                            title: String(localized: "AutoPresets", comment: "AutoPresets feature name"),
-                            description: String(localized: "Auto-activate override presets on walking or running.", comment: "AutoPresets description"),
-                            gradientColors: [
-                                Color(red: 0.3, green: 0.7, blue: 0.4),
-                                Color(red: 0.35, green: 0.55, blue: 0.85)
-                            ],
-                            destination: AnyView(AutoPresetsSettingsView())
-                        )
                     }
                     .padding(.horizontal)
 

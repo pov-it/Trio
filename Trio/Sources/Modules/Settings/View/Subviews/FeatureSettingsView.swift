@@ -25,6 +25,7 @@ struct FeatureSettingsView: BaseView {
                     Text("Meal Settings").navigationLink(to: .mealSettings, from: self)
                     Text("Shortcuts").navigationLink(to: .shortcutsConfig, from: self)
                     Text("Remote Control").navigationLink(to: .remoteControlConfig, from: self)
+                    Text(String(localized: "AutoPresets", comment: "AutoPresets feature row")).navigationLink(to: .autoPresets, from: self)
                 }
             )
             .listRowBackground(Color.chart)
