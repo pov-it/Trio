@@ -209,6 +209,9 @@ extension AIInsights {
     @Observable final class FoodFinderStateModel: BaseStateModel<Provider> {
         var isAnalyzing: Bool = false
         var errorMessage: String?
+        var barcodeStatusMessage: String?
+        var barcodeStatusIsSuccess: Bool = false
+        var lastAddedFoodItemID: UUID?
         var currentResult: FoodAnalysisResult?
         var foodDescription: String = "" {
             didSet { saveDraftDescription() }
@@ -1121,18 +1124,19 @@ extension AIInsights {
 
             isAnalyzing = true
             errorMessage = nil
+            barcodeStatusMessage = nil
             defer { isAnalyzing = false }
 
             do {
                 guard var components = URLComponents(url: openFoodFactsProductURL(for: barcode), resolvingAgainstBaseURL: false) else {
-                    errorMessage = String(localized: "Invalid barcode.", comment: "Barcode error")
+                    setBarcodeError(String(localized: "Invalid barcode.", comment: "Barcode error"))
                     return
                 }
                 components.queryItems = [
                     URLQueryItem(name: "fields", value: "code,product_name,brands,nutriments,serving_size,serving_quantity,nutrition_data_completeness,image_url,url")
                 ]
                 guard let url = components.url else {
-                    errorMessage = String(localized: "Invalid OpenFoodFacts URL.", comment: "Barcode error")
+                    setBarcodeError(String(localized: "Invalid OpenFoodFacts URL.", comment: "Barcode error"))
                     return
                 }
 
@@ -1147,7 +1151,7 @@ extension AIInsights {
                       Int(doubleValue(json["status"])) == 1,
                       let product = json["product"] as? [String: Any]
                 else {
-                    errorMessage = String(localized: "Product not found. Try the AI Camera instead.", comment: "Barcode error")
+                    setBarcodeError(String(localized: "Product not found. Try the AI Camera instead.", comment: "Barcode error"))
                     return
                 }
 
@@ -1171,9 +1175,16 @@ extension AIInsights {
 
                 result.items.append(item)
                 storeUpdatedResult(result)
+                lastAddedFoodItemID = item.id
+                setBarcodeSuccess(
+                    String(
+                        format: String(localized: "Added %@", comment: "Barcode product added success"),
+                        item.name
+                    )
+                )
 
             } catch {
-                errorMessage = String(localized: "Network error looking up barcode: \(error.localizedDescription)", comment: "Barcode error")
+                setBarcodeError(String(localized: "Network error looking up barcode: \(error.localizedDescription)", comment: "Barcode error"))
             }
         }
 
@@ -1248,6 +1259,8 @@ extension AIInsights {
         func clearResult(resetDraft: Bool = false) {
             currentResult = nil
             errorMessage = nil
+            barcodeStatusMessage = nil
+            lastAddedFoodItemID = nil
             if resetDraft {
                 capturedImageData = nil
                 foodDescription = ""
@@ -1382,18 +1395,19 @@ extension AIInsights {
         func lookupBarcode(_ barcode: String) async {
             isAnalyzing = true
             errorMessage = nil
+            barcodeStatusMessage = nil
             defer { isAnalyzing = false }
 
             do {
                 guard var components = URLComponents(url: openFoodFactsProductURL(for: barcode), resolvingAgainstBaseURL: false) else {
-                    errorMessage = String(localized: "Invalid barcode.", comment: "Barcode error")
+                    setBarcodeError(String(localized: "Invalid barcode.", comment: "Barcode error"))
                     return
                 }
                 components.queryItems = [
                     URLQueryItem(name: "fields", value: "code,product_name,brands,nutriments,serving_size,serving_quantity,nutrition_data_completeness,image_url,url")
                 ]
                 guard let url = components.url else {
-                    errorMessage = String(localized: "Invalid OpenFoodFacts URL.", comment: "Barcode error")
+                    setBarcodeError(String(localized: "Invalid OpenFoodFacts URL.", comment: "Barcode error"))
                     return
                 }
 
@@ -1405,7 +1419,7 @@ extension AIInsights {
                 let (data, response) = try await URLSession.shared.data(for: request)
 
                 guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                    errorMessage = String(localized: "Product not found in OpenFoodFacts.", comment: "Barcode error")
+                    setBarcodeError(String(localized: "Product not found in OpenFoodFacts.", comment: "Barcode error"))
                     return
                 }
 
@@ -1413,7 +1427,7 @@ extension AIInsights {
                       Int(doubleValue(json["status"])) == 1,
                       let product = json["product"] as? [String: Any]
                 else {
-                    errorMessage = String(localized: "Product not found. Try the AI Camera instead.", comment: "Barcode error")
+                    setBarcodeError(String(localized: "Product not found. Try the AI Camera instead.", comment: "Barcode error"))
                     return
                 }
 
@@ -1453,12 +1467,30 @@ extension AIInsights {
                     confidence: 0.95
                 )
                 currentResult = result
+                lastAddedFoodItemID = item.id
+                setBarcodeSuccess(
+                    String(
+                        format: String(localized: "Scanned %@", comment: "Barcode product scanned success"),
+                        item.name
+                    )
+                )
                 recentResults.insert(result, at: 0)
                 saveRecentResults()
 
             } catch {
-                errorMessage = String(localized: "Network error looking up barcode: \(error.localizedDescription)", comment: "Barcode error")
+                setBarcodeError(String(localized: "Network error looking up barcode: \(error.localizedDescription)", comment: "Barcode error"))
             }
+        }
+
+        private func setBarcodeError(_ message: String) {
+            errorMessage = message
+            barcodeStatusMessage = message
+            barcodeStatusIsSuccess = false
+        }
+
+        private func setBarcodeSuccess(_ message: String) {
+            barcodeStatusMessage = message
+            barcodeStatusIsSuccess = true
         }
 
         // MARK: - Dictation
