@@ -968,7 +968,7 @@ extension AIInsights {
                 .padding(.top, 8)
                 .padding(.bottom, isComposerExpanded ? 1 : 8)
             }
-            .background(colorScheme == .dark ? Color.bgDarkBlue : Color.white)
+            .background(isComposerExpanded ? Color.clear : (colorScheme == .dark ? Color.bgDarkBlue : Color.white))
             .animation(.spring(response: 0.45, dampingFraction: 0.72), value: state.currentResult?.id)
             .animation(.spring(response: 0.36, dampingFraction: 0.86), value: isComposerExpanded)
         }
@@ -1054,9 +1054,7 @@ extension AIInsights {
             .padding(.horizontal, 10)
             .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.9), value: composerDragOffset)
             .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-                    isTextFieldFocused = true
-                }
+                isTextFieldFocused = true
             }
         }
 
@@ -1164,15 +1162,20 @@ extension AIInsights {
 
         private var expandComposerButton: some View {
             Button {
+                isTextFieldFocused = true
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
                     isComposerExpanded = true
                 }
             } label: {
-                ZStack {
-                    peekingComposerIcon("camera.fill", matchedID: "composer-camera", x: -19, y: -13)
-                    peekingComposerIcon("photo.on.rectangle", matchedID: "composer-library", x: -6, y: -17)
-                    peekingComposerIcon("barcode.viewfinder", matchedID: "composer-barcode", x: 7, y: -17)
-                    peekingComposerIcon(state.isDictating ? "mic.fill" : "mic", matchedID: "composer-mic", x: 20, y: -13)
+                ZStack(alignment: .leading) {
+                    HStack(spacing: -10) {
+                        peekingComposerIcon("camera.fill", matchedID: "composer-camera")
+                        peekingComposerIcon("photo.on.rectangle", matchedID: "composer-library")
+                        peekingComposerIcon("barcode.viewfinder", matchedID: "composer-barcode")
+                        peekingComposerIcon(state.isDictating ? "mic.fill" : "mic", matchedID: "composer-mic")
+                    }
+                    .offset(x: 28)
+                    .opacity(0.55)
 
                     Image(systemName: "square.stack.3d.up.fill")
                         .font(.system(size: 17, weight: .semibold))
@@ -1185,22 +1188,21 @@ extension AIInsights {
                             Circle()
                                 .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
                         )
+                        .zIndex(1)
                 }
-                .frame(width: 56, height: 48)
+                .frame(width: 50, height: 44, alignment: .leading)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(String(localized: "Open FoodFinder tools", comment: "Expand FoodFinder tools button"))
             .foregroundStyle(colorScheme == .dark ? .white : .primary)
         }
 
-        private func peekingComposerIcon(_ systemImage: String, matchedID: String, x: CGFloat, y: CGFloat) -> some View {
+        private func peekingComposerIcon(_ systemImage: String, matchedID: String) -> some View {
             Image(systemName: systemImage)
-                .font(.system(size: 9, weight: .semibold))
-                .frame(width: 19, height: 19)
-                .background(Circle().fill(Color.accentColor.opacity(0.2)))
+                .font(.system(size: 8, weight: .semibold))
+                .frame(width: 18, height: 18)
+                .background(Circle().fill(Color.accentColor.opacity(0.16)))
                 .foregroundStyle(systemImage == "mic.fill" ? .red : Color.accentColor)
-                .offset(x: x, y: y)
-                .opacity(0.9)
                 .matchedGeometryEffect(id: matchedID, in: composerNamespace)
         }
 
