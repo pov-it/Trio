@@ -15,6 +15,8 @@ extension AIInsights {
         @State private var isComposerExpanded: Bool = false
         @State private var isEditingTotals = false
         @State private var editingFoodItem: FoodItem?
+        @State private var compactInputMeasuredHeight: CGFloat = 0
+        @State private var compactInputSingleLineHeight: CGFloat = 0
         @GestureState private var composerDragOffset: CGFloat = 0
         @Namespace private var composerNamespace
 
@@ -979,13 +981,11 @@ extension AIInsights {
                     .disabled(state.isAnalyzing)
 
                 TextField(
-                    state.currentResult != nil
-                        ? String(localized: "Search ingredient...", comment: "FoodFinder ingredient search placeholder")
-                        : String(localized: "Describe your meal...", comment: "FoodFinder input placeholder"),
+                    compactInputPlaceholder,
                     text: $state.foodDescription,
                     axis: .vertical
                 )
-                .lineLimit(1 ... 3)
+                .lineLimit(1)
                 .focused($isTextFieldFocused)
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 12)
@@ -995,11 +995,86 @@ extension AIInsights {
                     RoundedRectangle(cornerRadius: 20)
                         .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray6))
                 )
+                .overlay(alignment: .topLeading) {
+                    compactInputMeasurementLayer
+                }
+                .onPreferenceChange(FoodFinderCompactInputHeightKey.self) { height in
+                    compactInputMeasuredHeight = height
+                    expandCompactInputIfNeeded(measuredHeight: height)
+                }
+                .onPreferenceChange(FoodFinderCompactInputSingleLineHeightKey.self) { height in
+                    compactInputSingleLineHeight = height
+                }
+                .onChange(of: state.foodDescription) {
+                    expandCompactInputIfNeeded(measuredHeight: compactInputMeasuredHeight)
+                }
                 .layoutPriority(1)
 
                 foodSearchButton
             }
             .padding(.horizontal, 12)
+        }
+
+        private var compactInputPlaceholder: String {
+            state.currentResult != nil
+                ? String(localized: "Search ingredient...", comment: "FoodFinder ingredient search placeholder")
+                : String(localized: "Describe your meal...", comment: "FoodFinder input placeholder")
+        }
+
+        private var compactInputMeasurementLayer: some View {
+            ZStack(alignment: .topLeading) {
+                compactInputMeasuredText(compactInputMeasurementText)
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: FoodFinderCompactInputHeightKey.self,
+                                value: proxy.size.height
+                            )
+                        }
+                    )
+
+                compactInputMeasuredText("Ag")
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: FoodFinderCompactInputSingleLineHeightKey.self,
+                                value: proxy.size.height
+                            )
+                        }
+                    )
+            }
+            .opacity(0)
+            .allowsHitTesting(false)
+        }
+
+        private var compactInputMeasurementText: String {
+            let text = state.foodDescription.isEmpty ? compactInputPlaceholder : state.foodDescription
+            return text.isEmpty ? " " : text
+        }
+
+        private func compactInputMeasuredText(_ text: String) -> some View {
+            Text(text)
+                .font(.body)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        private func expandCompactInputIfNeeded(measuredHeight: CGFloat) {
+            guard !isComposerExpanded,
+                  isTextFieldFocused,
+                  !state.foodDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { return }
+
+            let singleLineHeight = compactInputSingleLineHeight > 0 ? compactInputSingleLineHeight : 40
+            let needsAnotherLine = measuredHeight > singleLineHeight + 6 || state.foodDescription.contains("\n")
+            guard needsAnotherLine else { return }
+
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                isComposerExpanded = true
+            }
         }
 
         private var expandedFoodComposer: some View {
@@ -1458,6 +1533,22 @@ private struct FoodItemEditSheet: View {
 
     private static func format(_ value: Double) -> String {
         String(format: "%.0f", value)
+    }
+}
+
+private struct FoodFinderCompactInputHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct FoodFinderCompactInputSingleLineHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
