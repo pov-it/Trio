@@ -309,7 +309,9 @@ extension AIInsights {
             let vc = BarcodeScannerViewController()
             vc.onBarcodeScanned = { barcode in
                 onBarcodeScanned(barcode)
-                dismiss()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    dismiss()
+                }
             }
             vc.onCancel = {
                 dismiss()
@@ -328,6 +330,8 @@ extension AIInsights {
         private var previewLayer: AVCaptureVideoPreviewLayer?
         private weak var captureDevice: AVCaptureDevice?
         private weak var torchButton: UIButton?
+        private weak var scanFrameView: UIView?
+        private weak var instructionLabel: UILabel?
         private var hasScanned = false
 
         override func viewDidLoad() {
@@ -400,6 +404,7 @@ extension AIInsights {
             frameView.layer.cornerRadius = 12
             frameView.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(frameView)
+            scanFrameView = frameView
             NSLayoutConstraint.activate([
                 frameView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
                 frameView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
@@ -415,6 +420,7 @@ extension AIInsights {
             label.textAlignment = .center
             label.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(label)
+            instructionLabel = label
             NSLayoutConstraint.activate([
                 label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
                 label.topAnchor.constraint(equalTo: frameView.bottomAnchor, constant: 20)
@@ -482,7 +488,33 @@ extension AIInsights {
             let generator = UINotificationFeedbackGenerator()
             generator.notificationOccurred(.success)
 
+            showScanSuccess()
             onBarcodeScanned?(barcode)
+        }
+
+        private func showScanSuccess() {
+            scanFrameView?.layer.borderColor = UIColor.systemGreen.cgColor
+            scanFrameView?.layer.borderWidth = 4
+            instructionLabel?.text = NSLocalizedString("Barcode scanned", comment: "Barcode scanner success")
+            instructionLabel?.textColor = .systemGreen
+
+            let check = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
+            check.tintColor = .systemGreen
+            check.contentMode = .scaleAspectFit
+            check.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(check)
+            NSLayoutConstraint.activate([
+                check.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                check.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+                check.widthAnchor.constraint(equalToConstant: 56),
+                check.heightAnchor.constraint(equalToConstant: 56)
+            ])
+            check.transform = CGAffineTransform(scaleX: 0.75, y: 0.75)
+            check.alpha = 0
+            UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut]) {
+                check.alpha = 1
+                check.transform = .identity
+            }
         }
 
         private func showError() {

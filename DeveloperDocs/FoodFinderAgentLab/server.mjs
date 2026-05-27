@@ -392,6 +392,18 @@ function heuristicEstimate(ingredient) {
   if (/(banana|banaan)/i.test(text)) {
     return estimate("Banana estimate", ingredient.portion || "1 medium banana (118 g)", 27, 0.4, 1.3, 3.1, 105);
   }
+  if (/(dextro|glucose|druiven.?suiker|hypo).*(tablet|tab|pastille)|(?:tablet|tab|pastille).*(dextro|glucose|druiven.?suiker)/i.test(text)) {
+    const count = tabletCount(text) || 3;
+    return estimate(
+      "Glucose tablet estimate",
+      `${count} tablets`,
+      round1(count * 5.3),
+      0,
+      0,
+      0,
+      Math.round(count * 21.7)
+    );
+  }
   if (/(bread|brood|toast|bagel|bun)/i.test(text)) {
     return estimate("Bread estimate", ingredient.portion || "1 serving", 30, 2, 6, 2, 160);
   }
@@ -399,6 +411,11 @@ function heuristicEstimate(ingredient) {
     return estimate("Potato estimate", ingredient.portion || "200 g", 40, 0.2, 4, 4, 180);
   }
   return null;
+}
+
+function tabletCount(text) {
+  const match = /(\d+(?:[.,]\d+)?)\s*(?:x\s*)?(?:tablet|tablets|tab|tabs|pastille|pastilles)\b/i.exec(text);
+  return match ? Number(match[1].replace(",", ".")) : null;
 }
 
 async function searchOpenFoodFacts(query) {

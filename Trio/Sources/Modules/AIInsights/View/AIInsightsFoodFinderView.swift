@@ -32,9 +32,10 @@ extension AIInsights {
             ZStack(alignment: .bottom) {
                 contentArea
                 foodInputBar
+                barcodeStatusBanner
             }
             .background(appState.trioBackgroundColor(for: colorScheme))
-            .aiInsightsKeyboardAdaptive(bottomSpacing: isComposerExpanded ? 16 : 0)
+            .aiInsightsKeyboardAdaptive(bottomSpacing: isComposerExpanded ? 72 : 0)
             .navigationTitle(currentNavTitle)
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(state.currentResult != nil)
@@ -62,6 +63,17 @@ extension AIInsights {
             }
             .simultaneousGesture(swipeBackGesture)
             .onAppear(perform: configureView)
+            .onChange(of: state.barcodeStatusMessage) {
+                guard let message = state.barcodeStatusMessage else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    if state.barcodeStatusMessage == message {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            state.barcodeStatusMessage = nil
+                        }
+                    }
+                }
+            }
             .fullScreenCover(isPresented: $state.showCamera) {
                 AIInsights.CameraCaptureView { imageData in
                     state.pendingImageForCrop = imageData
@@ -70,6 +82,7 @@ extension AIInsights {
             }
             .fullScreenCover(isPresented: $state.showBarcodeScanner) {
                 AIInsights.BarcodeScannerView { barcode in
+                    collapseComposer(keepKeyboard: false)
                     Task {
                         if state.currentResult != nil {
                             await state.addIngredientFromBarcode(barcode)
@@ -169,6 +182,40 @@ extension AIInsights {
                 }
         }
 
+        @ViewBuilder
+        private var barcodeStatusBanner: some View {
+            if let message = state.barcodeStatusMessage {
+                HStack(spacing: 10) {
+                    Image(systemName: state.barcodeStatusIsSuccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    Text(message)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .background(
+                    Capsule()
+                        .fill(state.barcodeStatusIsSuccess ? Color.green : Color.orange)
+                        .shadow(color: Color.black.opacity(0.16), radius: 12, y: 5)
+                )
+                .padding(.horizontal, 18)
+                .padding(.bottom, isComposerExpanded ? 12 : 76)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .zIndex(3)
+            }
+        }
+
+        private func scrollToLastAddedItem(with proxy: ScrollViewProxy) {
+            guard let itemID = state.lastAddedFoodItemID else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                withAnimation(.easeInOut(duration: 0.28)) {
+                    proxy.scrollTo(itemID, anchor: .center)
+                }
+            }
+        }
+
 
         // MARK: - Root content (default FoodFinder page)
 
@@ -204,13 +251,21 @@ extension AIInsights {
 
         @ViewBuilder
         private func mealDetailScreen(for result: FoodAnalysisResult) -> some View {
-            List {
-                resultSections(result)
+            ScrollViewReader { proxy in
+                List {
+                    resultSections(result)
+                }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(appState.trioBackgroundColor(for: colorScheme))
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: state.lastAddedFoodItemID) {
+                    scrollToLastAddedItem(with: proxy)
+                }
+                .onAppear {
+                    scrollToLastAddedItem(with: proxy)
+                }
             }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(appState.trioBackgroundColor(for: colorScheme))
-            .scrollDismissesKeyboard(.interactively)
         }
 
         // MARK: - Empty State
@@ -291,6 +346,7 @@ extension AIInsights {
             Section {
                 ForEach(result.items) { item in
                     foodItemRow(item)
+                        .id(item.id)
                         .swipeActions(edge: .leading, allowsFullSwipe: false) {
                             Button(String(localized: "Edit", comment: "Edit food item"), systemImage: "pencil") {
                                 editingFoodItem = item
@@ -1122,7 +1178,7 @@ extension AIInsights {
         }
 
         private var expandedFoodComposer: some View {
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 composerDragHandle
 
                 if let result = state.currentResult {
@@ -1165,7 +1221,9 @@ extension AIInsights {
                     foodSearchButton
                 }
             }
-            .padding(12)
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
             .background(
                 FoodFinderComposerBackground(cornerRadius: 24)
                     .fill(colorScheme == .dark ? Color.bgDarkBlue : Color.white)
@@ -1345,8 +1403,9 @@ extension AIInsights {
                     .scrollContentBackground(.hidden)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
-                    .frame(minHeight: 116, maxHeight: 220)
+                    .frame(height: 132)
             }
+            .frame(height: 132)
             .background(
                 RoundedRectangle(cornerRadius: 16)
                     .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray6))
