@@ -12,9 +12,10 @@ extension AIInsights {
         @Environment(AppState.self) var appState
         @Environment(\.managedObjectContext) var moc
         @FocusState private var isTextFieldFocused: Bool
-        @State private var showExpandedComposer: Bool = false
+        @State private var isComposerExpanded: Bool = false
         @State private var isEditingTotals = false
         @State private var editingFoodItem: FoodItem?
+        @Namespace private var composerNamespace
 
         @FetchRequest(
             entity: MealPresetStored.entity(),
@@ -56,19 +57,6 @@ extension AIInsights {
             }
             .simultaneousGesture(swipeBackGesture)
             .onAppear(perform: configureView)
-            .sheet(isPresented: $showExpandedComposer) {
-                AIInsights.FoodFinderExpandedComposer(state: state) {
-                    Task {
-                        if state.currentResult != nil {
-                            await state.addIngredientFromCurrentInput()
-                        } else {
-                            await state.analyzeCurrentInput()
-                        }
-                    }
-                }
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-            }
             .fullScreenCover(isPresented: $state.showCamera) {
                 AIInsights.CameraCaptureView { imageData in
                     state.pendingImageForCrop = imageData
@@ -954,100 +942,313 @@ extension AIInsights {
                     ))
                 }
 
-                VStack(spacing: 6) {
-                    if !state.capturedImages.isEmpty {
-                        attachedImagesStrip
+                VStack(spacing: 8) {
+                    if isComposerExpanded {
+                        expandedFoodComposer
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .bottom).combined(with: .opacity),
+                                removal: .move(edge: .bottom).combined(with: .opacity)
+                            ))
+                    } else {
+                        if !state.capturedImages.isEmpty {
+                            attachedImagesStrip
+                                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
+                        compactFoodInputRow
                     }
-
-                    HStack(spacing: 8) {
-                        roundInputButton(systemImage: "camera.fill") {
-                            state.showCamera = true
-                        }
-                        .disabled(state.isAnalyzing)
-
-                        roundInputButton(systemImage: "photo.on.rectangle") {
-                            state.showPhotoPicker = true
-                        }
-                        .disabled(state.isAnalyzing)
-
-                        roundInputButton(systemImage: "barcode.viewfinder") {
-                            state.showBarcodeScanner = true
-                        }
-                        .disabled(state.isAnalyzing)
-
-                        roundInputButton(systemImage: state.isDictating ? "mic.fill" : "mic") {
-                            state.toggleDictation()
-                        }
-                        .foregroundStyle(state.isDictating ? .red : (colorScheme == .dark ? .white : .primary))
-                        .disabled(state.isAnalyzing)
-
-                        roundInputButton(systemImage: "arrow.up.left.and.arrow.down.right") {
-                            isTextFieldFocused = false
-                            showExpandedComposer = true
-                        }
-                        .accessibilityLabel(String(localized: "Open larger composer", comment: "Expand composer button"))
-                        .disabled(state.isAnalyzing)
-
-                        TextField(
-                            state.currentResult != nil
-                                ? String(localized: "Search ingredient...", comment: "FoodFinder ingredient search placeholder")
-                                : String(localized: "Describe your meal...", comment: "FoodFinder input placeholder"),
-                            text: $state.foodDescription,
-                            axis: .vertical
-                        )
-                        .lineLimit(1 ... 3)
-                        .focused($isTextFieldFocused)
-                        .textFieldStyle(.plain)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 20)
-                                .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray6))
-                        )
-
-                        Button {
-                            isTextFieldFocused = false
-                            Task {
-                                if state.currentResult != nil {
-                                    await state.addIngredientFromCurrentInput()
-                                } else {
-                                    await state.analyzeCurrentInput()
-                                }
-                            }
-                        } label: {
-                            Group {
-                                if state.isAnalyzing {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                } else {
-                                    Image(systemName: state.currentResult != nil ? "plus.circle.fill" : "sparkle.magnifyingglass")
-                                }
-                            }
-                            .frame(width: 36, height: 36)
-                            .background(
-                                Circle()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [
-                                                Color(red: 0.3411764706, green: 0.6666666667, blue: 0.9254901961),
-                                                Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
-                                            ],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
-                            )
-                            .foregroundStyle(.white)
-                        }
-                        .disabled(!hasFoodFinderInput || state.isAnalyzing)
-                        .opacity(!hasFoodFinderInput || state.isAnalyzing ? 0.5 : 1)
-                    }
-                    .padding(.horizontal, 12)
                 }
                 .padding(.vertical, 8)
             }
             .background(colorScheme == .dark ? Color.bgDarkBlue : Color.white)
             .animation(.spring(response: 0.45, dampingFraction: 0.72), value: state.currentResult?.id)
+            .animation(.spring(response: 0.36, dampingFraction: 0.86), value: isComposerExpanded)
+        }
+
+        private var compactFoodInputRow: some View {
+            HStack(spacing: 8) {
+                expandComposerButton
+                    .disabled(state.isAnalyzing)
+
+                TextField(
+                    state.currentResult != nil
+                        ? String(localized: "Search ingredient...", comment: "FoodFinder ingredient search placeholder")
+                        : String(localized: "Describe your meal...", comment: "FoodFinder input placeholder"),
+                    text: $state.foodDescription,
+                    axis: .vertical
+                )
+                .lineLimit(1 ... 3)
+                .focused($isTextFieldFocused)
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .frame(minHeight: 40)
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray6))
+                )
+                .layoutPriority(1)
+
+                foodSearchButton
+            }
+            .padding(.horizontal, 12)
+        }
+
+        private var expandedFoodComposer: some View {
+            VStack(spacing: 12) {
+                Capsule()
+                    .fill(Color.secondary.opacity(0.35))
+                    .frame(width: 36, height: 4)
+                    .padding(.top, 2)
+
+                composerActionGrid
+
+                if !state.capturedImages.isEmpty {
+                    attachedImagesStrip
+                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
+                }
+
+                expandedTextEditor
+
+                HStack(spacing: 10) {
+                    Button {
+                        isTextFieldFocused = false
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                            isComposerExpanded = false
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .frame(width: 38, height: 38)
+                            .background(
+                                Circle()
+                                    .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray5))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(colorScheme == .dark ? .white : .primary)
+
+                    Text(
+                        state.currentResult != nil
+                            ? String(localized: "Add ingredient to this meal", comment: "Expanded FoodFinder add mode hint")
+                            : String(localized: "Add photos or describe the meal", comment: "Expanded FoodFinder analyze mode hint")
+                    )
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    foodSearchButton
+                }
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 24)
+                    .fill(colorScheme == .dark ? Color.bgDarkBlue : Color.white)
+                    .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.12), radius: 18, y: 8)
+            )
+            .padding(.horizontal, 10)
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                    isTextFieldFocused = true
+                }
+            }
+        }
+
+        private var composerActionGrid: some View {
+            HStack(spacing: 8) {
+                composerActionButton(
+                    systemImage: "camera.fill",
+                    title: String(localized: "Camera", comment: "Composer camera button"),
+                    matchedID: "composer-camera"
+                ) {
+                    isTextFieldFocused = false
+                    state.showCamera = true
+                }
+                .disabled(state.isAnalyzing || state.capturedImages.count >= 6)
+
+                composerActionButton(
+                    systemImage: "photo.on.rectangle",
+                    title: String(localized: "Library", comment: "Composer photo library button"),
+                    matchedID: "composer-library"
+                ) {
+                    isTextFieldFocused = false
+                    state.showPhotoPicker = true
+                }
+                .disabled(state.isAnalyzing || state.capturedImages.count >= 6)
+
+                composerActionButton(
+                    systemImage: "barcode.viewfinder",
+                    title: String(localized: "Barcode", comment: "Composer barcode button"),
+                    matchedID: "composer-barcode"
+                ) {
+                    isTextFieldFocused = false
+                    state.showBarcodeScanner = true
+                }
+                .disabled(state.isAnalyzing)
+
+                composerActionButton(
+                    systemImage: state.isDictating ? "mic.fill" : "mic",
+                    title: state.isDictating
+                        ? String(localized: "Stop", comment: "Composer dictation stop")
+                        : String(localized: "Dictate", comment: "Composer dictation start"),
+                    matchedID: "composer-mic",
+                    tint: state.isDictating ? .red : nil
+                ) {
+                    state.toggleDictation()
+                }
+                .disabled(state.isAnalyzing)
+            }
+        }
+
+        private var expandedTextEditor: some View {
+            ZStack(alignment: .topLeading) {
+                if state.foodDescription.isEmpty {
+                    Text(
+                        state.currentResult != nil
+                            ? String(localized: "Describe the ingredient(s) to add...", comment: "Composer placeholder add mode")
+                            : String(localized: "Describe your meal in detail...", comment: "Composer placeholder analyze mode")
+                    )
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 14)
+                    .allowsHitTesting(false)
+                }
+
+                TextEditor(text: $state.foodDescription)
+                    .focused($isTextFieldFocused)
+                    .scrollContentBackground(.hidden)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .frame(minHeight: 116, maxHeight: 220)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray6))
+            )
+            .matchedGeometryEffect(id: "composer-text", in: composerNamespace)
+        }
+
+        private var expandComposerButton: some View {
+            Button {
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                    isComposerExpanded = true
+                }
+            } label: {
+                ZStack {
+                    peekingComposerIcon("camera.fill", matchedID: "composer-camera", x: -12, y: -7)
+                    peekingComposerIcon("photo.on.rectangle", matchedID: "composer-library", x: 11, y: -7)
+                    peekingComposerIcon("barcode.viewfinder", matchedID: "composer-barcode", x: -11, y: 10)
+                    peekingComposerIcon(state.isDictating ? "mic.fill" : "mic", matchedID: "composer-mic", x: 12, y: 10)
+
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 17, weight: .bold))
+                        .frame(width: 42, height: 42)
+                        .background(
+                            Circle()
+                                .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray5))
+                        )
+                        .overlay(
+                            Circle()
+                                .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
+                        )
+                }
+                .frame(width: 48, height: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(String(localized: "Open FoodFinder tools", comment: "Expand FoodFinder tools button"))
+            .foregroundStyle(colorScheme == .dark ? .white : .primary)
+        }
+
+        private func peekingComposerIcon(_ systemImage: String, matchedID: String, x: CGFloat, y: CGFloat) -> some View {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .semibold))
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(Color.accentColor.opacity(0.18)))
+                .foregroundStyle(systemImage == "mic.fill" ? .red : Color.accentColor)
+                .offset(x: x, y: y)
+                .opacity(0.82)
+                .matchedGeometryEffect(id: matchedID, in: composerNamespace)
+        }
+
+        private func composerActionButton(
+            systemImage: String,
+            title: String,
+            matchedID: String,
+            tint: Color? = nil,
+            action: @escaping () -> Void
+        ) -> some View {
+            Button(action: action) {
+                VStack(spacing: 5) {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 34, height: 34)
+                        .background(
+                            Circle()
+                                .fill((tint ?? Color.accentColor).opacity(colorScheme == .dark ? 0.25 : 0.14))
+                        )
+                        .foregroundStyle(tint ?? Color.accentColor)
+                        .matchedGeometryEffect(id: matchedID, in: composerNamespace)
+
+                    Text(title)
+                        .font(.caption2)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.7) : Color(.systemGray6))
+                )
+            }
+            .buttonStyle(.plain)
+        }
+
+        private var foodSearchButton: some View {
+            Button {
+                submitFoodFinderInput()
+            } label: {
+                Group {
+                    if state.isAnalyzing {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    } else {
+                        Image(systemName: state.currentResult != nil ? "plus.circle.fill" : "sparkle.magnifyingglass")
+                    }
+                }
+                .frame(width: 40, height: 40)
+                .background(Circle().fill(foodFinderActionGradient))
+                .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+            .disabled(!hasFoodFinderInput || state.isAnalyzing)
+            .opacity(!hasFoodFinderInput || state.isAnalyzing ? 0.5 : 1)
+        }
+
+        private var foodFinderActionGradient: LinearGradient {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.3411764706, green: 0.6666666667, blue: 0.9254901961),
+                    Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+
+        private func submitFoodFinderInput() {
+            isTextFieldFocused = false
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                isComposerExpanded = false
+            }
+            Task {
+                if state.currentResult != nil {
+                    await state.addIngredientFromCurrentInput()
+                } else {
+                    await state.analyzeCurrentInput()
+                }
+            }
         }
 
         private var hasFoodFinderInput: Bool {
@@ -1099,18 +1300,6 @@ extension AIInsights {
                 .padding(.horizontal, 12)
             }
             .frame(height: 64)
-        }
-
-        private func roundInputButton(systemImage: String, action: @escaping () -> Void) -> some View {
-            Button(action: action) {
-                Image(systemName: systemImage)
-                    .frame(width: 36, height: 36)
-                    .background(
-                        Circle()
-                            .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray5))
-                    )
-                    .foregroundStyle(colorScheme == .dark ? .white : .primary)
-            }
         }
 
         private func relativeMinutesText(from date: Date) -> String {
