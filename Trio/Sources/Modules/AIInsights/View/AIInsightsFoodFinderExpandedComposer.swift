@@ -47,11 +47,14 @@ extension AIInsights {
                             state.showBarcodeScanner = true
                         }
                         composerButton(
-                            icon: state.isDictating ? "mic.fill" : "mic",
-                            label: state.isDictating
+                            icon: state.isDictating || state.isTranscribingDictation ? "mic.fill" : "mic",
+                            label: state.isTranscribingDictation
+                                ? String(localized: "Loading", comment: "Composer dictation loading")
+                                : state.isDictating
                                 ? String(localized: "Stop", comment: "Composer dictation stop")
                                 : String(localized: "Dictate", comment: "Composer dictation start"),
-                            tint: state.isDictating ? .red : nil
+                            tint: state.isDictating ? .red : nil,
+                            showsProgress: state.isTranscribingDictation
                         ) {
                             state.toggleDictation()
                         }
@@ -208,12 +211,19 @@ extension AIInsights {
             icon: String,
             label: String,
             tint: Color? = nil,
+            showsProgress: Bool = false,
             action: @escaping () -> Void
         ) -> some View {
             Button(action: action) {
                 VStack(spacing: 4) {
-                    Image(systemName: icon)
-                        .font(.system(size: 18))
+                    if showsProgress {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: tint ?? Color.accentColor))
+                            .scaleEffect(0.82)
+                    } else {
+                        Image(systemName: icon)
+                            .font(.system(size: 18))
+                    }
                     Text(label)
                         .font(.caption2)
                 }
