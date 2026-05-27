@@ -80,6 +80,70 @@ extension AIInsights {
                 }
                 .listRowBackground(Color.chart)
 
+                // MARK: - Dictation
+                Section(
+                    header: Text("Dictation", comment: "AI dictation settings section header"),
+                    footer: Text("When enabled, FoodFinder records your voice and asks the selected AI provider to transcribe it. If the provider cannot transcribe or the request fails, Trio falls back to Apple Speech dictation.", comment: "AI dictation settings footer")
+                ) {
+                    Toggle(isOn: $state.aiDictationEnabled) {
+                        Label(String(localized: "Use AI provider for dictation", comment: "AI dictation provider toggle"), systemImage: "waveform")
+                    }
+                    .onChange(of: state.aiDictationEnabled) {
+                        state.saveSettings()
+                    }
+
+                    if state.aiDictationEnabled {
+                        Toggle(isOn: $state.aiDictationUsesSeparateProvider) {
+                            Label(String(localized: "Use a different dictation provider", comment: "Separate dictation provider toggle"), systemImage: "arrow.triangle.branch")
+                        }
+                        .onChange(of: state.aiDictationUsesSeparateProvider) {
+                            state.resetDictationDefaults()
+                        }
+
+                        if state.aiDictationUsesSeparateProvider {
+                            Picker(String(localized: "Dictation Provider", comment: "Dictation provider picker label"), selection: $state.aiDictationProviderType) {
+                                ForEach(AIProvider.allCases) { provider in
+                                    Text(provider.rawValue).tag(provider)
+                                }
+                            }
+                            .onChange(of: state.aiDictationProviderType) {
+                                state.resetDictationDefaults()
+                            }
+
+                            TextField(
+                                String(localized: "Dictation Endpoint URL", comment: "Dictation endpoint URL placeholder"),
+                                text: $state.aiDictationBaseURL,
+                                axis: .vertical
+                            )
+                            .lineLimit(1...5)
+                            .onChange(of: state.aiDictationBaseURL) {
+                                state.saveSettings()
+                            }
+                            .font(.system(.caption, design: .monospaced))
+                            .autocorrectionDisabled()
+                            .autocapitalization(.none)
+
+                            SecureField(String(localized: "Dictation API Key", comment: "Dictation API key field placeholder"), text: $state.aiDictationAPIKey)
+                                .onChange(of: state.aiDictationAPIKey) {
+                                    state.saveDictationAPIKey()
+                                }
+                        }
+
+                        TextField(String(localized: "Dictation Model", comment: "Dictation model placeholder"), text: $state.aiDictationModel)
+                            .onChange(of: state.aiDictationModel) {
+                                state.saveSettings()
+                            }
+                            .autocorrectionDisabled()
+                            .autocapitalization(.none)
+
+                        Button(String(localized: "Reset Dictation Defaults", comment: "Reset dictation defaults button")) {
+                            state.resetDictationDefaults()
+                        }
+                        .font(.caption)
+                    }
+                }
+                .listRowBackground(Color.chart)
+
                 // MARK: - Analysis Settings
                 Section(
                     header: Text("Analysis", comment: "Analysis section header")

@@ -15,6 +15,7 @@ extension AIInsights {
         @State private var isComposerExpanded: Bool = false
         @State private var isEditingTotals = false
         @State private var editingFoodItem: FoodItem?
+        @GestureState private var composerDragOffset: CGFloat = 0
         @Namespace private var composerNamespace
 
         @FetchRequest(
@@ -29,7 +30,7 @@ extension AIInsights {
                 foodInputBar
             }
             .background(appState.trioBackgroundColor(for: colorScheme))
-            .aiInsightsKeyboardAdaptive()
+            .aiInsightsKeyboardAdaptive(bottomSpacing: isComposerExpanded ? 8 : 0)
             .navigationTitle(currentNavTitle)
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(state.currentResult != nil)
@@ -76,8 +77,14 @@ extension AIInsights {
                 .ignoresSafeArea()
             }
             .fullScreenCover(isPresented: $state.showPhotoPicker) {
-                AIInsights.PhotoLibraryPickerView { imageData in
-                    state.pendingImageForCrop = imageData
+                AIInsights.PhotoLibraryPickerView(
+                    selectionLimit: max(1, state.maxFoodFinderImages - state.capturedImages.count)
+                ) { images in
+                    if images.count == 1, let image = images.first {
+                        state.pendingImageForCrop = image
+                    } else {
+                        state.attachImages(images)
+                    }
                 }
                 .ignoresSafeArea()
             }
@@ -945,6 +952,7 @@ extension AIInsights {
                 VStack(spacing: 8) {
                     if isComposerExpanded {
                         expandedFoodComposer
+                            .offset(y: composerDragOffset)
                             .transition(.asymmetric(
                                 insertion: .move(edge: .bottom).combined(with: .opacity),
                                 removal: .move(edge: .bottom).combined(with: .opacity)
@@ -957,7 +965,8 @@ extension AIInsights {
                         compactFoodInputRow
                     }
                 }
-                .padding(.vertical, 8)
+                .padding(.top, 8)
+                .padding(.bottom, isComposerExpanded ? 1 : 8)
             }
             .background(colorScheme == .dark ? Color.bgDarkBlue : Color.white)
             .animation(.spring(response: 0.45, dampingFraction: 0.72), value: state.currentResult?.id)
@@ -995,10 +1004,7 @@ extension AIInsights {
 
         private var expandedFoodComposer: some View {
             VStack(spacing: 12) {
-                Capsule()
-                    .fill(Color.secondary.opacity(0.35))
-                    .frame(width: 36, height: 4)
-                    .padding(.top, 2)
+                composerDragHandle
 
                 composerActionGrid
 
@@ -1046,11 +1052,39 @@ extension AIInsights {
                     .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.12), radius: 18, y: 8)
             )
             .padding(.horizontal, 10)
+            .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.9), value: composerDragOffset)
             .onAppear {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
                     isTextFieldFocused = true
                 }
             }
+        }
+
+        private var composerDragHandle: some View {
+            Capsule()
+                .fill(Color.secondary.opacity(0.38))
+                .frame(width: 44, height: 5)
+                .padding(.top, 1)
+                .padding(.bottom, 2)
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+                .gesture(composerDismissDragGesture)
+                .accessibilityLabel(String(localized: "Drag down to collapse", comment: "FoodFinder composer drag handle accessibility label"))
+        }
+
+        private var composerDismissDragGesture: some Gesture {
+            DragGesture(minimumDistance: 4, coordinateSpace: .local)
+                .updating($composerDragOffset) { value, state, _ in
+                    state = max(0, value.translation.height)
+                }
+                .onEnded { value in
+                    let shouldCollapse = value.translation.height > 64 || value.predictedEndTranslation.height > 120
+                    guard shouldCollapse else { return }
+                    isTextFieldFocused = false
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.88)) {
+                        isComposerExpanded = false
+                    }
+                }
         }
 
         private var composerActionGrid: some View {
@@ -1063,7 +1097,7 @@ extension AIInsights {
                     isTextFieldFocused = false
                     state.showCamera = true
                 }
-                .disabled(state.isAnalyzing || state.capturedImages.count >= 6)
+                .disabled(state.isAnalyzing || state.capturedImages.count >= state.maxFoodFinderImages)
 
                 composerActionButton(
                     systemImage: "photo.on.rectangle",
@@ -1073,7 +1107,7 @@ extension AIInsights {
                     isTextFieldFocused = false
                     state.showPhotoPicker = true
                 }
-                .disabled(state.isAnalyzing || state.capturedImages.count >= 6)
+                .disabled(state.isAnalyzing || state.capturedImages.count >= state.maxFoodFinderImages)
 
                 composerActionButton(
                     systemImage: "barcode.viewfinder",
@@ -1135,13 +1169,13 @@ extension AIInsights {
                 }
             } label: {
                 ZStack {
-                    peekingComposerIcon("camera.fill", matchedID: "composer-camera", x: -12, y: -7)
-                    peekingComposerIcon("photo.on.rectangle", matchedID: "composer-library", x: 11, y: -7)
-                    peekingComposerIcon("barcode.viewfinder", matchedID: "composer-barcode", x: -11, y: 10)
-                    peekingComposerIcon(state.isDictating ? "mic.fill" : "mic", matchedID: "composer-mic", x: 12, y: 10)
+                    peekingComposerIcon("camera.fill", matchedID: "composer-camera", x: -19, y: -13)
+                    peekingComposerIcon("photo.on.rectangle", matchedID: "composer-library", x: -6, y: -17)
+                    peekingComposerIcon("barcode.viewfinder", matchedID: "composer-barcode", x: 7, y: -17)
+                    peekingComposerIcon(state.isDictating ? "mic.fill" : "mic", matchedID: "composer-mic", x: 20, y: -13)
 
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 17, weight: .bold))
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(.system(size: 17, weight: .semibold))
                         .frame(width: 42, height: 42)
                         .background(
                             Circle()
@@ -1152,7 +1186,7 @@ extension AIInsights {
                                 .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
                         )
                 }
-                .frame(width: 48, height: 44)
+                .frame(width: 56, height: 48)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(String(localized: "Open FoodFinder tools", comment: "Expand FoodFinder tools button"))
@@ -1161,12 +1195,12 @@ extension AIInsights {
 
         private func peekingComposerIcon(_ systemImage: String, matchedID: String, x: CGFloat, y: CGFloat) -> some View {
             Image(systemName: systemImage)
-                .font(.system(size: 10, weight: .semibold))
-                .frame(width: 20, height: 20)
-                .background(Circle().fill(Color.accentColor.opacity(0.18)))
+                .font(.system(size: 9, weight: .semibold))
+                .frame(width: 19, height: 19)
+                .background(Circle().fill(Color.accentColor.opacity(0.2)))
                 .foregroundStyle(systemImage == "mic.fill" ? .red : Color.accentColor)
                 .offset(x: x, y: y)
-                .opacity(0.82)
+                .opacity(0.9)
                 .matchedGeometryEffect(id: matchedID, in: composerNamespace)
         }
 
@@ -1256,7 +1290,7 @@ extension AIInsights {
         }
 
         /// Horizontal strip of attached photos + a hint of how many more can
-        /// be added (cap of 6 set in the state model). Each thumb has its
+        /// be added (cap set by the active provider). Each thumb has its
         /// own delete affordance so the user can swap one without clearing
         /// the rest.
         @ViewBuilder
@@ -1286,7 +1320,7 @@ extension AIInsights {
                         }
                     }
 
-                    if state.capturedImages.count < 6 {
+                    if state.capturedImages.count < state.maxFoodFinderImages {
                         Text(
                             state.capturedImages.count == 1
                                 ? String(localized: "Add more photos", comment: "FoodFinder add-more-photos hint")

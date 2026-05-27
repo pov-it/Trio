@@ -79,6 +79,11 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var aiProvider: AIInsights.AIProvider = .google
     var aiModel: String = AIInsights.AIProvider.google.defaultModel
     var aiBaseURL: String = AIInsights.AIProvider.google.defaultEndpoint
+    var aiDictationEnabled: Bool = false
+    var aiDictationUsesSeparateProvider: Bool = false
+    var aiDictationProvider: AIInsights.AIProvider = .google
+    var aiDictationModel: String = AIInsights.AIProvider.google.defaultDictationModel
+    var aiDictationBaseURL: String = AIInsights.AIProvider.google.defaultEndpoint
     var aiSystemPrompt: String = AIInsights.defaultChatSystemPrompt
     var aiEnabled: Bool = false
     var aiAnalysisPeriodDays: Int = 7
@@ -418,6 +423,29 @@ extension TrioSettings: Decodable {
 
         if let aiBaseURL = try? container.decode(String.self, forKey: .aiBaseURL) {
             settings.aiBaseURL = aiBaseURL
+        }
+
+        if let aiDictationEnabled = try? container.decode(Bool.self, forKey: .aiDictationEnabled) {
+            settings.aiDictationEnabled = aiDictationEnabled
+        }
+
+        if let aiDictationUsesSeparateProvider = try? container.decode(
+            Bool.self,
+            forKey: .aiDictationUsesSeparateProvider
+        ) {
+            settings.aiDictationUsesSeparateProvider = aiDictationUsesSeparateProvider
+        }
+
+        if let aiDictationProvider = try? container.decode(AIInsights.AIProvider.self, forKey: .aiDictationProvider) {
+            settings.aiDictationProvider = aiDictationProvider
+        }
+
+        if let aiDictationModel = try? container.decode(String.self, forKey: .aiDictationModel) {
+            settings.aiDictationModel = aiDictationModel
+        }
+
+        if let aiDictationBaseURL = try? container.decode(String.self, forKey: .aiDictationBaseURL) {
+            settings.aiDictationBaseURL = aiDictationBaseURL
         }
 
         if let aiSystemPrompt = try? container.decode(String.self, forKey: .aiSystemPrompt) {

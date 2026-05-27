@@ -10,6 +10,12 @@ extension AIInsights {
         var providerType: AIProvider = .google
         var model: String = AIProvider.google.defaultModel
         var baseURL: String = AIProvider.google.defaultEndpoint
+        var aiDictationEnabled: Bool = false
+        var aiDictationUsesSeparateProvider: Bool = false
+        var aiDictationProviderType: AIProvider = .google
+        var aiDictationModel: String = AIProvider.google.defaultDictationModel
+        var aiDictationBaseURL: String = AIProvider.google.defaultEndpoint
+        var aiDictationAPIKey: String = ""
         var systemPrompt: String = AIInsights.defaultChatSystemPrompt
         var personality: AIPersonality = .clinicalExpert
         var analysisPeriodDays: Int = 7
@@ -23,10 +29,18 @@ extension AIInsights {
             if let savedKey = provider.keychain.getValue(String.self, forKey: "ai_insights_api_key") {
                 self.apiKey = savedKey
             }
+            if let savedDictationKey = provider.keychain.getValue(String.self, forKey: "ai_insights_dictation_api_key") {
+                aiDictationAPIKey = savedDictationKey
+            }
 
             providerType = provider.settings.aiProvider
             model = provider.settings.aiModel
             baseURL = provider.settings.aiBaseURL
+            aiDictationEnabled = provider.settings.aiDictationEnabled
+            aiDictationUsesSeparateProvider = provider.settings.aiDictationUsesSeparateProvider
+            aiDictationProviderType = provider.settings.aiDictationProvider
+            aiDictationModel = provider.settings.aiDictationModel
+            aiDictationBaseURL = provider.settings.aiDictationBaseURL
             systemPrompt = AIInsights.migratingSystemPrompt(provider.settings.aiSystemPrompt)
             personality = provider.settings.aiPersonality
             analysisPeriodDays = provider.settings.aiAnalysisPeriodDays
@@ -48,6 +62,11 @@ extension AIInsights {
             provider.keychain.setValue(apiKey, forKey: "ai_insights_api_key")
         }
 
+        func saveDictationAPIKey() {
+            guard provider != nil else { return }
+            provider.keychain.setValue(aiDictationAPIKey, forKey: "ai_insights_dictation_api_key")
+        }
+
         func saveSettings() {
             guard provider != nil else { return }
 
@@ -55,6 +74,11 @@ extension AIInsights {
             settings.aiProvider = providerType
             settings.aiModel = model
             settings.aiBaseURL = baseURL
+            settings.aiDictationEnabled = aiDictationEnabled
+            settings.aiDictationUsesSeparateProvider = aiDictationUsesSeparateProvider
+            settings.aiDictationProvider = aiDictationProviderType
+            settings.aiDictationModel = aiDictationModel
+            settings.aiDictationBaseURL = aiDictationBaseURL
             settings.aiSystemPrompt = systemPrompt
             settings.aiPersonality = personality
             settings.aiAnalysisPeriodDays = analysisPeriodDays
@@ -69,7 +93,17 @@ extension AIInsights {
         func resetToDefaults() {
             baseURL = providerType.defaultEndpoint
             model = providerType.defaultModel
+            if !aiDictationUsesSeparateProvider {
+                aiDictationModel = providerType.defaultDictationModel
+            }
             systemPrompt = AIInsights.defaultChatSystemPrompt
+            saveSettings()
+        }
+
+        func resetDictationDefaults() {
+            let dictationProvider = aiDictationUsesSeparateProvider ? aiDictationProviderType : providerType
+            aiDictationBaseURL = dictationProvider.defaultEndpoint
+            aiDictationModel = dictationProvider.defaultDictationModel
             saveSettings()
         }
 

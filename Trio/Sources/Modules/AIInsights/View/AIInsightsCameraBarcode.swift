@@ -34,12 +34,18 @@ extension AIInsights {
     /// to analyze an existing photo instead of taking one.
     struct PhotoLibraryPickerView: UIViewControllerRepresentable {
         @Environment(\.dismiss) var dismiss
-        var onImagePicked: (Data) -> Void
+        let selectionLimit: Int
+        var onImagesPicked: ([Data]) -> Void
+
+        init(selectionLimit: Int = 1, onImagesPicked: @escaping ([Data]) -> Void) {
+            self.selectionLimit = max(1, selectionLimit)
+            self.onImagesPicked = onImagesPicked
+        }
 
         func makeUIViewController(context: Context) -> PHPickerViewController {
             var config = PHPickerConfiguration()
             config.filter = .images
-            config.selectionLimit = 1
+            config.selectionLimit = selectionLimit
             let picker = PHPickerViewController(configuration: config)
             picker.delegate = context.coordinator
             return picker
@@ -54,24 +60,38 @@ extension AIInsights {
             init(_ parent: PhotoLibraryPickerView) { self.parent = parent }
 
             func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-                guard let result = results.first else {
+                guard !results.isEmpty else {
                     parent.dismiss()
                     return
                 }
-                let provider = result.itemProvider
-                guard provider.canLoadObject(ofClass: UIImage.self) else {
-                    parent.dismiss()
-                    return
-                }
-                provider.loadObject(ofClass: UIImage.self) { [weak self] object, _ in
-                    DispatchQueue.main.async {
-                        if let image = object as? UIImage,
-                           let data = image.jpegData(compressionQuality: 0.7)
-                        {
-                            self?.parent.onImagePicked(data)
-                        }
-                        self?.parent.dismiss()
+
+                let group = DispatchGroup()
+                let lock = NSLock()
+                var pickedImages: [(Int, Data)] = []
+
+                for (idx, result) in results.enumerated() {
+                    let provider = result.itemProvider
+                    guard provider.canLoadObject(ofClass: UIImage.self) else { continue }
+                    group.enter()
+                    provider.loadObject(ofClass: UIImage.self) { object, _ in
+                        defer { group.leave() }
+                        guard let image = object as? UIImage,
+                              let data = image.jpegData(compressionQuality: 0.7)
+                        else { return }
+                        lock.lock()
+                        pickedImages.append((idx, data))
+                        lock.unlock()
                     }
+                }
+
+                group.notify(queue: .main) { [weak self] in
+                    let ordered = pickedImages
+                        .sorted { $0.0 < $1.0 }
+                        .map { $0.1 }
+                    if !ordered.isEmpty {
+                        self?.parent.onImagesPicked(ordered)
+                    }
+                    self?.parent.dismiss()
                 }
             }
         }

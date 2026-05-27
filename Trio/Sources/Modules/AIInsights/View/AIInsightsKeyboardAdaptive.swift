@@ -22,17 +22,18 @@ extension View {
     /// Apply this near the root of a view that contains a TextField at the
     /// bottom (chat input, FoodFinder composer, etc.) so the input remains
     /// visible while the keyboard is up.
-    func aiInsightsKeyboardAdaptive() -> some View {
-        modifier(AIInsightsKeyboardAdaptive())
+    func aiInsightsKeyboardAdaptive(bottomSpacing: CGFloat = 0) -> some View {
+        modifier(AIInsightsKeyboardAdaptive(bottomSpacing: bottomSpacing))
     }
 }
 
 private struct AIInsightsKeyboardAdaptive: ViewModifier {
+    let bottomSpacing: CGFloat
     @State private var keyboardHeight: CGFloat = 0
 
     func body(content: Content) -> some View {
         content
-            .padding(.bottom, keyboardHeight)
+            .padding(.bottom, max(0, keyboardHeight - bottomSpacing))
             // Tell SwiftUI not to also try its own avoidance — otherwise it
             // sometimes double-applies and pushes content off-screen.
             .ignoresSafeArea(.keyboard, edges: .bottom)

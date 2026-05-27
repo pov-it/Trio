@@ -95,6 +95,24 @@ enum AIInsights {
             }
         }
 
+        var defaultDictationModel: String {
+            switch self {
+            case .google: return "gemini-2.0-flash"
+            case .openai: return "gpt-4o-transcribe"
+            case .anthropic: return defaultModel
+            case .custom: return ""
+            }
+        }
+
+        var foodFinderImageLimit: Int {
+            switch self {
+            case .google: return 3600
+            case .openai: return 500
+            case .anthropic: return 100
+            case .custom: return 6
+            }
+        }
+
         /// Full endpoint URL for the provider, combining baseURL with the model name.
         /// For Google Gemini, this constructs the generateContent endpoint.
         /// For OpenAI/Anthropic/Custom, the model is sent in the request body.
