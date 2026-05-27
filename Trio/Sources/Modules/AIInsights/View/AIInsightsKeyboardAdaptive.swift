@@ -41,9 +41,12 @@ private struct AIInsightsKeyboardAdaptive: ViewModifier {
     }
 
     private func subscribe() {
-        let center = NotificationCenter.default
+        // Use the fully-qualified Foundation type because Trio defines its own
+        // `NotificationCenter` protocol (for DI) that shadows the Foundation
+        // class at module scope.
+        let center = Foundation.NotificationCenter.default
         center.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification,
-                           object: nil, queue: .main) { note in
+                           object: nil, queue: OperationQueue.main) { note in
             guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
             let screenH = UIScreen.main.bounds.height
             // When the keyboard is hidden iOS reports an off-screen frame
@@ -51,11 +54,15 @@ private struct AIInsightsKeyboardAdaptive: ViewModifier {
             // keyboard portion we need to pad for.
             let visible = max(0, screenH - frame.origin.y)
             let bottomInset = currentBottomSafeInset()
-            self.keyboardHeight = max(0, visible - bottomInset)
+            DispatchQueue.main.async {
+                self.keyboardHeight = max(0, visible - bottomInset)
+            }
         }
         center.addObserver(forName: UIResponder.keyboardWillHideNotification,
-                           object: nil, queue: .main) { _ in
-            self.keyboardHeight = 0
+                           object: nil, queue: OperationQueue.main) { _ in
+            DispatchQueue.main.async {
+                self.keyboardHeight = 0
+            }
         }
     }
 
