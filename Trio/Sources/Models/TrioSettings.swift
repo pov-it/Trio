@@ -89,6 +89,10 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var aiAnalysisPeriodDays: Int = 7
     var aiPersonality: AIPersonality = .clinicalExpert
     var openFoodFactsBaseURL: String = AIInsights.defaultOpenFoodFactsBaseURL
+    var foodFinderLookupMode: AIInsights.FoodFinderLookupMode = .verifiedAgent
+    var foodFinderOpenFoodFactsEnabled: Bool = true
+    var foodFinderUSDAEnabled: Bool = false
+    var foodFinderPreferredSource: AIInsights.FoodSourceID = .openFoodFacts
     /// Inject reverse-geocoded venue/locality into AI chat prompt. Off by default; first use triggers iOS Location permission prompt.
     var aiLocationContextEnabled: Bool = false
     /// Read dietaryCaffeine from Apple Health and merge with manual caffeine entries.
@@ -466,6 +470,31 @@ extension TrioSettings: Decodable {
 
         if let openFoodFactsBaseURL = try? container.decode(String.self, forKey: .openFoodFactsBaseURL) {
             settings.openFoodFactsBaseURL = openFoodFactsBaseURL
+        }
+
+        if let foodFinderLookupMode = try? container.decode(
+            AIInsights.FoodFinderLookupMode.self,
+            forKey: .foodFinderLookupMode
+        ) {
+            settings.foodFinderLookupMode = foodFinderLookupMode
+        }
+
+        if let foodFinderOpenFoodFactsEnabled = try? container.decode(
+            Bool.self,
+            forKey: .foodFinderOpenFoodFactsEnabled
+        ) {
+            settings.foodFinderOpenFoodFactsEnabled = foodFinderOpenFoodFactsEnabled
+        }
+
+        if let foodFinderUSDAEnabled = try? container.decode(Bool.self, forKey: .foodFinderUSDAEnabled) {
+            settings.foodFinderUSDAEnabled = foodFinderUSDAEnabled
+        }
+
+        if let foodFinderPreferredSource = try? container.decode(
+            AIInsights.FoodSourceID.self,
+            forKey: .foodFinderPreferredSource
+        ) {
+            settings.foodFinderPreferredSource = foodFinderPreferredSource
         }
 
         if let aiLocationContextEnabled = try? container.decode(Bool.self, forKey: .aiLocationContextEnabled) {

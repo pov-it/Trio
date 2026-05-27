@@ -17,12 +17,99 @@ extension AIInsights {
         var fiber: Double
         var calories: Double
         var portionMultiplier: Double = 1.0
+        var source: FoodSourceID = .aiEstimate
+        var sourceURL: URL?
+        var sourceVerified: Bool = false
+        var sourceName: String?
+        var sourceBrand: String?
+        var sourceImageURL: URL?
+        var sourceScore: Double?
+        var alternateMatches: [FoodLookupResult] = []
 
         var adjustedCarbs: Double { carbs * portionMultiplier }
         var adjustedFat: Double { fat * portionMultiplier }
         var adjustedProtein: Double { protein * portionMultiplier }
         var adjustedFiber: Double { fiber * portionMultiplier }
         var adjustedCalories: Double { calories * portionMultiplier }
+
+        init(
+            id: UUID = UUID(),
+            name: String,
+            portion: String,
+            carbs: Double,
+            fat: Double,
+            protein: Double,
+            fiber: Double,
+            calories: Double,
+            portionMultiplier: Double = 1.0,
+            source: FoodSourceID = .aiEstimate,
+            sourceURL: URL? = nil,
+            sourceVerified: Bool = false,
+            sourceName: String? = nil,
+            sourceBrand: String? = nil,
+            sourceImageURL: URL? = nil,
+            sourceScore: Double? = nil,
+            alternateMatches: [FoodLookupResult] = []
+        ) {
+            self.id = id
+            self.name = name
+            self.portion = portion
+            self.carbs = carbs
+            self.fat = fat
+            self.protein = protein
+            self.fiber = fiber
+            self.calories = calories
+            self.portionMultiplier = portionMultiplier
+            self.source = source
+            self.sourceURL = sourceURL
+            self.sourceVerified = sourceVerified
+            self.sourceName = sourceName
+            self.sourceBrand = sourceBrand
+            self.sourceImageURL = sourceImageURL
+            self.sourceScore = sourceScore
+            self.alternateMatches = alternateMatches
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case name
+            case portion
+            case carbs
+            case fat
+            case protein
+            case fiber
+            case calories
+            case portionMultiplier
+            case source
+            case sourceURL
+            case sourceVerified
+            case sourceName
+            case sourceBrand
+            case sourceImageURL
+            case sourceScore
+            case alternateMatches
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+            name = try container.decode(String.self, forKey: .name)
+            portion = try container.decode(String.self, forKey: .portion)
+            carbs = try container.decodeIfPresent(Double.self, forKey: .carbs) ?? 0
+            fat = try container.decodeIfPresent(Double.self, forKey: .fat) ?? 0
+            protein = try container.decodeIfPresent(Double.self, forKey: .protein) ?? 0
+            fiber = try container.decodeIfPresent(Double.self, forKey: .fiber) ?? 0
+            calories = try container.decodeIfPresent(Double.self, forKey: .calories) ?? 0
+            portionMultiplier = try container.decodeIfPresent(Double.self, forKey: .portionMultiplier) ?? 1.0
+            source = try container.decodeIfPresent(FoodSourceID.self, forKey: .source) ?? .aiEstimate
+            sourceURL = try container.decodeIfPresent(URL.self, forKey: .sourceURL)
+            sourceVerified = try container.decodeIfPresent(Bool.self, forKey: .sourceVerified) ?? false
+            sourceName = try container.decodeIfPresent(String.self, forKey: .sourceName)
+            sourceBrand = try container.decodeIfPresent(String.self, forKey: .sourceBrand)
+            sourceImageURL = try container.decodeIfPresent(URL.self, forKey: .sourceImageURL)
+            sourceScore = try container.decodeIfPresent(Double.self, forKey: .sourceScore)
+            alternateMatches = try container.decodeIfPresent([FoodLookupResult].self, forKey: .alternateMatches) ?? []
+        }
     }
 
     /// Per-meal override that lets the user dictate the total macros without
@@ -168,6 +255,11 @@ extension AIInsights {
         var aiDictationAPIKey: String = ""
         var aiEnabled: Bool = false
         var openFoodFactsBaseURL: String = AIInsights.defaultOpenFoodFactsBaseURL
+        var foodFinderLookupMode: FoodFinderLookupMode = .verifiedAgent
+        var foodFinderOpenFoodFactsEnabled: Bool = true
+        var foodFinderUSDAEnabled: Bool = false
+        var foodFinderPreferredSource: FoodSourceID = .openFoodFacts
+        var foodFinderUSDAAPIKey: String = ""
         var maxFoodFinderImages: Int { max(1, providerType.foodFinderImageLimit) }
 
         @ObservationIgnored private let speechRecognizer = SFSpeechRecognizer(locale: Locale.current)
@@ -193,6 +285,9 @@ extension AIInsights {
             if let savedDictationKey = provider.keychain.getValue(String.self, forKey: "ai_insights_dictation_api_key") {
                 aiDictationAPIKey = savedDictationKey
             }
+            if let savedUSDAKey = provider.keychain.getValue(String.self, forKey: "ai_foodfinder_usda_api_key") {
+                foodFinderUSDAAPIKey = savedUSDAKey
+            }
 
             providerType = provider.settings.aiProvider
             model = provider.settings.aiModel
@@ -204,6 +299,10 @@ extension AIInsights {
             aiDictationBaseURL = provider.settings.aiDictationBaseURL
             aiEnabled = provider.settings.aiEnabled
             openFoodFactsBaseURL = provider.settings.openFoodFactsBaseURL
+            foodFinderLookupMode = provider.settings.foodFinderLookupMode
+            foodFinderOpenFoodFactsEnabled = provider.settings.foodFinderOpenFoodFactsEnabled
+            foodFinderUSDAEnabled = provider.settings.foodFinderUSDAEnabled
+            foodFinderPreferredSource = provider.settings.foodFinderPreferredSource
 
             loadDraftDescription()
             loadRecentResults()
@@ -481,6 +580,7 @@ extension AIInsights {
                     )
                     parsed = parseFoodAnalysis(from: retryResponse)
                 }
+                parsed.items = await enrichFoodItemsWithLookup(parsed.items)
 
                 guard !parsed.items.isEmpty,
                       !isSuspiciousZeroCarbResult(parsed, description: description, hasImage: false)
@@ -652,6 +752,185 @@ extension AIInsights {
             parseFoodAnalysis(from: text).items
         }
 
+        // MARK: - Food Lookup Agent
+
+        private var isFoodLookupAgentEnabled: Bool {
+            foodFinderLookupMode == .verifiedAgent
+        }
+
+        private var enabledFoodSourcesInPreferenceOrder: [FoodSourceID] {
+            var sources: [FoodSourceID] = []
+            if foodFinderPreferredSource == .openFoodFacts, foodFinderOpenFoodFactsEnabled {
+                sources.append(.openFoodFacts)
+            }
+            if foodFinderPreferredSource == .usda, foodFinderUSDAEnabled, !foodFinderUSDAAPIKey.isEmpty {
+                sources.append(.usda)
+            }
+            if foodFinderOpenFoodFactsEnabled, !sources.contains(.openFoodFacts) {
+                sources.append(.openFoodFacts)
+            }
+            if foodFinderUSDAEnabled, !foodFinderUSDAAPIKey.isEmpty, !sources.contains(.usda) {
+                sources.append(.usda)
+            }
+            return sources
+        }
+
+        private func enrichFoodItemsWithLookup(_ items: [FoodItem]) async -> [FoodItem] {
+            guard isFoodLookupAgentEnabled else { return items }
+
+            var enriched: [FoodItem] = []
+            for item in items {
+                enriched.append(await enrichFoodItemWithLookup(item))
+            }
+            return enriched
+        }
+
+        private func enrichFoodItemWithLookup(_ item: FoodItem) async -> FoodItem {
+            let matches = await lookupFoodSources(query: item.name)
+            guard let best = bestLookupMatch(for: item, from: matches) else {
+                var fallback = item
+                fallback.source = .aiEstimate
+                fallback.sourceVerified = false
+                fallback.alternateMatches = matches
+                return fallback
+            }
+
+            return itemByApplyingLookup(best, to: item, alternates: matches)
+        }
+
+        private func lookupFoodSources(query: String) async -> [FoodLookupResult] {
+            let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return [] }
+
+            var results: [FoodLookupResult] = []
+            for source in enabledFoodSourcesInPreferenceOrder {
+                do {
+                    switch source {
+                    case .openFoodFacts:
+                        results.append(contentsOf: try await lookupOpenFoodFactsResults(trimmed))
+                    case .usda:
+                        results.append(contentsOf: try await lookupUSDAResults(trimmed))
+                    case .aiEstimate:
+                        break
+                    }
+                } catch {
+                    debugPrint("FoodFinder lookup failed for \(source.rawValue): \(error)")
+                }
+            }
+            return results.sorted { $0.verifiedScore > $1.verifiedScore }
+        }
+
+        private func bestLookupMatch(for item: FoodItem, from matches: [FoodLookupResult]) -> FoodLookupResult? {
+            matches
+                .map { match in
+                    (match: match, score: match.verifiedScore * nameMatchScore(item.name, match.name))
+                }
+                .filter { $0.score >= 0.52 }
+                .sorted { lhs, rhs in
+                    if lhs.score == rhs.score {
+                        return sourceRank(lhs.match.sourceID) < sourceRank(rhs.match.sourceID)
+                    }
+                    return lhs.score > rhs.score
+                }
+                .first?
+                .match
+        }
+
+        private func sourceRank(_ source: FoodSourceID) -> Int {
+            source == foodFinderPreferredSource ? 0 : 1
+        }
+
+        private func itemByApplyingLookup(
+            _ lookup: FoodLookupResult,
+            to item: FoodItem,
+            alternates: [FoodLookupResult]
+        ) -> FoodItem {
+            let existingGrams = gramsFromPortion(item.portion)
+            let lookupGrams = lookup.portionGrams
+            let scale: Double
+            let portion: String
+
+            if let existingGrams, let lookupGrams, lookupGrams > 0 {
+                scale = max(0.05, existingGrams / lookupGrams)
+                portion = item.portion
+            } else {
+                scale = 1
+                portion = item.portion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? lookup.portion
+                    : item.portion
+            }
+
+            return FoodItem(
+                id: item.id,
+                name: item.name,
+                portion: portion,
+                carbs: lookup.carbs * scale,
+                fat: lookup.fat * scale,
+                protein: lookup.protein * scale,
+                fiber: lookup.fiber * scale,
+                calories: lookup.calories * scale,
+                portionMultiplier: item.portionMultiplier,
+                source: lookup.sourceID,
+                sourceURL: lookup.sourceURL,
+                sourceVerified: lookup.sourceVerified,
+                sourceName: lookup.name,
+                sourceBrand: lookup.brand,
+                sourceImageURL: lookup.imageURL,
+                sourceScore: lookup.verifiedScore,
+                alternateMatches: alternates
+            )
+        }
+
+        private func foodItem(from lookup: FoodLookupResult, fallbackName: String, existingPortion: String?) -> FoodItem {
+            let seed = FoodItem(
+                name: fallbackName,
+                portion: existingPortion?.aiInsightsNilIfEmpty ?? lookup.portion,
+                carbs: lookup.carbs,
+                fat: lookup.fat,
+                protein: lookup.protein,
+                fiber: lookup.fiber,
+                calories: lookup.calories
+            )
+            return itemByApplyingLookup(lookup, to: seed, alternates: [lookup])
+        }
+
+        private func nameMatchScore(_ query: String, _ candidate: String) -> Double {
+            let q = normalizedFoodTokens(query)
+            let c = normalizedFoodTokens(candidate)
+            guard !q.isEmpty, !c.isEmpty else { return 0 }
+            let overlap = q.intersection(c).count
+            if overlap == 0 { return 0.25 }
+            let coverage = Double(overlap) / Double(q.count)
+            let union = Double(q.union(c).count)
+            let jaccard = union > 0 ? Double(overlap) / union : coverage
+            return min(1, max(coverage, jaccard))
+        }
+
+        private func normalizedFoodTokens(_ text: String) -> Set<String> {
+            let stopWords: Set<String> = [
+                "the", "and", "with", "for", "een", "het", "de", "met", "van", "zonder", "about",
+                "portion", "serving", "plate", "bowl", "cooked", "raw"
+            ]
+            let cleaned = text
+                .lowercased()
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { $0.count > 2 && !stopWords.contains($0) }
+            return Set(cleaned)
+        }
+
+        private func gramsFromPortion(_ portion: String) -> Double? {
+            let pattern = #"(\d+(?:[.,]\d+)?)\s*(g|gram|grams|ml|milliliter|milliliters)\b"#
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+                return nil
+            }
+            let range = NSRange(portion.startIndex..<portion.endIndex, in: portion)
+            guard let match = regex.firstMatch(in: portion, options: [], range: range),
+                  match.numberOfRanges >= 2,
+                  let valueRange = Range(match.range(at: 1), in: portion)
+            else { return nil }
+            return Double(String(portion[valueRange]).replacingOccurrences(of: ",", with: "."))
+        }
+
         // MARK: - Helpers
 
         func updatePortion(for itemId: UUID, multiplier: Double) {
@@ -718,17 +997,10 @@ extension AIInsights {
                 guard var updatedResult = currentResult,
                       let idx = updatedResult.items.firstIndex(where: { $0.id == itemId })
                 else { return }
-                updatedResult.items[idx] = FoodItem(
-                    id: itemId,
-                    name: replacement.name,
-                    portion: replacement.portion,
-                    carbs: replacement.carbs,
-                    fat: replacement.fat,
-                    protein: replacement.protein,
-                    fiber: replacement.fiber,
-                    calories: replacement.calories,
-                    portionMultiplier: item.portionMultiplier
-                )
+                var updatedItem = replacement
+                updatedItem.id = itemId
+                updatedItem.portionMultiplier = item.portionMultiplier
+                updatedResult.items[idx] = updatedItem
                 storeUpdatedResult(updatedResult)
             } catch let error as AIServiceAdapter.AIError {
                 errorMessage = error.errorDescription ?? error.localizedDescription
@@ -822,7 +1094,8 @@ extension AIInsights {
                     apiKey: apiKey
                 )
 
-                let parsed = parseFoodAnalysis(from: response.text)
+                var parsed = parseFoodAnalysis(from: response.text)
+                parsed.items = await enrichFoodItemsWithLookup(parsed.items)
                 guard !parsed.items.isEmpty else {
                     errorMessage = String(localized: "No food items could be identified in the photo.", comment: "FoodFinder add from image error")
                     return
@@ -855,7 +1128,7 @@ extension AIInsights {
                     return
                 }
                 components.queryItems = [
-                    URLQueryItem(name: "fields", value: "product_name,nutriments,serving_size,serving_quantity")
+                    URLQueryItem(name: "fields", value: "code,product_name,brands,nutriments,serving_size,serving_quantity,nutrition_data_completeness,image_url,url")
                 ]
                 guard let url = components.url else {
                     errorMessage = String(localized: "Invalid OpenFoodFacts URL.", comment: "Barcode error")
@@ -881,15 +1154,19 @@ extension AIInsights {
                 let serving = stringValue(product["serving_size"], fallback: String(localized: "1 serving", comment: "Default food serving"))
                 let nutriments = product["nutriments"] as? [String: Any] ?? [:]
 
-                let item = FoodItem(
-                    name: name,
-                    portion: serving,
-                    carbs: nutrientValue(["carbohydrates_serving", "carbohydrates_100g"], in: nutriments),
-                    fat: nutrientValue(["fat_serving", "fat_100g"], in: nutriments),
-                    protein: nutrientValue(["proteins_serving", "proteins_100g"], in: nutriments),
-                    fiber: nutrientValue(["fiber_serving", "fiber_100g"], in: nutriments),
-                    calories: nutrientValue(["energy-kcal_serving", "energy-kcal_100g"], in: nutriments)
-                )
+                let item = openFoodFactsLookupResult(from: product, fallbackName: name)
+                    .map { foodItem(from: $0, fallbackName: $0.name, existingPortion: serving) }
+                    ?? FoodItem(
+                        name: name,
+                        portion: serving,
+                        carbs: nutrientValue(["carbohydrates_serving", "carbohydrates_100g"], in: nutriments),
+                        fat: nutrientValue(["fat_serving", "fat_100g"], in: nutriments),
+                        protein: nutrientValue(["proteins_serving", "proteins_100g"], in: nutriments),
+                        fiber: nutrientValue(["fiber_serving", "fiber_100g"], in: nutriments),
+                        calories: nutrientValue(["energy-kcal_serving", "energy-kcal_100g"], in: nutriments),
+                        source: .openFoodFacts,
+                        sourceVerified: true
+                    )
 
                 result.items.append(item)
                 storeUpdatedResult(result)
@@ -1057,6 +1334,7 @@ extension AIInsights {
                     )
                     parsed = parseFoodAnalysis(from: retryResponse)
                 }
+                parsed.items = await enrichFoodItemsWithLookup(parsed.items)
 
                 guard !parsed.items.isEmpty,
                       !isSuspiciousZeroCarbResult(parsed, description: validationDescription, hasImage: true)
@@ -1109,7 +1387,7 @@ extension AIInsights {
                     return
                 }
                 components.queryItems = [
-                    URLQueryItem(name: "fields", value: "product_name,nutriments,serving_size,serving_quantity")
+                    URLQueryItem(name: "fields", value: "code,product_name,brands,nutriments,serving_size,serving_quantity,nutrition_data_completeness,image_url,url")
                 ]
                 guard let url = components.url else {
                     errorMessage = String(localized: "Invalid OpenFoodFacts URL.", comment: "Barcode error")
@@ -1146,15 +1424,19 @@ extension AIInsights {
                 let fiber = nutrientValue(["fiber_serving", "fiber_100g"], in: nutriments)
                 let calories = nutrientValue(["energy-kcal_serving", "energy-kcal_100g"], in: nutriments)
 
-                let item = FoodItem(
-                    name: name,
-                    portion: serving,
-                    carbs: carbs,
-                    fat: fat,
-                    protein: protein,
-                    fiber: fiber,
-                    calories: calories
-                )
+                let item = openFoodFactsLookupResult(from: product, fallbackName: name)
+                    .map { foodItem(from: $0, fallbackName: $0.name, existingPortion: serving) }
+                    ?? FoodItem(
+                        name: name,
+                        portion: serving,
+                        carbs: carbs,
+                        fat: fat,
+                        protein: protein,
+                        fiber: fiber,
+                        calories: calories,
+                        source: .openFoodFacts,
+                        sourceVerified: true
+                    )
 
                 let result = FoodAnalysisResult(
                     items: [item],
@@ -1190,6 +1472,7 @@ extension AIInsights {
                 return
             }
 
+            let preservedText = foodDescription
             audioEngine.stop()
             recognitionRequest?.endAudio()
             recognitionTask?.cancel()
@@ -1199,6 +1482,11 @@ extension AIInsights {
             }
             recognitionRequest = nil
             recognitionTask = nil
+            if foodDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               !preservedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                foodDescription = preservedText
+            }
             isDictating = false
         }
 
@@ -1445,8 +1733,22 @@ extension AIInsights {
             let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return nil }
 
-            if let item = try await lookupOpenFoodFactsIngredient(trimmed) {
-                return item
+            if isFoodLookupAgentEnabled {
+                let matches = await lookupFoodSources(query: trimmed)
+                if let best = bestLookupMatch(
+                    for: FoodItem(
+                        name: trimmed,
+                        portion: existingPortion ?? String(localized: "1 serving", comment: "Default food serving"),
+                        carbs: 0,
+                        fat: 0,
+                        protein: 0,
+                        fiber: 0,
+                        calories: 0
+                    ),
+                    from: matches
+                ) {
+                    return foodItem(from: best, fallbackName: trimmed, existingPortion: existingPortion)
+                }
             }
 
             let portionHint = existingPortion.map { " Keep this portion if it still makes sense: \($0)." } ?? ""
@@ -1457,17 +1759,17 @@ extension AIInsights {
             return parseFoodAnalysis(from: responseText).items.first
         }
 
-        private func lookupOpenFoodFactsIngredient(_ query: String) async throws -> FoodItem? {
+        private func lookupOpenFoodFactsResults(_ query: String) async throws -> [FoodLookupResult] {
             guard var components = URLComponents(url: openFoodFactsSearchURL(), resolvingAgainstBaseURL: false) else {
-                return nil
+                return []
             }
             components.queryItems = [
                 URLQueryItem(name: "search_terms", value: query),
-                URLQueryItem(name: "fields", value: "product_name,nutriments,serving_size"),
-                URLQueryItem(name: "page_size", value: "1"),
+                URLQueryItem(name: "fields", value: "code,product_name,brands,nutriments,serving_size,serving_quantity,nutrition_data_completeness,image_url,url"),
+                URLQueryItem(name: "page_size", value: "5"),
                 URLQueryItem(name: "json", value: "1")
             ]
-            guard let url = components.url else { return nil }
+            guard let url = components.url else { return [] }
 
             var request = URLRequest(url: url)
             let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
@@ -1477,26 +1779,100 @@ extension AIInsights {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let products = json["products"] as? [[String: Any]],
-                  let product = products.first
+                  let products = json["products"] as? [[String: Any]]
             else {
-                return nil
+                return []
             }
 
-            let name = stringValue(product["product_name"], fallback: query)
-            guard name != query || product["nutriments"] != nil else { return nil }
+            return products.compactMap { openFoodFactsLookupResult(from: $0, fallbackName: query) }
+        }
 
+        private func openFoodFactsLookupResult(from product: [String: Any], fallbackName: String) -> FoodLookupResult? {
+            let name = stringValue(product["product_name"], fallback: fallbackName)
+            guard name != fallbackName || product["nutriments"] != nil else { return nil }
             let serving = stringValue(product["serving_size"], fallback: String(localized: "1 serving", comment: "Default food serving"))
             let nutriments = product["nutriments"] as? [String: Any] ?? [:]
+            let completeness = min(1, max(0.35, doubleValue(product["nutrition_data_completeness"])))
+            let code = stringValue(product["code"], fallback: "")
+            let servingQuantity = doubleValue(product["serving_quantity"])
+            let sourceURL: URL? = {
+                if let raw = product["url"] as? String, let url = URL(string: raw) {
+                    return url
+                }
+                if !code.isEmpty {
+                    return URL(string: "https://world.openfoodfacts.org/product/\(code)")
+                }
+                return nil
+            }()
 
-            return FoodItem(
+            return FoodLookupResult(
+                sourceID: .openFoodFacts,
                 name: name,
+                brand: stringValue(product["brands"], fallback: "").aiInsightsNilIfEmpty,
                 portion: serving,
+                portionGrams: gramsFromPortion(serving) ?? (servingQuantity > 0 ? servingQuantity : nil),
                 carbs: nutrientValue(["carbohydrates_serving", "carbohydrates_100g"], in: nutriments),
                 fat: nutrientValue(["fat_serving", "fat_100g"], in: nutriments),
                 protein: nutrientValue(["proteins_serving", "proteins_100g"], in: nutriments),
                 fiber: nutrientValue(["fiber_serving", "fiber_100g"], in: nutriments),
-                calories: nutrientValue(["energy-kcal_serving", "energy-kcal_100g"], in: nutriments)
+                calories: nutrientValue(["energy-kcal_serving", "energy-kcal_100g"], in: nutriments),
+                sourceURL: sourceURL,
+                verifiedScore: completeness,
+                imageURL: (product["image_url"] as? String).flatMap(URL.init(string:))
+            )
+        }
+
+        private func lookupUSDAResults(_ query: String) async throws -> [FoodLookupResult] {
+            let apiKey = foodFinderUSDAAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !apiKey.isEmpty else { return [] }
+
+            var components = URLComponents(string: "https://api.nal.usda.gov/fdc/v1/foods/search")
+            components?.queryItems = [
+                URLQueryItem(name: "query", value: query),
+                URLQueryItem(name: "pageSize", value: "5"),
+                URLQueryItem(name: "api_key", value: apiKey)
+            ]
+            guard let url = components?.url else { return [] }
+
+            var request = URLRequest(url: url)
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let foods = json["foods"] as? [[String: Any]]
+            else {
+                return []
+            }
+
+            return foods.compactMap { usdaLookupResult(from: $0, fallbackName: query) }
+        }
+
+        private func usdaLookupResult(from food: [String: Any], fallbackName: String) -> FoodLookupResult? {
+            let name = stringValue(food["description"], fallback: fallbackName)
+            let fdcId = Int(doubleValue(food["fdcId"]))
+            let nutrients = food["foodNutrients"] as? [[String: Any]] ?? []
+            let servingSize = doubleValue(food["servingSize"])
+            let servingUnit = stringValue(food["servingSizeUnit"], fallback: "g")
+            let grams = servingSize > 0 ? servingSize : 100
+            let portion = servingSize > 0
+                ? "\(String(format: "%.0f", servingSize)) \(servingUnit)"
+                : String(localized: "100 g", comment: "USDA default portion")
+            let score = stringValue(food["dataType"], fallback: "").localizedCaseInsensitiveContains("foundation") ? 0.9 : 0.78
+
+            return FoodLookupResult(
+                sourceID: .usda,
+                name: name,
+                brand: stringValue(food["brandOwner"], fallback: "").aiInsightsNilIfEmpty,
+                portion: portion,
+                portionGrams: grams,
+                carbs: usdaNutrient(["Carbohydrate, by difference", "Carbohydrate"], in: nutrients),
+                fat: usdaNutrient(["Total lipid (fat)", "Total Fat"], in: nutrients),
+                protein: usdaNutrient(["Protein"], in: nutrients),
+                fiber: usdaNutrient(["Fiber, total dietary", "Fiber"], in: nutrients),
+                calories: usdaNutrient(["Energy"], in: nutrients),
+                sourceURL: fdcId > 0 ? URL(string: "https://fdc.nal.usda.gov/fdc-app.html#/food-details/\(fdcId)/nutrients") : nil,
+                verifiedScore: score,
+                imageURL: nil
             )
         }
 
@@ -1580,6 +1956,18 @@ extension AIInsights {
                 let value = doubleValue(nutriments[key])
                 if value > 0 {
                     return value
+                }
+            }
+            return 0
+        }
+
+        private func usdaNutrient(_ names: [String], in nutrients: [[String: Any]]) -> Double {
+            for name in names {
+                if let nutrient = nutrients.first(where: { entry in
+                    let nutrientName = stringValue(entry["nutrientName"] ?? entry["name"], fallback: "")
+                    return nutrientName.localizedCaseInsensitiveContains(name)
+                }) {
+                    return doubleValue(nutrient["value"] ?? nutrient["amount"])
                 }
             }
             return 0

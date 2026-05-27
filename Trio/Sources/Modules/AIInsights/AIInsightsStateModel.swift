@@ -21,6 +21,11 @@ extension AIInsights {
         var analysisPeriodDays: Int = 7
         var aiEnabled: Bool = false
         var openFoodFactsBaseURL: String = AIInsights.defaultOpenFoodFactsBaseURL
+        var foodFinderLookupMode: FoodFinderLookupMode = .verifiedAgent
+        var foodFinderOpenFoodFactsEnabled: Bool = true
+        var foodFinderUSDAEnabled: Bool = false
+        var foodFinderPreferredSource: FoodSourceID = .openFoodFacts
+        var foodFinderUSDAAPIKey: String = ""
         var locationContextEnabled: Bool = false
         var healthKitCaffeineEnabled: Bool = false
         var healthKitAlcoholEnabled: Bool = false
@@ -31,6 +36,9 @@ extension AIInsights {
             }
             if let savedDictationKey = provider.keychain.getValue(String.self, forKey: "ai_insights_dictation_api_key") {
                 aiDictationAPIKey = savedDictationKey
+            }
+            if let savedUSDAKey = provider.keychain.getValue(String.self, forKey: "ai_foodfinder_usda_api_key") {
+                foodFinderUSDAAPIKey = savedUSDAKey
             }
 
             providerType = provider.settings.aiProvider
@@ -46,6 +54,10 @@ extension AIInsights {
             analysisPeriodDays = provider.settings.aiAnalysisPeriodDays
             aiEnabled = provider.settings.aiEnabled
             openFoodFactsBaseURL = provider.settings.openFoodFactsBaseURL
+            foodFinderLookupMode = provider.settings.foodFinderLookupMode
+            foodFinderOpenFoodFactsEnabled = provider.settings.foodFinderOpenFoodFactsEnabled
+            foodFinderUSDAEnabled = provider.settings.foodFinderUSDAEnabled
+            foodFinderPreferredSource = provider.settings.foodFinderPreferredSource
             locationContextEnabled = provider.settings.aiLocationContextEnabled
             healthKitCaffeineEnabled = provider.settings.aiHealthKitCaffeineEnabled
             healthKitAlcoholEnabled = provider.settings.aiHealthKitAlcoholEnabled
@@ -67,6 +79,11 @@ extension AIInsights {
             provider.keychain.setValue(aiDictationAPIKey, forKey: "ai_insights_dictation_api_key")
         }
 
+        func saveFoodFinderUSDAAPIKey() {
+            guard provider != nil else { return }
+            provider.keychain.setValue(foodFinderUSDAAPIKey, forKey: "ai_foodfinder_usda_api_key")
+        }
+
         func saveSettings() {
             guard provider != nil else { return }
 
@@ -84,6 +101,10 @@ extension AIInsights {
             settings.aiAnalysisPeriodDays = analysisPeriodDays
             settings.aiEnabled = aiEnabled
             settings.openFoodFactsBaseURL = openFoodFactsBaseURL
+            settings.foodFinderLookupMode = foodFinderLookupMode
+            settings.foodFinderOpenFoodFactsEnabled = foodFinderOpenFoodFactsEnabled
+            settings.foodFinderUSDAEnabled = foodFinderUSDAEnabled
+            settings.foodFinderPreferredSource = foodFinderPreferredSource
             settings.aiLocationContextEnabled = locationContextEnabled
             settings.aiHealthKitCaffeineEnabled = healthKitCaffeineEnabled
             settings.aiHealthKitAlcoholEnabled = healthKitAlcoholEnabled

@@ -225,8 +225,40 @@ extension AIInsights {
                 // MARK: - FoodFinder
                 Section(
                     header: Text("FoodFinder", comment: "FoodFinder AI settings section header"),
-                    footer: Text("OpenFoodFacts is used for barcode lookup. Keep the default endpoint unless your region or mirror needs a different API host.", comment: "OpenFoodFacts settings footer")
+                    footer: Text("Use the lookup agent during testing to let FoodFinder ground ingredients against configured food databases before falling back to AI estimates.", comment: "FoodFinder agent settings footer")
                 ) {
+                    Picker(String(localized: "Search method", comment: "FoodFinder lookup mode picker"), selection: $state.foodFinderLookupMode) {
+                        ForEach(FoodFinderLookupMode.allCases) { mode in
+                            Text(mode.localizedTitle).tag(mode)
+                        }
+                    }
+                    .onChange(of: state.foodFinderLookupMode) {
+                        state.saveSettings()
+                    }
+
+                    Picker(String(localized: "Preferred source", comment: "FoodFinder preferred source picker"), selection: $state.foodFinderPreferredSource) {
+                        ForEach([FoodSourceID.openFoodFacts, FoodSourceID.usda, FoodSourceID.aiEstimate]) { source in
+                            Text(source.localizedTitle).tag(source)
+                        }
+                    }
+                    .onChange(of: state.foodFinderPreferredSource) {
+                        state.saveSettings()
+                    }
+                    .disabled(state.foodFinderLookupMode == .aiEstimateOnly)
+                }
+                .listRowBackground(Color.chart)
+
+                Section(
+                    header: Text("FoodFinder Providers", comment: "FoodFinder providers settings section header"),
+                    footer: Text("OpenFoodFacts needs no key. USDA FoodData Central can improve fresh ingredient matches when you add your own API key.", comment: "FoodFinder providers settings footer")
+                ) {
+                    Toggle(isOn: $state.foodFinderOpenFoodFactsEnabled) {
+                        Label(String(localized: "OpenFoodFacts", comment: "OpenFoodFacts provider toggle"), systemImage: "checkmark.seal")
+                    }
+                    .onChange(of: state.foodFinderOpenFoodFactsEnabled) {
+                        state.saveSettings()
+                    }
+
                     TextField(
                         String(localized: "OpenFoodFacts API URL", comment: "OpenFoodFacts API URL field"),
                         text: $state.openFoodFactsBaseURL,
@@ -244,6 +276,20 @@ extension AIInsights {
                         state.resetOpenFoodFactsURL()
                     }
                     .font(.caption)
+
+                    Toggle(isOn: $state.foodFinderUSDAEnabled) {
+                        Label(String(localized: "USDA FoodData Central", comment: "USDA provider toggle"), systemImage: "building.columns")
+                    }
+                    .onChange(of: state.foodFinderUSDAEnabled) {
+                        state.saveSettings()
+                    }
+
+                    if state.foodFinderUSDAEnabled {
+                        SecureField(String(localized: "USDA API Key", comment: "USDA API key field placeholder"), text: $state.foodFinderUSDAAPIKey)
+                            .onChange(of: state.foodFinderUSDAAPIKey) {
+                                state.saveFoodFinderUSDAAPIKey()
+                            }
+                    }
                 }
                 .listRowBackground(Color.chart)
 
