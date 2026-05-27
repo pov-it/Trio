@@ -18,6 +18,7 @@ extension AIInsights {
         @State private var selectedSourceItem: FoodItem?
         @State private var compactInputMeasuredHeight: CGFloat = 0
         @State private var compactInputSingleLineHeight: CGFloat = 0
+        @State private var composerFocusRequest = 0
         @GestureState private var composerDragOffset: CGFloat = 0
         @Namespace private var composerNamespace
 
@@ -28,12 +29,12 @@ extension AIInsights {
 
 
         var body: some View {
-            VStack(spacing: 0) {
+            ZStack(alignment: .bottom) {
                 contentArea
                 foodInputBar
             }
             .background(appState.trioBackgroundColor(for: colorScheme))
-            .aiInsightsKeyboardAdaptive(bottomSpacing: isComposerExpanded ? 12 : 0)
+            .aiInsightsKeyboardAdaptive(bottomSpacing: isComposerExpanded ? 16 : 0)
             .navigationTitle(currentNavTitle)
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(state.currentResult != nil)
@@ -976,6 +977,10 @@ extension AIInsights {
                             ))
                             .zIndex(1)
                     } else {
+                        if let result = state.currentResult {
+                            compactContextBanner(result)
+                                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
                         if !state.capturedImages.isEmpty {
                             attachedImagesStrip
                                 .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -986,7 +991,7 @@ extension AIInsights {
                 .padding(.top, isComposerExpanded ? 0 : 8)
                 .padding(.bottom, isComposerExpanded ? 0 : 8)
             }
-            .background(isComposerExpanded ? Color.clear : (colorScheme == .dark ? Color.bgDarkBlue : Color.white))
+            .background(isComposerExpanded ? Color.clear : (colorScheme == .dark ? Color.bgDarkBlue.opacity(0.96) : Color.white.opacity(0.96)))
             .animation(.spring(response: 0.45, dampingFraction: 0.72), value: state.currentResult?.id)
             .animation(.interactiveSpring(response: 0.42, dampingFraction: 0.88, blendDuration: 0.08), value: isComposerExpanded)
         }
@@ -1036,6 +1041,30 @@ extension AIInsights {
             state.currentResult != nil
                 ? String(localized: "Search ingredient...", comment: "FoodFinder ingredient search placeholder")
                 : String(localized: "Describe your meal...", comment: "FoodFinder input placeholder")
+        }
+
+        private func compactContextBanner(_ result: FoodAnalysisResult) -> some View {
+            HStack(spacing: 6) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.caption.bold())
+                Text(
+                    String(
+                        format: String(localized: "Adding to \"%@\"", comment: "FoodFinder add ingredient context banner"),
+                        mealTitle(for: result)
+                    )
+                )
+                .font(.caption.bold())
+                .lineLimit(1)
+                Spacer()
+            }
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                Capsule()
+                    .fill(Color.accentColor.opacity(colorScheme == .dark ? 0.18 : 0.12))
+            )
+            .padding(.horizontal, 12)
         }
 
         private var compactInputMeasurementLayer: some View {
@@ -1111,10 +1140,7 @@ extension AIInsights {
 
                 HStack(spacing: 10) {
                     Button {
-                        isTextFieldFocused = false
-                        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
-                            isComposerExpanded = false
-                        }
+                        collapseComposer(keepKeyboard: true)
                     } label: {
                         Image(systemName: "chevron.down")
                             .frame(width: 38, height: 38)
@@ -1181,25 +1207,46 @@ extension AIInsights {
         }
 
         private func expandComposer(keepKeyboard: Bool) {
+            composerFocusRequest += 1
+            let request = composerFocusRequest
             if keepKeyboard {
                 isTextFieldFocused = true
             }
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
+            withAnimation(.interactiveSpring(response: 0.42, dampingFraction: 0.88, blendDuration: 0.08)) {
                 isComposerExpanded = true
             }
             if keepKeyboard {
-                refocusComposerInput()
+                refocusComposerInput(request: request)
             }
         }
 
-        private func refocusComposerInput() {
+        private func collapseComposer(keepKeyboard: Bool) {
+            composerFocusRequest += 1
+            let request = composerFocusRequest
+            if !keepKeyboard {
+                isTextFieldFocused = false
+            }
+            withAnimation(.interactiveSpring(response: 0.42, dampingFraction: 0.9, blendDuration: 0.08)) {
+                isComposerExpanded = false
+            }
+            if keepKeyboard {
+                isTextFieldFocused = true
+                DispatchQueue.main.async {
+                    guard composerFocusRequest == request, !isComposerExpanded else { return }
+                    isTextFieldFocused = true
+                }
+            }
+        }
+
+        private func refocusComposerInput(request: Int? = nil) {
+            let request = request ?? composerFocusRequest
             isTextFieldFocused = true
             DispatchQueue.main.async {
-                guard isComposerExpanded else { return }
+                guard isComposerExpanded, composerFocusRequest == request else { return }
                 isTextFieldFocused = true
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                guard isComposerExpanded else { return }
+                guard isComposerExpanded, composerFocusRequest == request else { return }
                 isTextFieldFocused = true
             }
         }
@@ -1224,10 +1271,7 @@ extension AIInsights {
                 .onEnded { value in
                     let shouldCollapse = value.translation.height > 64 || value.predictedEndTranslation.height > 120
                     guard shouldCollapse else { return }
-                    isTextFieldFocused = false
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.88)) {
-                        isComposerExpanded = false
-                    }
+                    collapseComposer(keepKeyboard: false)
                 }
         }
 
@@ -1413,10 +1457,7 @@ extension AIInsights {
         }
 
         private func submitFoodFinderInput() {
-            isTextFieldFocused = false
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
-                isComposerExpanded = false
-            }
+            collapseComposer(keepKeyboard: false)
             Task {
                 if state.currentResult != nil {
                     await state.addIngredientFromCurrentInput()
