@@ -15,6 +15,7 @@ extension AIInsights {
         @State private var isComposerExpanded: Bool = false
         @State private var isEditingTotals = false
         @State private var editingFoodItem: FoodItem?
+        @State private var selectedSourceItem: FoodItem?
         @State private var compactInputMeasuredHeight: CGFloat = 0
         @State private var compactInputSingleLineHeight: CGFloat = 0
         @GestureState private var composerDragOffset: CGFloat = 0
@@ -32,7 +33,7 @@ extension AIInsights {
                 foodInputBar
             }
             .background(appState.trioBackgroundColor(for: colorScheme))
-            .aiInsightsKeyboardAdaptive(bottomSpacing: isComposerExpanded ? 8 : 0)
+            .aiInsightsKeyboardAdaptive(bottomSpacing: 0)
             .navigationTitle(currentNavTitle)
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(state.currentResult != nil)
@@ -118,6 +119,9 @@ extension AIInsights {
                     editingFoodItem = nil
                 }
             }
+            .sheet(item: $selectedSourceItem) { item in
+                FoodSourceDetailSheet(item: item)
+            }
         }
 
         // MARK: - Content area + transitions
@@ -132,7 +136,7 @@ extension AIInsights {
         @ViewBuilder
         private var contentArea: some View {
             ZStack {
-                if let result = state.currentResult {
+                if let result = state.currentResult, !isComposerExpanded {
                     mealDetailScreen(for: result)
                         .transition(.asymmetric(
                             insertion: .move(edge: .trailing).combined(with: .opacity),
@@ -584,6 +588,8 @@ extension AIInsights {
 
                     Spacer()
 
+                    sourceBadge(for: item)
+
                     portionControl(for: item)
                 }
 
@@ -621,6 +627,44 @@ extension AIInsights {
                 }
             }
             .padding(.vertical, 6)
+        }
+
+        @ViewBuilder
+        private func sourceBadge(for item: FoodItem) -> some View {
+            Button {
+                selectedSourceItem = item
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: item.source.systemImage)
+                        .font(.caption2)
+                    Text(item.source.shortTitle)
+                        .font(.caption2.weight(.semibold))
+                    if item.sourceVerified {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 8, weight: .bold))
+                    }
+                }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule()
+                        .fill(sourceTint(for: item).opacity(colorScheme == .dark ? 0.28 : 0.14))
+                )
+                .foregroundStyle(sourceTint(for: item))
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(item.source.localizedTitle)
+        }
+
+        private func sourceTint(for item: FoodItem) -> Color {
+            switch item.source {
+            case .aiEstimate:
+                return .orange
+            case .openFoodFacts:
+                return item.sourceVerified ? .green : .secondary
+            case .usda:
+                return .blue
+            }
         }
 
         /// Two-line editable ingredient stat: value (TextField) above a label.
@@ -967,8 +1011,8 @@ extension AIInsights {
                         compactFoodInputRow
                     }
                 }
-                .padding(.top, 8)
-                .padding(.bottom, isComposerExpanded ? 1 : 8)
+                .padding(.top, isComposerExpanded ? 0 : 8)
+                .padding(.bottom, isComposerExpanded ? 0 : 8)
             }
             .background(isComposerExpanded ? Color.clear : (colorScheme == .dark ? Color.bgDarkBlue : Color.white))
             .animation(.spring(response: 0.45, dampingFraction: 0.72), value: state.currentResult?.id)
@@ -1072,14 +1116,16 @@ extension AIInsights {
             let needsAnotherLine = measuredHeight > singleLineHeight + 6 || state.foodDescription.contains("\n")
             guard needsAnotherLine else { return }
 
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
-                isComposerExpanded = true
-            }
+            expandComposer(keepKeyboard: true)
         }
 
         private var expandedFoodComposer: some View {
             VStack(spacing: 12) {
                 composerDragHandle
+
+                if let result = state.currentResult {
+                    expandedContextBanner(result)
+                }
 
                 composerActionGrid
 
@@ -1122,13 +1168,65 @@ extension AIInsights {
             }
             .padding(12)
             .background(
-                RoundedRectangle(cornerRadius: 24)
+                FoodFinderComposerBackground(cornerRadius: 24)
                     .fill(colorScheme == .dark ? Color.bgDarkBlue : Color.white)
                     .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.12), radius: 18, y: 8)
             )
-            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity)
             .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.9), value: composerDragOffset)
             .onAppear {
+                refocusComposerInput()
+            }
+            .onChange(of: isComposerExpanded) {
+                if isComposerExpanded {
+                    refocusComposerInput()
+                }
+            }
+        }
+
+        private func expandedContextBanner(_ result: FoodAnalysisResult) -> some View {
+            HStack(spacing: 6) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.caption.bold())
+                Text(
+                    String(
+                        format: String(localized: "Adding to \"%@\"", comment: "FoodFinder add ingredient context banner"),
+                        mealTitle(for: result)
+                    )
+                )
+                .font(.caption.bold())
+                .lineLimit(1)
+                Spacer()
+            }
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                Capsule()
+                    .fill(Color.accentColor.opacity(colorScheme == .dark ? 0.18 : 0.12))
+            )
+        }
+
+        private func expandComposer(keepKeyboard: Bool) {
+            if keepKeyboard {
+                isTextFieldFocused = true
+            }
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
+                isComposerExpanded = true
+            }
+            if keepKeyboard {
+                refocusComposerInput()
+            }
+        }
+
+        private func refocusComposerInput() {
+            isTextFieldFocused = true
+            DispatchQueue.main.async {
+                guard isComposerExpanded else { return }
+                isTextFieldFocused = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                guard isComposerExpanded else { return }
                 isTextFieldFocused = true
             }
         }
@@ -1141,7 +1239,7 @@ extension AIInsights {
                 .padding(.bottom, 2)
                 .frame(maxWidth: .infinity)
                 .contentShape(Rectangle())
-                .gesture(composerDismissDragGesture)
+                .highPriorityGesture(composerDismissDragGesture)
                 .accessibilityLabel(String(localized: "Drag down to collapse", comment: "FoodFinder composer drag handle accessibility label"))
         }
 
@@ -1161,7 +1259,7 @@ extension AIInsights {
         }
 
         private var composerActionGrid: some View {
-            HStack(spacing: 8) {
+            HStack(spacing: 18) {
                 composerActionButton(
                     systemImage: "camera.fill",
                     title: String(localized: "Camera", comment: "Composer camera button"),
@@ -1204,6 +1302,7 @@ extension AIInsights {
                 }
                 .disabled(state.isAnalyzing)
             }
+            .frame(maxWidth: .infinity)
         }
 
         private var expandedTextEditor: some View {
@@ -1237,35 +1336,19 @@ extension AIInsights {
 
         private var expandComposerButton: some View {
             Button {
-                isTextFieldFocused = true
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
-                    isComposerExpanded = true
-                }
+                expandComposer(keepKeyboard: true)
             } label: {
-                ZStack(alignment: .leading) {
-                    HStack(spacing: -10) {
-                        peekingComposerIcon("camera.fill", matchedID: "composer-camera")
-                        peekingComposerIcon("photo.on.rectangle", matchedID: "composer-library")
-                        peekingComposerIcon("barcode.viewfinder", matchedID: "composer-barcode")
-                        peekingComposerIcon(state.isDictating ? "mic.fill" : "mic", matchedID: "composer-mic")
-                    }
-                    .offset(x: 28)
-                    .opacity(0.55)
-
-                    Image(systemName: "square.stack.3d.up.fill")
-                        .font(.system(size: 17, weight: .semibold))
-                        .frame(width: 42, height: 42)
-                        .background(
-                            Circle()
-                                .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray5))
-                        )
-                        .overlay(
-                            Circle()
-                                .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
-                        )
-                        .zIndex(1)
-                }
-                .frame(width: 50, height: 44, alignment: .leading)
+                Image(systemName: "plus")
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 42, height: 42)
+                    .background(
+                        Circle()
+                            .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray5))
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
+                    )
             }
             .buttonStyle(.plain)
             .accessibilityLabel(String(localized: "Open FoodFinder tools", comment: "Expand FoodFinder tools button"))
@@ -1291,8 +1374,8 @@ extension AIInsights {
             Button(action: action) {
                 VStack(spacing: 5) {
                     Image(systemName: systemImage)
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 34, height: 34)
+                        .font(.system(size: 20, weight: .semibold))
+                        .frame(width: 48, height: 48)
                         .background(
                             Circle()
                                 .fill((tint ?? Color.accentColor).opacity(colorScheme == .dark ? 0.25 : 0.14))
@@ -1306,12 +1389,8 @@ extension AIInsights {
                         .minimumScaleFactor(0.8)
                         .foregroundStyle(colorScheme == .dark ? .white : .primary)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.7) : Color(.systemGray6))
-                )
+                .frame(minWidth: 58)
+                .padding(.vertical, 4)
             }
             .buttonStyle(.plain)
         }
@@ -1431,7 +1510,116 @@ extension AIInsights {
 }
 
 
+private struct FoodFinderComposerBackground: Shape {
+    var cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let radius = min(cornerRadius, rect.width / 2, rect.height / 2)
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + radius, y: rect.minY),
+            control: CGPoint(x: rect.minX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
+            control: CGPoint(x: rect.maxX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
 // MARK: - Flow Layout (for example food chips)
+
+private struct FoodSourceDetailSheet: View {
+    let item: AIInsights.FoodItem
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    LabeledContent(String(localized: "Displayed item", comment: "FoodFinder source detail")) {
+                        Text(item.name)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    if let sourceName = item.sourceName {
+                        LabeledContent(String(localized: "Source match", comment: "FoodFinder source detail")) {
+                            Text(sourceName)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+                    if let brand = item.sourceBrand {
+                        LabeledContent(String(localized: "Brand", comment: "FoodFinder source detail"), value: brand)
+                    }
+                    LabeledContent(String(localized: "Source", comment: "FoodFinder source detail"), value: item.source.localizedTitle)
+                    LabeledContent(String(localized: "Confidence", comment: "FoodFinder source detail")) {
+                        Text(sourceConfidenceText)
+                    }
+                }
+
+                Section(String(localized: "Nutrition", comment: "FoodFinder source nutrition section")) {
+                    LabeledContent(String(localized: "Carbs", comment: "Carbs macro"), value: "\(String(format: "%.0f", item.adjustedCarbs)) g")
+                    LabeledContent(String(localized: "Fat", comment: "Fat macro"), value: "\(String(format: "%.0f", item.adjustedFat)) g")
+                    LabeledContent(String(localized: "Protein", comment: "Protein macro"), value: "\(String(format: "%.0f", item.adjustedProtein)) g")
+                    LabeledContent(String(localized: "Fiber", comment: "Fiber macro"), value: "\(String(format: "%.0f", item.adjustedFiber)) g")
+                    LabeledContent(String(localized: "Calories", comment: "Calories label"), value: "\(String(format: "%.0f", item.adjustedCalories)) kcal")
+                }
+
+                if let url = item.sourceURL {
+                    Section {
+                        Button {
+                            openURL(url)
+                        } label: {
+                            Label(String(localized: "Open source", comment: "Open food source button"), systemImage: "safari")
+                        }
+                    }
+                }
+
+                if !item.alternateMatches.isEmpty {
+                    Section(String(localized: "Other matches", comment: "FoodFinder alternate matches section")) {
+                        ForEach(item.alternateMatches.prefix(5)) { match in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(match.name)
+                                    .font(.subheadline.weight(.semibold))
+                                Text(match.brand ?? match.sourceID.localizedTitle)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("\(String(format: "%.0f", match.carbs)) g \(String(localized: "carbs", comment: "Carbs lowercase")) - \(match.portion)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(String(localized: "Food source", comment: "FoodFinder source detail title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(String(localized: "Done", comment: "Done button")) {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private var sourceConfidenceText: String {
+        guard let score = item.sourceScore else {
+            return item.sourceVerified
+                ? String(localized: "Verified", comment: "FoodFinder verified source")
+                : String(localized: "Estimated", comment: "FoodFinder estimated source")
+        }
+        return "\(String(format: "%.0f", score * 100))%"
+    }
+}
 
 private struct FoodItemEditSheet: View {
     let item: AIInsights.FoodItem
@@ -1510,7 +1698,15 @@ private struct FoodItemEditSheet: View {
             protein: max(0, decimalValue(protein)) / multiplier,
             fiber: max(0, decimalValue(fiber)) / multiplier,
             calories: max(0, decimalValue(calories)) / multiplier,
-            portionMultiplier: item.portionMultiplier
+            portionMultiplier: item.portionMultiplier,
+            source: item.source,
+            sourceURL: item.sourceURL,
+            sourceVerified: item.sourceVerified,
+            sourceName: item.sourceName,
+            sourceBrand: item.sourceBrand,
+            sourceImageURL: item.sourceImageURL,
+            sourceScore: item.sourceScore,
+            alternateMatches: item.alternateMatches
         )
     }
 

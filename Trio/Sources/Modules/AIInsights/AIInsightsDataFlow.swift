@@ -3,6 +3,78 @@ import Foundation
 enum AIInsights {
     static let defaultOpenFoodFactsBaseURL = "https://world.openfoodfacts.org/api/v2"
 
+    enum FoodFinderLookupMode: String, CaseIterable, Identifiable, Codable, JSON {
+        case aiEstimateOnly
+        case verifiedAgent
+
+        var id: String { rawValue }
+
+        var localizedTitle: String {
+            switch self {
+            case .aiEstimateOnly:
+                return String(localized: "AI estimate only", comment: "FoodFinder lookup mode")
+            case .verifiedAgent:
+                return String(localized: "Verified lookup agent", comment: "FoodFinder lookup mode")
+            }
+        }
+    }
+
+    enum FoodSourceID: String, CaseIterable, Identifiable, Codable, JSON {
+        case aiEstimate
+        case openFoodFacts
+        case usda
+
+        var id: String { rawValue }
+
+        var shortTitle: String {
+            switch self {
+            case .aiEstimate: return String(localized: "AI", comment: "FoodFinder AI estimate source")
+            case .openFoodFacts: return String(localized: "OFF", comment: "OpenFoodFacts short source")
+            case .usda: return String(localized: "USDA", comment: "USDA short source")
+            }
+        }
+
+        var localizedTitle: String {
+            switch self {
+            case .aiEstimate:
+                return String(localized: "AI estimate", comment: "FoodFinder AI estimate source")
+            case .openFoodFacts:
+                return String(localized: "OpenFoodFacts", comment: "OpenFoodFacts source")
+            case .usda:
+                return String(localized: "USDA FoodData Central", comment: "USDA FoodData Central source")
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .aiEstimate: return "sparkles"
+            case .openFoodFacts: return "checkmark.seal.fill"
+            case .usda: return "building.columns.fill"
+            }
+        }
+    }
+
+    struct FoodLookupResult: Identifiable, Codable, Equatable {
+        var id: UUID = UUID()
+        var sourceID: FoodSourceID
+        var name: String
+        var brand: String?
+        var portion: String
+        var portionGrams: Double?
+        var carbs: Double
+        var fat: Double
+        var protein: Double
+        var fiber: Double
+        var calories: Double
+        var sourceURL: URL?
+        var verifiedScore: Double
+        var imageURL: URL?
+
+        var sourceVerified: Bool {
+            verifiedScore >= 0.6 && sourceID != .aiEstimate
+        }
+    }
+
     static let defaultSystemPrompt = """
     Analyze glucose and treatment data for a person with Type 1 Diabetes using Trio/OpenAPS.
     Answer naturally in the user's language, cite only provided numbers, and avoid any fixed Observation/Evidence template.
