@@ -20,8 +20,6 @@ extension AIInsights {
         @Environment(AppState.self) private var appState
         @FocusState private var textFocused: Bool
 
-        private static let imageCap = 6
-
         var body: some View {
             NavigationStack {
                 VStack(spacing: 12) {
@@ -59,7 +57,7 @@ extension AIInsights {
                         }
                     }
                     .padding(.horizontal, 4)
-                    .disabled(state.capturedImages.count >= Self.imageCap && false) // capacity guard handled per button
+                    .disabled(false) // capacity guard handled per button
 
                     // Text editor
                     ZStack(alignment: .topLeading) {
@@ -151,7 +149,7 @@ extension AIInsights {
                 Text(String(localized: "No photos attached", comment: "Composer photos empty state"))
                     .font(.caption)
                     .foregroundColor(.secondary)
-                Text(String(format: String(localized: "Add up to %d photos of the same meal", comment: "Composer photos empty state hint"), Self.imageCap))
+                Text(String(format: String(localized: "Add up to %d photos of the same meal", comment: "Composer photos empty state hint"), state.maxFoodFinderImages))
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
@@ -227,7 +225,7 @@ extension AIInsights {
                         .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.7) : Color(.systemGray6))
                 )
             }
-            .disabled(state.capturedImages.count >= Self.imageCap && (icon == "camera.fill" || icon == "photo.on.rectangle"))
+            .disabled(state.capturedImages.count >= state.maxFoodFinderImages && (icon == "camera.fill" || icon == "photo.on.rectangle"))
         }
     }
 }

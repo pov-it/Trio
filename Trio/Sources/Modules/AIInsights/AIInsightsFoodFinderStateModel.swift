@@ -160,14 +160,24 @@ extension AIInsights {
         var providerType: AIProvider = .google
         var model: String = AIProvider.google.defaultModel
         var baseURL: String = AIProvider.google.defaultEndpoint
+        var aiDictationEnabled: Bool = false
+        var aiDictationUsesSeparateProvider: Bool = false
+        var aiDictationProviderType: AIProvider = .google
+        var aiDictationModel: String = AIProvider.google.defaultDictationModel
+        var aiDictationBaseURL: String = AIProvider.google.defaultEndpoint
+        var aiDictationAPIKey: String = ""
         var aiEnabled: Bool = false
         var openFoodFactsBaseURL: String = AIInsights.defaultOpenFoodFactsBaseURL
+        var maxFoodFinderImages: Int { max(1, providerType.foodFinderImageLimit) }
 
         @ObservationIgnored private let speechRecognizer = SFSpeechRecognizer(locale: Locale.current)
         @ObservationIgnored private let audioEngine = AVAudioEngine()
         @ObservationIgnored private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
         @ObservationIgnored private var recognitionTask: SFSpeechRecognitionTask?
         @ObservationIgnored private var hasAudioTap = false
+        @ObservationIgnored private var aiAudioRecorder: AVAudioRecorder?
+        @ObservationIgnored private var aiDictationAudioURL: URL?
+        @ObservationIgnored private var isUsingAIDictation = false
 
         private struct ParsedFoodAnalysis {
             var items: [FoodItem]
@@ -180,10 +190,18 @@ extension AIInsights {
             if let savedKey = provider.keychain.getValue(String.self, forKey: "ai_insights_api_key") {
                 self.apiKey = savedKey
             }
+            if let savedDictationKey = provider.keychain.getValue(String.self, forKey: "ai_insights_dictation_api_key") {
+                aiDictationAPIKey = savedDictationKey
+            }
 
             providerType = provider.settings.aiProvider
             model = provider.settings.aiModel
             baseURL = provider.settings.aiBaseURL
+            aiDictationEnabled = provider.settings.aiDictationEnabled
+            aiDictationUsesSeparateProvider = provider.settings.aiDictationUsesSeparateProvider
+            aiDictationProviderType = provider.settings.aiDictationProvider
+            aiDictationModel = provider.settings.aiDictationModel
+            aiDictationBaseURL = provider.settings.aiDictationBaseURL
             aiEnabled = provider.settings.aiEnabled
             openFoodFactsBaseURL = provider.settings.openFoodFactsBaseURL
 
@@ -397,12 +415,17 @@ extension AIInsights {
             }
         }
 
-        /// Append a new image to the composer. Cap at 6 images per analysis
-        /// to keep token cost predictable and avoid timing out very large
-        /// multi-modal prompts.
+        /// Append a new image to the composer. The cap follows the active
+        /// provider's multimodal limits.
         func attachImage(_ imageData: Data) {
-            guard capturedImages.count < 6 else { return }
+            guard capturedImages.count < maxFoodFinderImages else { return }
             capturedImages.append(imageData)
+        }
+
+        func attachImages(_ imageData: [Data]) {
+            let remaining = max(0, maxFoodFinderImages - capturedImages.count)
+            guard remaining > 0 else { return }
+            capturedImages.append(contentsOf: imageData.prefix(remaining))
         }
 
         /// Remove an attached image by index (used by the per-thumb delete
@@ -1029,7 +1052,8 @@ extension AIInsights {
                 if shouldRetrySuspiciousResult(parsed, description: validationDescription, hasImage: true) {
                     let retryResponse = try await requestFoodAnalysis(
                         prompt: "Re-evaluate this photo and user context carefully. The previous estimate returned zero or near-zero carbs for a likely carb-containing meal. Return the same strict JSON object schema and break the meal into ingredients. User context: \(trimmedDescription)",
-                        imageData: images.first
+                        imageData: images.first,
+                        additionalImageData: Array(images.dropFirst())
                     )
                     parsed = parseFoodAnalysis(from: retryResponse)
                 }
@@ -1161,6 +1185,11 @@ extension AIInsights {
 
         @MainActor
         func stopDictation() {
+            if isUsingAIDictation {
+                stopAIDictationRecording()
+                return
+            }
+
             audioEngine.stop()
             recognitionRequest?.endAudio()
             recognitionTask?.cancel()
@@ -1175,6 +1204,15 @@ extension AIInsights {
 
         @MainActor
         private func startDictation() {
+            if aiDictationEnabled, !effectiveDictationAPIKey.isEmpty {
+                startAIDictationRecording()
+                return
+            }
+            startAppleDictation()
+        }
+
+        @MainActor
+        private func startAppleDictation() {
             SFSpeechRecognizer.requestAuthorization { [weak self] status in
                 Task { @MainActor in
                     guard let self else { return }
@@ -1225,9 +1263,160 @@ extension AIInsights {
             }
         }
 
+        @MainActor
+        private func startAIDictationRecording() {
+            AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
+                Task { @MainActor in
+                    guard let self else { return }
+                    guard granted else {
+                        self.errorMessage = String(localized: "Microphone permission is required for dictation.", comment: "Microphone permission error")
+                        return
+                    }
+                    self.beginAIDictationRecording()
+                }
+            }
+        }
+
+        @MainActor
+        private func beginAIDictationRecording() {
+            stopDictation()
+
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("foodfinder-dictation-\(UUID().uuidString).m4a")
+            let settings: [String: Any] = [
+                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+                AVSampleRateKey: 44_100,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+            ]
+
+            do {
+                let session = AVAudioSession.sharedInstance()
+                try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.duckOthers, .defaultToSpeaker])
+                try session.setActive(true, options: .notifyOthersOnDeactivation)
+                let recorder = try AVAudioRecorder(url: url, settings: settings)
+                recorder.prepareToRecord()
+                recorder.record()
+                aiAudioRecorder = recorder
+                aiDictationAudioURL = url
+                isUsingAIDictation = true
+                isDictating = true
+            } catch {
+                errorMessage = String(localized: "Could not start AI dictation: \(error.localizedDescription)", comment: "AI dictation start error")
+                startAppleDictation()
+            }
+        }
+
+        @MainActor
+        private func stopAIDictationRecording() {
+            aiAudioRecorder?.stop()
+            aiAudioRecorder = nil
+            isDictating = false
+            isUsingAIDictation = false
+            guard let url = aiDictationAudioURL else { return }
+            aiDictationAudioURL = nil
+
+            Task {
+                await transcribeAIDictationAudio(from: url)
+            }
+        }
+
+        @MainActor
+        private func transcribeAIDictationAudio(from url: URL) async {
+            defer { try? FileManager.default.removeItem(at: url) }
+
+            do {
+                let audioData = try Data(contentsOf: url)
+                let transcript = try await AIServiceAdapter.transcribeAudio(
+                    audioData: audioData,
+                    mimeType: "audio/mp4",
+                    provider: effectiveDictationProviderType,
+                    model: effectiveDictationModel,
+                    baseURL: effectiveDictationBaseURL,
+                    apiKey: effectiveDictationAPIKey,
+                    languageHint: Locale.preferredLanguages.first ?? Locale.current.identifier
+                )
+                appendDictationTranscript(transcript)
+            } catch {
+                do {
+                    let fallback = try await transcribeWithAppleSpeechFile(url)
+                    appendDictationTranscript(fallback)
+                } catch {
+                    errorMessage = String(localized: "Could not transcribe dictation: \(error.localizedDescription)", comment: "Dictation transcription error")
+                }
+            }
+        }
+
+        private var effectiveDictationProviderType: AIProvider {
+            aiDictationUsesSeparateProvider ? aiDictationProviderType : providerType
+        }
+
+        private var effectiveDictationModel: String {
+            let candidate = aiDictationModel.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !candidate.isEmpty { return candidate }
+            return effectiveDictationProviderType.defaultDictationModel
+        }
+
+        private var effectiveDictationBaseURL: String {
+            aiDictationUsesSeparateProvider ? aiDictationBaseURL : baseURL
+        }
+
+        private var effectiveDictationAPIKey: String {
+            guard aiDictationUsesSeparateProvider else { return apiKey }
+            let separateKey = aiDictationAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            return separateKey.isEmpty ? apiKey : separateKey
+        }
+
+        @MainActor
+        private func appendDictationTranscript(_ transcript: String) {
+            let cleaned = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleaned.isEmpty else { return }
+
+            let existing = foodDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            foodDescription = existing.isEmpty ? cleaned : "\(existing) \(cleaned)"
+        }
+
+        private func transcribeWithAppleSpeechFile(_ url: URL) async throws -> String {
+            try await requestAppleSpeechAuthorization()
+            return try await withCheckedThrowingContinuation { continuation in
+                guard let recognizer = speechRecognizer else {
+                    continuation.resume(throwing: AIServiceAdapter.AIError.parsingError("Speech recognizer is unavailable"))
+                    return
+                }
+                let request = SFSpeechURLRecognitionRequest(url: url)
+                request.shouldReportPartialResults = false
+                var didResume = false
+                recognizer.recognitionTask(with: request) { result, error in
+                    if let result, result.isFinal, !didResume {
+                        didResume = true
+                        continuation.resume(returning: result.bestTranscription.formattedString)
+                    } else if let error, !didResume {
+                        didResume = true
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+        }
+
+        private func requestAppleSpeechAuthorization() async throws {
+            try await withCheckedThrowingContinuation { continuation in
+                SFSpeechRecognizer.requestAuthorization { status in
+                    if status == .authorized {
+                        continuation.resume()
+                    } else {
+                        continuation.resume(throwing: AIServiceAdapter.AIError.parsingError("Speech recognition permission is required"))
+                    }
+                }
+            }
+        }
+
         // MARK: - Parsing Helpers
 
-        private func requestFoodAnalysis(prompt: String, imageData: Data?) async throws -> String {
+        private func requestFoodAnalysis(
+            prompt: String,
+            imageData: Data?,
+            additionalImageData: [Data] = []
+        ) async throws -> String {
             let request = AIServiceAdapter.AIRequest(
                 model: model,
                 messages: [
@@ -1239,6 +1428,7 @@ extension AIInsights {
                 topK: nil,
                 maxTokens: 2048,
                 imageData: imageData,
+                additionalImageData: additionalImageData,
                 responseFormat: foodFinderResponseFormat
             )
 

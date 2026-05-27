@@ -156,6 +156,171 @@ extension AIInsights {
             return true
         }
 
+        // MARK: - Audio Transcription
+
+        static func transcribeAudio(
+            audioData: Data,
+            mimeType: String,
+            provider: AIProvider,
+            model: String,
+            baseURL: String,
+            apiKey: String,
+            languageHint: String
+        ) async throws -> String {
+            guard !apiKey.isEmpty else { throw AIError.noAPIKey }
+
+            switch provider {
+            case .google:
+                return try await transcribeGeminiAudio(
+                    audioData: audioData,
+                    mimeType: mimeType,
+                    model: model,
+                    baseURL: baseURL,
+                    apiKey: apiKey,
+                    languageHint: languageHint
+                )
+            case .openai, .custom:
+                return try await transcribeOpenAICompatibleAudio(
+                    audioData: audioData,
+                    mimeType: mimeType,
+                    model: model,
+                    baseURL: baseURL,
+                    apiKey: apiKey,
+                    languageHint: languageHint
+                )
+            case .anthropic:
+                throw AIError.parsingError("Anthropic does not support audio transcription in this FoodFinder flow.")
+            }
+        }
+
+        private static func transcribeGeminiAudio(
+            audioData: Data,
+            mimeType: String,
+            model: String,
+            baseURL: String,
+            apiKey: String,
+            languageHint: String
+        ) async throws -> String {
+            let urlString: String
+            if baseURL.contains(":generateContent") || baseURL.contains(":streamGenerateContent") {
+                urlString = "\(baseURL)?key=\(apiKey)"
+            } else {
+                let trimmed = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                urlString = "\(trimmed)/\(model):generateContent?key=\(apiKey)"
+            }
+
+            guard let url = URL(string: urlString) else { throw AIError.invalidURL }
+
+            var urlRequest = URLRequest(url: url)
+            urlRequest.httpMethod = "POST"
+            urlRequest.addValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            let prompt = """
+            Transcribe this short spoken FoodFinder meal description.
+            Language hint: \(languageHint).
+            Return only the transcript. Do not translate, summarize, add punctuation notes, or wrap it in JSON.
+            """
+            let body: [String: Any] = [
+                "contents": [[
+                    "role": "user",
+                    "parts": [
+                        [
+                            "inline_data": [
+                                "mime_type": mimeType,
+                                "data": audioData.base64EncodedString()
+                            ]
+                        ],
+                        ["text": prompt]
+                    ]
+                ]],
+                "generationConfig": [
+                    "temperature": 0,
+                    "maxOutputTokens": 512
+                ]
+            ]
+            urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+            let (data, response) = try await performRequest(urlRequest)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw AIError.parsingError("Invalid response type")
+            }
+            guard httpResponse.statusCode == 200 else {
+                let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+                throw AIError.httpError(statusCode: httpResponse.statusCode, body: errorBody)
+            }
+
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let candidates = json["candidates"] as? [[String: Any]],
+                  let firstCandidate = candidates.first,
+                  let content = firstCandidate["content"] as? [String: Any],
+                  let parts = content["parts"] as? [[String: Any]]
+            else {
+                throw AIError.parsingError("Could not parse Gemini transcription response")
+            }
+
+            let transcript = parts
+                .compactMap { $0["text"] as? String }
+                .joined(separator: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !transcript.isEmpty else { throw AIError.noContent }
+            return transcript
+        }
+
+        private static func transcribeOpenAICompatibleAudio(
+            audioData: Data,
+            mimeType: String,
+            model: String,
+            baseURL: String,
+            apiKey: String,
+            languageHint: String
+        ) async throws -> String {
+            guard let url = openAITranscriptionURL(from: baseURL) else { throw AIError.invalidURL }
+
+            let boundary = "Boundary-\(UUID().uuidString)"
+            var urlRequest = URLRequest(url: url)
+            urlRequest.httpMethod = "POST"
+            urlRequest.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            urlRequest.addValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+            urlRequest.httpBody = multipartBody(
+                boundary: boundary,
+                fields: [
+                    "model": model,
+                    "response_format": "json",
+                    "prompt": "Transcribe this FoodFinder meal description in the same language the user spoke. Language hint: \(languageHint)."
+                ],
+                fileField: "file",
+                fileName: "foodfinder-dictation.m4a",
+                mimeType: mimeType,
+                fileData: audioData
+            )
+
+            let (data, response) = try await performRequest(urlRequest)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw AIError.parsingError("Invalid response type")
+            }
+            guard httpResponse.statusCode == 200 else {
+                let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+                throw AIError.httpError(statusCode: httpResponse.statusCode, body: errorBody)
+            }
+
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let text = json["text"] as? String
+            {
+                let transcript = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !transcript.isEmpty else { throw AIError.noContent }
+                return transcript
+            }
+
+            if let text = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                !text.isEmpty
+            {
+                return text
+            }
+
+            throw AIError.parsingError("Could not parse transcription response")
+        }
+
         // MARK: - Google Gemini
 
         private static func sendGemini(
@@ -480,12 +645,58 @@ extension AIInsights {
 
         // MARK: - Shared Network Helper
 
+        private static func openAITranscriptionURL(from baseURL: String) -> URL? {
+            var trimmed = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            if trimmed.hasSuffix("/chat/completions") {
+                trimmed = String(trimmed.dropLast("/chat/completions".count)) + "/audio/transcriptions"
+            } else if trimmed.hasSuffix("/responses") {
+                trimmed = String(trimmed.dropLast("/responses".count)) + "/audio/transcriptions"
+            } else if !trimmed.hasSuffix("/audio/transcriptions") {
+                trimmed += "/audio/transcriptions"
+            }
+            return URL(string: trimmed)
+        }
+
+        private static func multipartBody(
+            boundary: String,
+            fields: [String: String],
+            fileField: String,
+            fileName: String,
+            mimeType: String,
+            fileData: Data
+        ) -> Data {
+            var body = Data()
+            let lineBreak = "\r\n"
+
+            for (name, value) in fields {
+                body.appendString("--\(boundary)\(lineBreak)")
+                body.appendString("Content-Disposition: form-data; name=\"\(name)\"\(lineBreak)\(lineBreak)")
+                body.appendString("\(value)\(lineBreak)")
+            }
+
+            body.appendString("--\(boundary)\(lineBreak)")
+            body.appendString("Content-Disposition: form-data; name=\"\(fileField)\"; filename=\"\(fileName)\"\(lineBreak)")
+            body.appendString("Content-Type: \(mimeType)\(lineBreak)\(lineBreak)")
+            body.append(fileData)
+            body.appendString(lineBreak)
+            body.appendString("--\(boundary)--\(lineBreak)")
+            return body
+        }
+
         private static func performRequest(_ urlRequest: URLRequest) async throws -> (Data, URLResponse) {
             do {
                 return try await URLSession.shared.data(for: urlRequest)
             } catch {
                 throw AIError.networkError(error)
             }
+        }
+    }
+}
+
+private extension Data {
+    mutating func appendString(_ string: String) {
+        if let data = string.data(using: .utf8) {
+            append(data)
         }
     }
 }
