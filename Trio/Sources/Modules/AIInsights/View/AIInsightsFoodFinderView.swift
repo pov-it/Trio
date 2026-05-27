@@ -33,7 +33,7 @@ extension AIInsights {
                 foodInputBar
             }
             .background(appState.trioBackgroundColor(for: colorScheme))
-            .aiInsightsKeyboardAdaptive(bottomSpacing: 0)
+            .aiInsightsKeyboardAdaptive(bottomSpacing: isComposerExpanded ? 12 : 0)
             .navigationTitle(currentNavTitle)
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(state.currentResult != nil)
@@ -51,7 +51,7 @@ extension AIInsights {
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
-                            state.clearResult()
+                            state.clearResult(resetDraft: true)
                         } label: {
                             Text(String(localized: "New", comment: "New analysis button"))
                                 .font(.subheadline)
@@ -136,7 +136,7 @@ extension AIInsights {
         @ViewBuilder
         private var contentArea: some View {
             ZStack {
-                if let result = state.currentResult, !isComposerExpanded {
+                if let result = state.currentResult {
                     mealDetailScreen(for: result)
                         .transition(.asymmetric(
                             insertion: .move(edge: .trailing).combined(with: .opacity),
@@ -966,43 +966,15 @@ extension AIInsights {
 
         private var foodInputBar: some View {
             VStack(spacing: 0) {
-                // Context banner: shown when viewing a meal (all inputs add to that meal).
-                // Only this banner animates in — the rest of the bar stays visually stable.
-                if let result = state.currentResult {
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.caption.bold())
-                        Text(
-                            String(
-                                format: String(
-                                    localized: "Adding to \"%@\"",
-                                    comment: "FoodFinder add ingredient context banner"
-                                ),
-                                mealTitle(for: result)
-                            )
-                        )
-                        .font(.caption.bold())
-                        .lineLimit(1)
-                        Spacer()
-                    }
-                    .foregroundStyle(Color.accentColor)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .bottom).combined(with: .opacity).combined(with: .scale(scale: 0.85, anchor: .bottom)),
-                        removal: .move(edge: .bottom).combined(with: .opacity)
-                    ))
-                }
-
                 VStack(spacing: 8) {
                     if isComposerExpanded {
                         expandedFoodComposer
                             .offset(y: composerDragOffset)
                             .transition(.asymmetric(
-                                insertion: .move(edge: .bottom).combined(with: .opacity),
-                                removal: .move(edge: .bottom).combined(with: .opacity)
+                                insertion: .scale(scale: 0.94, anchor: .bottom).combined(with: .opacity),
+                                removal: .scale(scale: 0.98, anchor: .bottom).combined(with: .opacity)
                             ))
+                            .zIndex(1)
                     } else {
                         if !state.capturedImages.isEmpty {
                             attachedImagesStrip
@@ -1016,7 +988,7 @@ extension AIInsights {
             }
             .background(isComposerExpanded ? Color.clear : (colorScheme == .dark ? Color.bgDarkBlue : Color.white))
             .animation(.spring(response: 0.45, dampingFraction: 0.72), value: state.currentResult?.id)
-            .animation(.spring(response: 0.36, dampingFraction: 0.86), value: isComposerExpanded)
+            .animation(.interactiveSpring(response: 0.42, dampingFraction: 0.88, blendDuration: 0.08), value: isComposerExpanded)
         }
 
         private var compactFoodInputRow: some View {
@@ -1039,6 +1011,7 @@ extension AIInsights {
                     RoundedRectangle(cornerRadius: 20)
                         .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray6))
                 )
+                .matchedGeometryEffect(id: "composer-text", in: composerNamespace)
                 .overlay(alignment: .topLeading) {
                     compactInputMeasurementLayer
                 }
@@ -1291,16 +1264,19 @@ extension AIInsights {
                 .disabled(state.isAnalyzing)
 
                 composerActionButton(
-                    systemImage: state.isDictating ? "mic.fill" : "mic",
-                    title: state.isDictating
+                    systemImage: state.isDictating || state.isTranscribingDictation ? "mic.fill" : "mic",
+                    title: state.isTranscribingDictation
+                        ? String(localized: "Loading", comment: "Composer dictation loading")
+                        : state.isDictating
                         ? String(localized: "Stop", comment: "Composer dictation stop")
                         : String(localized: "Dictate", comment: "Composer dictation start"),
                     matchedID: "composer-mic",
-                    tint: state.isDictating ? .red : nil
+                    tint: state.isDictating ? .red : nil,
+                    showsProgress: state.isTranscribingDictation
                 ) {
                     state.toggleDictation()
                 }
-                .disabled(state.isAnalyzing)
+                .disabled(state.isAnalyzing || state.isTranscribingDictation)
             }
             .frame(maxWidth: .infinity)
         }
@@ -1369,19 +1345,28 @@ extension AIInsights {
             title: String,
             matchedID: String,
             tint: Color? = nil,
+            showsProgress: Bool = false,
             action: @escaping () -> Void
         ) -> some View {
             Button(action: action) {
                 VStack(spacing: 5) {
-                    Image(systemName: systemImage)
-                        .font(.system(size: 20, weight: .semibold))
-                        .frame(width: 48, height: 48)
-                        .background(
-                            Circle()
-                                .fill((tint ?? Color.accentColor).opacity(colorScheme == .dark ? 0.25 : 0.14))
-                        )
-                        .foregroundStyle(tint ?? Color.accentColor)
-                        .matchedGeometryEffect(id: matchedID, in: composerNamespace)
+                    ZStack {
+                        if showsProgress {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: tint ?? Color.accentColor))
+                                .scaleEffect(0.82)
+                        } else {
+                            Image(systemName: systemImage)
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(tint ?? Color.accentColor)
+                                .matchedGeometryEffect(id: matchedID, in: composerNamespace)
+                        }
+                    }
+                    .frame(width: 48, height: 48)
+                    .background(
+                        Circle()
+                            .fill((tint ?? Color.accentColor).opacity(colorScheme == .dark ? 0.25 : 0.14))
+                    )
 
                     Text(title)
                         .font(.caption2)

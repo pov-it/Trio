@@ -8,6 +8,7 @@ extension AIInsights {
 
         @Environment(\.colorScheme) var colorScheme
         @Environment(AppState.self) var appState
+        @State private var isEditingSystemPromptFullscreen = false
 
         var body: some View {
             Form {
@@ -295,7 +296,18 @@ extension AIInsights {
 
                 // MARK: - System Prompt
                 Section(
-                    header: Text("System Prompt", comment: "System prompt section header"),
+                    header: HStack {
+                        Text("System Prompt", comment: "System prompt section header")
+                        Spacer()
+                        Button {
+                            isEditingSystemPromptFullscreen = true
+                        } label: {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(String(localized: "Edit system prompt fullscreen", comment: "System prompt fullscreen button accessibility label"))
+                    },
                     footer: Text("The instructions given to the AI. Customize the analysis style and focus.", comment: "System prompt footer")
                 ) {
                     TextEditor(text: $state.systemPrompt)
@@ -311,6 +323,11 @@ extension AIInsights {
             .background(appState.trioBackgroundColor(for: colorScheme))
             .navigationTitle(String(localized: "AI Settings", comment: "AI settings nav title"))
             .navigationBarTitleDisplayMode(.inline)
+            .fullScreenCover(isPresented: $isEditingSystemPromptFullscreen) {
+                SystemPromptEditorSheet(systemPrompt: $state.systemPrompt) {
+                    state.saveSettings()
+                }
+            }
             .alert(
                 String(localized: "Connection Test", comment: "Test alert title"),
                 isPresented: $showTestResult
@@ -350,6 +367,48 @@ extension AIInsights {
                 testErrorMessage = error.localizedDescription
             }
             showTestResult = true
+        }
+    }
+}
+
+private struct SystemPromptEditorSheet: View {
+    @Binding var systemPrompt: String
+    let onSave: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        NavigationStack {
+            TextEditor(text: $systemPrompt)
+                .font(.system(.body, design: .monospaced))
+                .padding()
+                .scrollContentBackground(.hidden)
+                .background(Color(.systemGroupedBackground))
+                .focused($isFocused)
+                .navigationTitle(String(localized: "System Prompt", comment: "System prompt editor title"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(String(localized: "Close", comment: "Close button")) {
+                            onSave()
+                            dismiss()
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(String(localized: "Done", comment: "Done button")) {
+                            onSave()
+                            dismiss()
+                        }
+                        .bold()
+                    }
+                }
+                .onAppear {
+                    isFocused = true
+                }
+                .onChange(of: systemPrompt) {
+                    onSave()
+                }
         }
     }
 }

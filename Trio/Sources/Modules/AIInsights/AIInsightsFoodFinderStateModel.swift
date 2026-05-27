@@ -241,6 +241,7 @@ extension AIInsights {
             }
         }
         var isDictating: Bool = false
+        var isTranscribingDictation: Bool = false
 
         // Shared AI config
         var apiKey: String = ""
@@ -1244,11 +1245,13 @@ extension AIInsights {
             capturedImageData = nil
         }
 
-        func clearResult() {
+        func clearResult(resetDraft: Bool = false) {
             currentResult = nil
             errorMessage = nil
-            capturedImageData = nil
-            foodDescription = ""
+            if resetDraft {
+                capturedImageData = nil
+                foodDescription = ""
+            }
         }
 
         func sendToBolusCalculator(openBolusCalculator: Bool = true) {
@@ -1462,6 +1465,7 @@ extension AIInsights {
 
         @MainActor
         func toggleDictation() {
+            guard !isTranscribingDictation else { return }
             isDictating ? stopDictation() : startDictation()
         }
 
@@ -1603,6 +1607,7 @@ extension AIInsights {
             isUsingAIDictation = false
             guard let url = aiDictationAudioURL else { return }
             aiDictationAudioURL = nil
+            isTranscribingDictation = true
 
             Task {
                 await transcribeAIDictationAudio(from: url)
@@ -1611,7 +1616,10 @@ extension AIInsights {
 
         @MainActor
         private func transcribeAIDictationAudio(from url: URL) async {
-            defer { try? FileManager.default.removeItem(at: url) }
+            defer {
+                isTranscribingDictation = false
+                try? FileManager.default.removeItem(at: url)
+            }
 
             do {
                 let audioData = try Data(contentsOf: url)
