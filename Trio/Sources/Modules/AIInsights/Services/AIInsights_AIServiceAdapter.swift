@@ -15,8 +15,23 @@ extension AIInsights {
             let topP: Double?
             let topK: Int?
             let maxTokens: Int?
+            /// Single primary image (kept for backward compatibility with
+            /// existing call sites). When sending multiple images, populate
+            /// `additionalImageData` with the rest — the provider serializers
+            /// will attach `imageData` first, followed by all of
+            /// `additionalImageData`, to the final user message.
             var imageData: Data? = nil
+            var additionalImageData: [Data] = []
             var responseFormat: [String: Any]? = nil
+
+            /// All images this request carries, in order — convenience for the
+            /// provider serializers.
+            var allImages: [Data] {
+                var out: [Data] = []
+                if let imageData { out.append(imageData) }
+                out.append(contentsOf: additionalImageData)
+                return out
+            }
         }
 
         struct ChatMessagePayload {
@@ -168,20 +183,27 @@ extension AIInsights {
             // Build Gemini request body
             var contents: [[String: Any]] = []
             // Gemini uses "user" role for all messages; system prompt goes in systemInstruction
+            let userMessages = request.messages.filter { $0.role == .user }
+            let lastUserIndex = userMessages.indices.last
+            var userMessageCounter = -1
             for msg in request.messages {
                 if msg.role == .system { continue } // handled separately
                 let role = msg.role == .assistant ? "model" : "user"
                 var parts: [[String: Any]] = [["text": msg.content]]
 
-                // Attach image to the last user message if available
-                if msg.role == .user && request.imageData != nil {
-                    if let imgData = request.imageData {
-                        parts.insert([
-                            "inline_data": [
-                                "mime_type": "image/jpeg",
-                                "data": imgData.base64EncodedString()
-                            ]
-                        ], at: 0)
+                // Attach any images to the LAST user message so the model sees
+                // them in context of the most recent prompt.
+                if msg.role == .user {
+                    userMessageCounter += 1
+                    if userMessageCounter == lastUserIndex {
+                        for img in request.allImages {
+                            parts.insert([
+                                "inline_data": [
+                                    "mime_type": "image/jpeg",
+                                    "data": img.base64EncodedString()
+                                ]
+                            ], at: 0)
+                        }
                     }
                 }
 
@@ -270,20 +292,29 @@ extension AIInsights {
             urlRequest.addValue("application/json", forHTTPHeaderField: "Content-Type")
             urlRequest.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
+            // OpenAI-compatible providers expect images attached to the LAST
+            // user message. Find that index up front so we don't accidentally
+            // attach images to earlier user turns.
+            let userIndices: [Int] = request.messages.enumerated().compactMap {
+                $0.element.role == .user ? $0.offset : nil
+            }
+            let lastUserIndex = userIndices.last
+            let images = request.allImages
+
             var messagesPayload: [[String: Any]] = []
-            for msg in request.messages {
-                if msg.role == .user, let imgData = request.imageData {
-                    // Multimodal: send image + text as content array
-                    let contentParts: [[String: Any]] = [
+            for (idx, msg) in request.messages.enumerated() {
+                if msg.role == .user, idx == lastUserIndex, !images.isEmpty {
+                    // Multimodal: send images + text as a content array.
+                    var contentParts: [[String: Any]] = images.map { img in
                         [
                             "type": "image_url",
-                            "image_url": ["url": "data:image/jpeg;base64,\(imgData.base64EncodedString())"]
-                        ],
-                        [
-                            "type": "text",
-                            "text": msg.content
+                            "image_url": ["url": "data:image/jpeg;base64,\(img.base64EncodedString())"]
                         ]
-                    ]
+                    }
+                    contentParts.append([
+                        "type": "text",
+                        "text": msg.content
+                    ])
                     messagesPayload.append(["role": msg.role.rawValue, "content": contentParts] as [String: Any])
                 } else {
                     messagesPayload.append(["role": msg.role.rawValue, "content": msg.content])
@@ -360,23 +391,28 @@ extension AIInsights {
             let systemMessages = request.messages.filter { $0.role == .system }
             let chatMessages = request.messages.filter { $0.role != .system }
 
+            // Attach images to the LAST user message only — Anthropic counts
+            // each image block toward the prompt token cost.
+            let lastUserIdx = chatMessages.lastIndex(where: { $0.role == .user })
+            let images = request.allImages
+
             var messagesPayload: [[String: Any]] = []
-            for msg in chatMessages {
-                if msg.role == .user, let imgData = request.imageData {
-                    let contentBlocks: [[String: Any]] = [
+            for (idx, msg) in chatMessages.enumerated() {
+                if msg.role == .user, idx == lastUserIdx, !images.isEmpty {
+                    var contentBlocks: [[String: Any]] = images.map { img in
                         [
                             "type": "image",
                             "source": [
                                 "type": "base64",
                                 "media_type": "image/jpeg",
-                                "data": imgData.base64EncodedString()
+                                "data": img.base64EncodedString()
                             ]
-                        ],
-                        [
-                            "type": "text",
-                            "text": msg.content
                         ]
-                    ]
+                    }
+                    contentBlocks.append([
+                        "type": "text",
+                        "text": msg.content
+                    ])
                     messagesPayload.append(["role": msg.role.rawValue, "content": contentBlocks])
                 } else {
                     messagesPayload.append(["role": msg.role.rawValue, "content": msg.content])

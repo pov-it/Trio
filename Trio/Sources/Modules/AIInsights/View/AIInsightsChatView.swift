@@ -90,6 +90,7 @@ extension AIInsights {
                     inputBar
                 }
             }
+            .aiInsightsKeyboardAdaptive()
             .navigationTitle(String(localized: "AI Chat", comment: "Navigation title for AI chat"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
