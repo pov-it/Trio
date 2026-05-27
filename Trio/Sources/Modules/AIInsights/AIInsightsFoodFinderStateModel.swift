@@ -134,7 +134,23 @@ extension AIInsights {
         /// crop sheet while this is non-nil. Setting it nil dismisses the
         /// sheet (e.g. on Skip or Cancel).
         var pendingImageForCrop: Data?
-        var capturedImageData: Data?
+        /// All images the user has attached to the next analysis. Earlier
+        /// versions had a single `capturedImageData: Data?`; we keep the same
+        /// behavior when the array contains one item but allow multi-photo
+        /// composition for richer meal context.
+        var capturedImages: [Data] = []
+        /// Convenience accessor mirroring the old single-image API. Returns
+        /// the first image; setting nil clears the array.
+        var capturedImageData: Data? {
+            get { capturedImages.first }
+            set {
+                if let new = newValue {
+                    capturedImages = [new]
+                } else {
+                    capturedImages.removeAll()
+                }
+            }
+        }
         var isDictating: Bool = false
 
         // Shared AI config
@@ -357,15 +373,26 @@ extension AIInsights {
         @MainActor
         func analyzeCurrentInput() async {
             let description = foodDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let imageData = capturedImageData {
-                await analyzeImage(imageData, description: description)
+            if !capturedImages.isEmpty {
+                await analyzeImages(capturedImages, description: description)
             } else {
                 await analyzeFood(description: description)
             }
         }
 
+        /// Append a new image to the composer. Cap at 6 images per analysis
+        /// to keep token cost predictable and avoid timing out very large
+        /// multi-modal prompts.
         func attachImage(_ imageData: Data) {
-            capturedImageData = imageData
+            guard capturedImages.count < 6 else { return }
+            capturedImages.append(imageData)
+        }
+
+        /// Remove an attached image by index (used by the per-thumb delete
+        /// button in the composer).
+        func removeAttachedImage(at index: Int) {
+            guard capturedImages.indices.contains(index) else { return }
+            capturedImages.remove(at: index)
         }
 
         @MainActor
@@ -698,16 +725,22 @@ extension AIInsights {
         @MainActor
         func addIngredientFromCurrentInput() async {
             let description = foodDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let imageData = capturedImageData {
-                await addIngredientsFromImage(imageData, description: description)
+            if !capturedImages.isEmpty {
+                await addIngredientsFromImages(capturedImages, description: description)
             } else {
                 await addIngredient(named: description)
             }
         }
 
+        /// Backwards-compatible single-image entry point.
         @MainActor
         func addIngredientsFromImage(_ imageData: Data, description: String = "") async {
-            guard currentResult != nil else { return }
+            await addIngredientsFromImages([imageData], description: description)
+        }
+
+        @MainActor
+        func addIngredientsFromImages(_ images: [Data], description: String = "") async {
+            guard !images.isEmpty, currentResult != nil else { return }
             guard provider != nil else {
                 errorMessage = String(localized: "AI Insights is not ready yet.", comment: "AI error")
                 return
@@ -724,17 +757,21 @@ extension AIInsights {
             do {
                 let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
                 let context = trimmedDescription.isEmpty ? "" : "\nUser context: \(trimmedDescription)"
+                let multi = images.count > 1
+                    ? "These \(images.count) photos show the items to add. "
+                    : ""
                 let request = AIServiceAdapter.AIRequest(
                     model: model,
                     messages: [
                         AIServiceAdapter.ChatMessagePayload(role: .system, content: foodFinderSystemPrompt),
-                        AIServiceAdapter.ChatMessagePayload(role: .user, content: "Analyze the food in this photo and return items to add to an existing meal.\(context)")
+                        AIServiceAdapter.ChatMessagePayload(role: .user, content: "\(multi)Analyze the food in the photo(s) and return items to add to an existing meal.\(context)")
                     ],
                     temperature: 0.2,
                     topP: 0.9,
                     topK: nil,
                     maxTokens: 2048,
-                    imageData: imageData,
+                    imageData: images.first,
+                    additionalImageData: Array(images.dropFirst()),
                     responseFormat: foodFinderResponseFormat
                 )
 
@@ -755,7 +792,7 @@ extension AIInsights {
                 result.items.append(contentsOf: parsed.items)
                 storeUpdatedResult(result)
                 foodDescription = ""
-                capturedImageData = nil
+                capturedImages.removeAll()
 
             } catch let error as AIServiceAdapter.AIError {
                 errorMessage = error.errorDescription ?? error.localizedDescription
@@ -916,8 +953,19 @@ extension AIInsights {
 
         // MARK: - Camera Analysis (Multimodal)
 
+        /// Backwards-compatible single-image entry point. Delegates to
+        /// `analyzeImages(_:description:)`.
         @MainActor
         func analyzeImage(_ imageData: Data, description: String = "") async {
+            await analyzeImages([imageData], description: description)
+        }
+
+        /// Multi-image AI analysis: sends every attached photo as a separate
+        /// part of the same user turn so the model can reason across them
+        /// (e.g. side dish + portion ruler + ingredient label).
+        @MainActor
+        func analyzeImages(_ images: [Data], description: String = "") async {
+            guard !images.isEmpty else { return }
             guard provider != nil else {
                 errorMessage = String(localized: "AI Insights is not ready yet.", comment: "AI error")
                 return
@@ -934,17 +982,21 @@ extension AIInsights {
             do {
                 let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
                 let context = trimmedDescription.isEmpty ? "" : "\nUser context: \(trimmedDescription)"
+                let multi = images.count > 1
+                    ? "These \(images.count) photos show ONE meal. "
+                    : ""
                 let request = AIServiceAdapter.AIRequest(
                     model: model,
                     messages: [
                         AIServiceAdapter.ChatMessagePayload(role: .system, content: foodFinderSystemPrompt),
-                        AIServiceAdapter.ChatMessagePayload(role: .user, content: "Analyze the food in this photo. Identify each item and provide the nutritional breakdown.\(context)")
+                        AIServiceAdapter.ChatMessagePayload(role: .user, content: "\(multi)Analyze the food. Identify each item and provide the nutritional breakdown.\(context)")
                     ],
                     temperature: 0.2,
                     topP: 0.9,
                     topK: nil,
                     maxTokens: 2048,
-                    imageData: imageData,
+                    imageData: images.first,
+                    additionalImageData: Array(images.dropFirst()),
                     responseFormat: foodFinderResponseFormat
                 )
 
@@ -960,7 +1012,7 @@ extension AIInsights {
                 if shouldRetrySuspiciousResult(parsed, description: validationDescription, hasImage: true) {
                     let retryResponse = try await requestFoodAnalysis(
                         prompt: "Re-evaluate this photo and user context carefully. The previous estimate returned zero or near-zero carbs for a likely carb-containing meal. Return the same strict JSON object schema and break the meal into ingredients. User context: \(trimmedDescription)",
-                        imageData: imageData
+                        imageData: images.first
                     )
                     parsed = parseFoodAnalysis(from: retryResponse)
                 }
@@ -979,7 +1031,9 @@ extension AIInsights {
                     rawResponse: response.text,
                     timestamp: Date(),
                     source: .aiCamera,
-                    imageData: imageData,
+                    // Store only the first image to keep the recent-results
+                    // payload small; the AI saw all of them.
+                    imageData: images.first,
                     mealDescription: trimmedDescription.isEmpty ? nil : trimmedDescription,
                     mealName: parsed.mealName ?? trimmedDescription.aiInsightsNilIfEmpty,
                     mealPortion: parsed.mealPortion,
@@ -991,7 +1045,7 @@ extension AIInsights {
                 saveRecentResults()
                 promoteIfFrequent(result)
                 foodDescription = ""
-                capturedImageData = nil
+                capturedImages.removeAll()
 
             } catch let error as AIServiceAdapter.AIError {
                 errorMessage = error.errorDescription ?? error.localizedDescription

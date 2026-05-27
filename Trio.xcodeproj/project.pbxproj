@@ -875,6 +875,8 @@
 		AABBCC00000000000000C0C8 /* AIInsightsCaffeineLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B8 /* AIInsightsCaffeineLogView.swift */; };
 		AABBCC00000000000000C0CD /* AIInsights_PeriodicRecap.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0BD /* AIInsights_PeriodicRecap.swift */; };
 		AABBCC00000000000000C0CE /* AIInsightsRecapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0BE /* AIInsightsRecapView.swift */; };
+		AABBCC00000000000000C0D0 /* AIInsightsKeyboardAdaptive.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0D0 /* AIInsightsKeyboardAdaptive.swift */; };
+		AABBCC00000000000000C0D1 /* AIInsightsFoodFinderExpandedComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0D1 /* AIInsightsFoodFinderExpandedComposer.swift */; };
 		AABBCC00000000000000C0CF /* AutoPresetsHealthKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0BF /* AutoPresetsHealthKitService.swift */; };
 		AABBCC00000000000000C0C9 /* AIInsights_AlcoholTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B9 /* AIInsights_AlcoholTracker.swift */; };
 		AABBCC00000000000000C0CA /* AIInsightsAlcoholLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0BA /* AIInsightsAlcoholLogView.swift */; };
@@ -1853,6 +1855,8 @@
 		AABBCC00000000000000B0B8 /* AIInsightsCaffeineLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsCaffeineLogView.swift; sourceTree = "<group>"; };
 		AABBCC00000000000000B0BD /* AIInsights_PeriodicRecap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsights_PeriodicRecap.swift; sourceTree = "<group>"; };
 		AABBCC00000000000000B0BE /* AIInsightsRecapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsRecapView.swift; sourceTree = "<group>"; };
+		AABBCC00000000000000B0D0 /* AIInsightsKeyboardAdaptive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsKeyboardAdaptive.swift; sourceTree = "<group>"; };
+		AABBCC00000000000000B0D1 /* AIInsightsFoodFinderExpandedComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsFoodFinderExpandedComposer.swift; sourceTree = "<group>"; };
 		AABBCC00000000000000B0BF /* AutoPresetsHealthKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoPresetsHealthKitService.swift; sourceTree = "<group>"; };
 		AABBCC00000000000000B0B9 /* AIInsights_AlcoholTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsights_AlcoholTracker.swift; sourceTree = "<group>"; };
 		AABBCC00000000000000B0BA /* AIInsightsAlcoholLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInsightsAlcoholLogView.swift; sourceTree = "<group>"; };
@@ -1969,6 +1973,8 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 				AABBCC00000000000000B0BB /* AIInsightsSharedLogControls.swift */,
 				AABBCC00000000000000B0BC /* AIInsightsImageCropView.swift */,
 				AABBCC00000000000000B0BE /* AIInsightsRecapView.swift */,
+				AABBCC00000000000000B0D0 /* AIInsightsKeyboardAdaptive.swift */,
+				AABBCC00000000000000B0D1 /* AIInsightsFoodFinderExpandedComposer.swift */,
 			);
 			path = View;
 			sourceTree = "<group>";
@@ -4813,6 +4819,8 @@ E1D69A8BBF1D49FB9AF8DF95 /* View */ = {
 				AABBCC00000000000000C0C8 /* AIInsightsCaffeineLogView.swift in Sources */,
 				AABBCC00000000000000C0CD /* AIInsights_PeriodicRecap.swift in Sources */,
 				AABBCC00000000000000C0CE /* AIInsightsRecapView.swift in Sources */,
+				AABBCC00000000000000C0D0 /* AIInsightsKeyboardAdaptive.swift in Sources */,
+				AABBCC00000000000000C0D1 /* AIInsightsFoodFinderExpandedComposer.swift in Sources */,
 				AABBCC00000000000000C0CF /* AutoPresetsHealthKitService.swift in Sources */,
 				AABBCC00000000000000C0C9 /* AIInsights_AlcoholTracker.swift in Sources */,
 				AABBCC00000000000000C0CA /* AIInsightsAlcoholLogView.swift in Sources */,

@@ -12,6 +12,7 @@ extension AIInsights {
         @Environment(AppState.self) var appState
         @Environment(\.managedObjectContext) var moc
         @FocusState private var isTextFieldFocused: Bool
+        @State private var showExpandedComposer: Bool = false
         @State private var isEditingTotals = false
         @State private var editingFoodItem: FoodItem?
 
@@ -27,6 +28,7 @@ extension AIInsights {
                 foodInputBar
             }
             .background(appState.trioBackgroundColor(for: colorScheme))
+            .aiInsightsKeyboardAdaptive()
             .navigationTitle(currentNavTitle)
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(state.currentResult != nil)
@@ -54,6 +56,19 @@ extension AIInsights {
             }
             .simultaneousGesture(swipeBackGesture)
             .onAppear(perform: configureView)
+            .sheet(isPresented: $showExpandedComposer) {
+                AIInsights.FoodFinderExpandedComposer(state: state) {
+                    Task {
+                        if state.currentResult != nil {
+                            await state.addIngredientFromCurrentInput()
+                        } else {
+                            await state.analyzeCurrentInput()
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
             .fullScreenCover(isPresented: $state.showCamera) {
                 AIInsights.CameraCaptureView { imageData in
                     state.pendingImageForCrop = imageData
@@ -940,38 +955,8 @@ extension AIInsights {
                 }
 
                 VStack(spacing: 6) {
-                    if state.capturedImageData != nil {
-                        HStack(spacing: 8) {
-                            if let imageData = state.capturedImageData,
-                               let image = UIImage(data: imageData)
-                            {
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 54, height: 54)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                            }
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(String(localized: "Photo attached", comment: "FoodFinder photo attached label"))
-                                    .font(.caption.weight(.semibold))
-                                Text(
-                                    state.currentResult != nil
-                                        ? String(localized: "Photo will be added as ingredient.", comment: "FoodFinder photo add ingredient help")
-                                        : String(localized: "This photo will be analyzed with your description.", comment: "FoodFinder attached photo help")
-                                )
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                            }
-                            Spacer()
-                            Button {
-                                state.discardCapturedImage()
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .padding(.horizontal, 12)
+                    if !state.capturedImages.isEmpty {
+                        attachedImagesStrip
                     }
 
                     HStack(spacing: 8) {
@@ -994,6 +979,13 @@ extension AIInsights {
                             state.toggleDictation()
                         }
                         .foregroundStyle(state.isDictating ? .red : (colorScheme == .dark ? .white : .primary))
+                        .disabled(state.isAnalyzing)
+
+                        roundInputButton(systemImage: "arrow.up.left.and.arrow.down.right") {
+                            isTextFieldFocused = false
+                            showExpandedComposer = true
+                        }
+                        .accessibilityLabel(String(localized: "Open larger composer", comment: "Expand composer button"))
                         .disabled(state.isAnalyzing)
 
                         TextField(
@@ -1059,7 +1051,54 @@ extension AIInsights {
         }
 
         private var hasFoodFinderInput: Bool {
-            state.capturedImageData != nil || !state.foodDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            !state.capturedImages.isEmpty || !state.foodDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+
+        /// Horizontal strip of attached photos + a hint of how many more can
+        /// be added (cap of 6 set in the state model). Each thumb has its
+        /// own delete affordance so the user can swap one without clearing
+        /// the rest.
+        @ViewBuilder
+        private var attachedImagesStrip: some View {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(state.capturedImages.enumerated()), id: \.offset) { idx, data in
+                        if let img = UIImage(data: data) {
+                            ZStack(alignment: .topTrailing) {
+                                Image(uiImage: img)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 56, height: 56)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.18)) {
+                                        state.removeAttachedImage(at: idx)
+                                    }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 16))
+                                        .foregroundStyle(.white, Color.black.opacity(0.7))
+                                        .padding(2)
+                                }
+                            }
+                        }
+                    }
+
+                    if state.capturedImages.count < 6 {
+                        Text(
+                            state.capturedImages.count == 1
+                                ? String(localized: "Add more photos", comment: "FoodFinder add-more-photos hint")
+                                : String(format: String(localized: "%d photos attached", comment: "FoodFinder attached photos count"), state.capturedImages.count)
+                        )
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .padding(.leading, 4)
+                    }
+                }
+                .padding(.horizontal, 12)
+            }
+            .frame(height: 64)
         }
 
         private func roundInputButton(systemImage: String, action: @escaping () -> Void) -> some View {
