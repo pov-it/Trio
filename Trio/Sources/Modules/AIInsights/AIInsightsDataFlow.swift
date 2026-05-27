@@ -105,12 +105,7 @@ enum AIInsights {
         }
 
         var foodFinderImageLimit: Int {
-            switch self {
-            case .google: return 3600
-            case .openai: return 500
-            case .anthropic: return 100
-            case .custom: return 6
-            }
+            6
         }
 
         /// Full endpoint URL for the provider, combining baseURL with the model name.
