@@ -123,7 +123,9 @@ extension AIInsights {
         var isAnalyzing: Bool = false
         var errorMessage: String?
         var currentResult: FoodAnalysisResult?
-        var foodDescription: String = ""
+        var foodDescription: String = "" {
+            didSet { saveDraftDescription() }
+        }
         var recentResults: [FoodAnalysisResult] = []
         /// Meals the user has analyzed ≥ 3 times. Latest snapshot per meal.
         var frequentMeals: [FoodAnalysisResult] = []
@@ -185,6 +187,7 @@ extension AIInsights {
             aiEnabled = provider.settings.aiEnabled
             openFoodFactsBaseURL = provider.settings.openFoodFactsBaseURL
 
+            loadDraftDescription()
             loadRecentResults()
             loadFrequentMeals()
         }
@@ -194,6 +197,7 @@ extension AIInsights {
         private static let usageCountsKey = "ai_foodfinder_meal_usage"
         private static let frequentMealsKey = "ai_foodfinder_frequent"
         private static let portionLearningKey = "ai_foodfinder_portion_learning"
+        private static let draftDescriptionKey = "ai_foodfinder_draft_description"
         private static let frequentThreshold = 3
         private static let frequentMealsMax = 10
         private static let portionLearningMinSamples = 2
@@ -212,6 +216,19 @@ extension AIInsights {
             let toSave = Array(recentResults.prefix(20))
             if let data = try? JSONEncoder().encode(toSave) {
                 UserDefaults.standard.set(data, forKey: "ai_foodfinder_recent")
+            }
+        }
+
+        private func loadDraftDescription() {
+            foodDescription = UserDefaults.standard.string(forKey: Self.draftDescriptionKey) ?? ""
+        }
+
+        private func saveDraftDescription() {
+            let trimmed = foodDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                UserDefaults.standard.removeObject(forKey: Self.draftDescriptionKey)
+            } else {
+                UserDefaults.standard.set(foodDescription, forKey: Self.draftDescriptionKey)
             }
         }
 
