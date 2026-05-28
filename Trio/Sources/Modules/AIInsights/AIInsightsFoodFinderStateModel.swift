@@ -139,6 +139,11 @@ extension AIInsights {
         var mealPortion: String? = nil
         var confidence: Double? = nil
         var manualMacroOverride: MacroOverride? = nil
+        var carbEstimateLowerBound: Double? = nil
+        var carbEstimateUpperBound: Double? = nil
+        var carbEstimateUncertaintyUnits: Double? = nil
+        var analysisCandidateCount: Int? = nil
+        var doseGuardApplied: Bool? = nil
 
         var totalCarbs: Double { manualMacroOverride?.carbs ?? items.reduce(0) { $0 + $1.adjustedCarbs } }
         var totalFat: Double { manualMacroOverride?.fat ?? items.reduce(0) { $0 + $1.adjustedFat } }
@@ -264,6 +269,8 @@ extension AIInsights {
         var foodFinderUSDAEnabled: Bool = false
         var foodFinderPreferredSource: FoodSourceID = .openFoodFacts
         var foodFinderUSDAAPIKey: String = ""
+        var foodFinderDoseGuardEnabled: Bool = true
+        var foodFinderDoseGuardSamples: Int = 2
         var maxFoodFinderImages: Int { max(1, providerType.foodFinderImageLimit) }
 
         @ObservationIgnored private let speechRecognizer = SFSpeechRecognizer(locale: Locale.current)
@@ -280,6 +287,23 @@ extension AIInsights {
             var mealName: String?
             var mealPortion: String?
             var confidence: Double?
+        }
+
+        private struct FoodAnalysisCandidate {
+            var parsed: ParsedFoodAnalysis
+            var rawResponse: String
+
+            var totalCarbs: Double {
+                parsed.items.reduce(0) { $0 + $1.adjustedCarbs }
+            }
+        }
+
+        private struct FoodDoseGuardDiagnostics {
+            var lowerBound: Double?
+            var upperBound: Double?
+            var uncertaintyUnits: Double?
+            var candidateCount: Int
+            var applied: Bool
         }
 
         override func subscribe() {
@@ -307,6 +331,8 @@ extension AIInsights {
             foodFinderOpenFoodFactsEnabled = provider.settings.foodFinderOpenFoodFactsEnabled
             foodFinderUSDAEnabled = provider.settings.foodFinderUSDAEnabled
             foodFinderPreferredSource = provider.settings.foodFinderPreferredSource
+            foodFinderDoseGuardEnabled = provider.settings.foodFinderDoseGuardEnabled
+            foodFinderDoseGuardSamples = min(3, max(1, provider.settings.foodFinderDoseGuardSamples))
 
             loadDraftDescription()
             loadRecentResults()
@@ -556,36 +582,25 @@ extension AIInsights {
             defer { isAnalyzing = false }
 
             do {
-                let request = AIServiceAdapter.AIRequest(
-                    model: model,
-                    messages: [
-                        AIServiceAdapter.ChatMessagePayload(role: .system, content: foodFinderSystemPrompt),
-                        AIServiceAdapter.ChatMessagePayload(role: .user, content: "Analyze this food: \(description)")
-                    ],
-                    temperature: 0.2,
-                    topP: 0.9,
-                    topK: nil,
-                    maxTokens: 2048,
-                    responseFormat: foodFinderResponseFormat
+                var (candidate, diagnostics) = try await requestFoodAnalysisCandidates(
+                    prompt: "Analyze this food: \(description)",
+                    imageData: nil,
+                    description: description,
+                    hasImage: false
                 )
 
-                let response = try await AIServiceAdapter.send(
-                    request: request,
-                    provider: providerType,
-                    baseURL: baseURL,
-                    apiKey: apiKey
-                )
-
-                var parsed = parseFoodAnalysis(from: response.text)
+                var parsed = candidate.parsed
                 if shouldRetrySuspiciousResult(parsed, description: description, hasImage: false) {
-                    let retryResponse = try await requestFoodAnalysis(
+                    let retry = try await requestFoodAnalysisCandidates(
                         prompt: "Re-evaluate this likely carb-containing meal. The previous estimate returned zero or near-zero carbs, which is implausible. Return the same strict JSON object schema with realistic standard portions. Food: \(description)",
-                        imageData: nil
+                        imageData: nil,
+                        description: description,
+                        hasImage: false
                     )
-                    parsed = parseFoodAnalysis(from: retryResponse)
+                    candidate = retry.0
+                    diagnostics = retry.1
+                    parsed = candidate.parsed
                 }
-                parsed.items = await enrichFoodItemsWithLookup(parsed.items)
-
                 guard !parsed.items.isEmpty,
                       !isSuspiciousZeroCarbResult(parsed, description: description, hasImage: false)
                 else {
@@ -595,7 +610,7 @@ extension AIInsights {
 
                 var result = FoodAnalysisResult(
                     items: parsed.items,
-                    rawResponse: response.text,
+                    rawResponse: candidate.rawResponse,
                     timestamp: Date(),
                     source: .aiText,
                     imageData: nil,
@@ -604,6 +619,7 @@ extension AIInsights {
                     mealPortion: parsed.mealPortion,
                     confidence: parsed.confidence
                 )
+                applyDoseGuardDiagnostics(diagnostics, to: &result)
                 applyLearnedPortions(to: &result)
 
                 currentResult = result
@@ -648,6 +664,11 @@ extension AIInsights {
             }
 
             RULES:
+            - Prefer a conservative lower plausible portion over an overestimate when the portion is uncertain.
+            - The user must still confirm/edit the result before dosing; do not include insulin advice or dosing math.
+            - Preserve explicit user quantities and units exactly when present.
+            - Use modest standard serving sizes when portions are not specified.
+            - Do not output chain-of-thought, hidden calculations, or explanatory prose.
             - Be as accurate as possible with carb counts — this directly affects insulin dosing
             - Break compound meals into individual items (e.g. "burger and fries" → separate items)
             - Use standard serving sizes when portions are not specified
@@ -1076,30 +1097,15 @@ extension AIInsights {
                 let multi = images.count > 1
                     ? "These \(images.count) photos show the items to add. "
                     : ""
-                let request = AIServiceAdapter.AIRequest(
-                    model: model,
-                    messages: [
-                        AIServiceAdapter.ChatMessagePayload(role: .system, content: foodFinderSystemPrompt),
-                        AIServiceAdapter.ChatMessagePayload(role: .user, content: "\(multi)Analyze the food in the photo(s) and return items to add to an existing meal.\(context)")
-                    ],
-                    temperature: 0.2,
-                    topP: 0.9,
-                    topK: nil,
-                    maxTokens: 2048,
+                let (candidate, _) = try await requestFoodAnalysisCandidates(
+                    prompt: "\(multi)Analyze the food in the photo(s) and return items to add to an existing meal.\(context)",
                     imageData: images.first,
                     additionalImageData: Array(images.dropFirst()),
-                    responseFormat: foodFinderResponseFormat
+                    description: trimmedDescription,
+                    hasImage: true
                 )
 
-                let response = try await AIServiceAdapter.send(
-                    request: request,
-                    provider: providerType,
-                    baseURL: baseURL,
-                    apiKey: apiKey
-                )
-
-                var parsed = parseFoodAnalysis(from: response.text)
-                parsed.items = await enrichFoodItemsWithLookup(parsed.items)
+                let parsed = candidate.parsed
                 guard !parsed.items.isEmpty else {
                     errorMessage = String(localized: "No food items could be identified in the photo.", comment: "FoodFinder add from image error")
                     return
@@ -1318,40 +1324,28 @@ extension AIInsights {
                 let multi = images.count > 1
                     ? "These \(images.count) photos show ONE meal. "
                     : ""
-                let request = AIServiceAdapter.AIRequest(
-                    model: model,
-                    messages: [
-                        AIServiceAdapter.ChatMessagePayload(role: .system, content: foodFinderSystemPrompt),
-                        AIServiceAdapter.ChatMessagePayload(role: .user, content: "\(multi)Analyze the food. Identify each item and provide the nutritional breakdown.\(context)")
-                    ],
-                    temperature: 0.2,
-                    topP: 0.9,
-                    topK: nil,
-                    maxTokens: 2048,
+                var (candidate, diagnostics) = try await requestFoodAnalysisCandidates(
+                    prompt: "\(multi)Analyze the food. Identify each item and provide the nutritional breakdown.\(context)",
                     imageData: images.first,
                     additionalImageData: Array(images.dropFirst()),
-                    responseFormat: foodFinderResponseFormat
+                    description: trimmedDescription,
+                    hasImage: true
                 )
 
-                let response = try await AIServiceAdapter.send(
-                    request: request,
-                    provider: providerType,
-                    baseURL: baseURL,
-                    apiKey: apiKey
-                )
-
-                var parsed = parseFoodAnalysis(from: response.text)
+                var parsed = candidate.parsed
                 let validationDescription = trimmedDescription.isEmpty ? (parsed.mealName ?? "") : trimmedDescription
                 if shouldRetrySuspiciousResult(parsed, description: validationDescription, hasImage: true) {
-                    let retryResponse = try await requestFoodAnalysis(
+                    let retry = try await requestFoodAnalysisCandidates(
                         prompt: "Re-evaluate this photo and user context carefully. The previous estimate returned zero or near-zero carbs for a likely carb-containing meal. Return the same strict JSON object schema and break the meal into ingredients. User context: \(trimmedDescription)",
                         imageData: images.first,
-                        additionalImageData: Array(images.dropFirst())
+                        additionalImageData: Array(images.dropFirst()),
+                        description: validationDescription,
+                        hasImage: true
                     )
-                    parsed = parseFoodAnalysis(from: retryResponse)
+                    candidate = retry.0
+                    diagnostics = retry.1
+                    parsed = candidate.parsed
                 }
-                parsed.items = await enrichFoodItemsWithLookup(parsed.items)
-
                 guard !parsed.items.isEmpty,
                       !isSuspiciousZeroCarbResult(parsed, description: validationDescription, hasImage: true)
                 else {
@@ -1363,7 +1357,7 @@ extension AIInsights {
 
                 var result = FoodAnalysisResult(
                     items: parsed.items,
-                    rawResponse: response.text,
+                    rawResponse: candidate.rawResponse,
                     timestamp: Date(),
                     source: .aiCamera,
                     // Store only the first image to keep the recent-results
@@ -1374,6 +1368,7 @@ extension AIInsights {
                     mealPortion: parsed.mealPortion,
                     confidence: parsed.confidence
                 )
+                applyDoseGuardDiagnostics(diagnostics, to: &result)
                 applyLearnedPortions(to: &result)
                 currentResult = result
                 recentResults.insert(result, at: 0)
@@ -1740,6 +1735,98 @@ extension AIInsights {
 
         // MARK: - Parsing Helpers
 
+        private func foodFinderCandidateCount(hasImage: Bool) -> Int {
+            guard foodFinderDoseGuardEnabled else { return 1 }
+            // Vision estimates are where stochastic portion drift hurts most,
+            // but text-only meals also benefit when the user gives an
+            // ambiguous restaurant-style description.
+            let requested = min(3, max(1, foodFinderDoseGuardSamples))
+            return hasImage ? requested : min(2, requested)
+        }
+
+        private func requestFoodAnalysisCandidates(
+            prompt: String,
+            imageData: Data?,
+            additionalImageData: [Data] = [],
+            description: String,
+            hasImage: Bool
+        ) async throws -> (FoodAnalysisCandidate, FoodDoseGuardDiagnostics) {
+            let count = foodFinderCandidateCount(hasImage: hasImage)
+            var candidates: [FoodAnalysisCandidate] = []
+            var lastError: Error?
+
+            for _ in 0 ..< count {
+                do {
+                    let response = try await requestFoodAnalysis(
+                        prompt: prompt,
+                        imageData: imageData,
+                        additionalImageData: additionalImageData
+                    )
+                    var parsed = parseFoodAnalysis(from: response)
+                    parsed.items = await enrichFoodItemsWithLookup(parsed.items)
+                    candidates.append(FoodAnalysisCandidate(parsed: parsed, rawResponse: response))
+                } catch {
+                    lastError = error
+                }
+            }
+
+            guard !candidates.isEmpty else {
+                throw lastError ?? AIServiceAdapter.AIError.noContent
+            }
+
+            let usable = candidates.filter {
+                !$0.parsed.items.isEmpty &&
+                    !isSuspiciousZeroCarbResult($0.parsed, description: description, hasImage: hasImage)
+            }
+            let pool = usable.isEmpty ? candidates : usable
+            let sorted = pool.sorted { $0.totalCarbs < $1.totalCarbs }
+            let applied = foodFinderDoseGuardEnabled && sorted.count > 1
+            let selected = applied
+                ? sorted[max(0, Int(floor(Double(sorted.count - 1) * 0.25)))]
+                : pool[0]
+
+            let lower = sorted.first?.totalCarbs
+            let upper = sorted.last?.totalCarbs
+            let uncertaintyUnits: Double? = {
+                guard let lower, let upper else { return nil }
+                // Report the full carb spread translated to insulin units at
+                // I:C 1:10, matching the safety metric used in the papers.
+                return max(0, upper - lower) / 10.0
+            }()
+
+            return (
+                selected,
+                FoodDoseGuardDiagnostics(
+                    lowerBound: lower,
+                    upperBound: upper,
+                    uncertaintyUnits: uncertaintyUnits,
+                    candidateCount: candidates.count,
+                    applied: applied
+                )
+            )
+        }
+
+        private func applyDoseGuardDiagnostics(
+            _ diagnostics: FoodDoseGuardDiagnostics,
+            to result: inout FoodAnalysisResult
+        ) {
+            result.carbEstimateLowerBound = diagnostics.lowerBound
+            result.carbEstimateUpperBound = diagnostics.upperBound
+            result.carbEstimateUncertaintyUnits = diagnostics.uncertaintyUnits
+            result.analysisCandidateCount = diagnostics.candidateCount
+            result.doseGuardApplied = diagnostics.applied
+
+            guard diagnostics.applied,
+                  let lower = diagnostics.lowerBound,
+                  let upper = diagnostics.upperBound,
+                  upper > lower
+            else { return }
+
+            let relativeSpread = (upper - lower) / max(upper, 1)
+            let baseConfidence = result.confidence ?? 0.65
+            result.confidence = max(0.1, baseConfidence * (1 - min(0.45, relativeSpread * 0.6)))
+        }
+
         private func requestFoodAnalysis(
             prompt: String,
             imageData: Data?,
@@ -1751,7 +1838,7 @@ extension AIInsights {
                     AIServiceAdapter.ChatMessagePayload(role: .system, content: foodFinderSystemPrompt),
                     AIServiceAdapter.ChatMessagePayload(role: .user, content: prompt)
                 ],
-                temperature: 0.15,
+                temperature: 0.0,
                 topP: 0.85,
                 topK: nil,
                 maxTokens: 2048,

@@ -25,6 +25,8 @@ extension AIInsights {
         var foodFinderOpenFoodFactsEnabled: Bool = true
         var foodFinderUSDAEnabled: Bool = false
         var foodFinderPreferredSource: FoodSourceID = .openFoodFacts
+        var foodFinderDoseGuardEnabled: Bool = true
+        var foodFinderDoseGuardSamples: Int = 2
         var foodFinderUSDAAPIKey: String = ""
         var locationContextEnabled: Bool = false
         var healthKitCaffeineEnabled: Bool = false
@@ -58,6 +60,8 @@ extension AIInsights {
             foodFinderOpenFoodFactsEnabled = provider.settings.foodFinderOpenFoodFactsEnabled
             foodFinderUSDAEnabled = provider.settings.foodFinderUSDAEnabled
             foodFinderPreferredSource = provider.settings.foodFinderPreferredSource
+            foodFinderDoseGuardEnabled = provider.settings.foodFinderDoseGuardEnabled
+            foodFinderDoseGuardSamples = min(3, max(1, provider.settings.foodFinderDoseGuardSamples))
             locationContextEnabled = provider.settings.aiLocationContextEnabled
             healthKitCaffeineEnabled = provider.settings.aiHealthKitCaffeineEnabled
             healthKitAlcoholEnabled = provider.settings.aiHealthKitAlcoholEnabled
@@ -105,6 +109,8 @@ extension AIInsights {
             settings.foodFinderOpenFoodFactsEnabled = foodFinderOpenFoodFactsEnabled
             settings.foodFinderUSDAEnabled = foodFinderUSDAEnabled
             settings.foodFinderPreferredSource = foodFinderPreferredSource
+            settings.foodFinderDoseGuardEnabled = foodFinderDoseGuardEnabled
+            settings.foodFinderDoseGuardSamples = min(3, max(1, foodFinderDoseGuardSamples))
             settings.aiLocationContextEnabled = locationContextEnabled
             settings.aiHealthKitCaffeineEnabled = healthKitCaffeineEnabled
             settings.aiHealthKitAlcoholEnabled = healthKitAlcoholEnabled

@@ -246,6 +246,29 @@ extension AIInsights {
                         state.saveSettings()
                     }
                     .disabled(state.foodFinderLookupMode == .aiEstimateOnly)
+
+                    Toggle(isOn: $state.foodFinderDoseGuardEnabled) {
+                        Label(String(localized: "Dose-guard ensemble", comment: "FoodFinder dose guard toggle"), systemImage: "shield.lefthalf.filled")
+                    }
+                    .onChange(of: state.foodFinderDoseGuardEnabled) {
+                        state.saveSettings()
+                    }
+                    .disabled(state.foodFinderLookupMode == .aiEstimateOnly)
+
+                    if state.foodFinderDoseGuardEnabled {
+                        Stepper(
+                            String(
+                                format: String(localized: "%d safety passes", comment: "FoodFinder dose guard sample count"),
+                                state.foodFinderDoseGuardSamples
+                            ),
+                            value: $state.foodFinderDoseGuardSamples,
+                            in: 1 ... 3
+                        )
+                        .onChange(of: state.foodFinderDoseGuardSamples) {
+                            state.saveSettings()
+                        }
+                        .disabled(state.foodFinderLookupMode == .aiEstimateOnly)
+                    }
                 }
                 .listRowBackground(Color.chart)
 
