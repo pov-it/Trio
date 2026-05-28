@@ -35,7 +35,11 @@ extension AIInsights {
                 barcodeStatusBanner
             }
             .background(appState.trioBackgroundColor(for: colorScheme))
-            .aiInsightsKeyboardAdaptive(bottomSpacing: isComposerExpanded ? 58 : 0)
+            // Higher bottomSpacing tightens the gap above the keyboard.
+            // Collapsed bar carries its own internal .padding(.bottom, 8), so it
+            // needs a larger value to land at the same visible spacing as the
+            // expanded composer (which has no internal bottom padding).
+            .aiInsightsKeyboardAdaptive(bottomSpacing: isComposerExpanded ? 50 : 58)
             .navigationTitle(currentNavTitle)
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(state.currentResult != nil)
