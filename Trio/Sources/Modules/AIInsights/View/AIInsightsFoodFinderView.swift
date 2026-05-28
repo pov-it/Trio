@@ -491,62 +491,55 @@ extension AIInsights {
                     .buttonStyle(.borderless)
                 }
                 .padding(.top, 11)
-                .padding(.bottom, 4)
+                .padding(.bottom, 6)
 
-                Divider()
-                totalsRow(
-                    label: String(localized: "Carbs", comment: "Carbs macro"),
-                    value: result.totalCarbs,
-                    unit: "g",
-                    color: .blue,
-                    onCommit: { commitTotal($0, for: \MacroOverride.carbs, in: result) }
-                )
-                if let candidateCount = result.analysisCandidateCount,
-                   candidateCount > 1,
-                   let lower = result.carbEstimateLowerBound,
-                   let upper = result.carbEstimateUpperBound
-                {
-                    doseGuardRow(
-                        lower: lower,
-                        upper: upper,
-                        uncertaintyUnits: result.carbEstimateUncertaintyUnits,
-                        candidateCount: candidateCount,
-                        applied: result.doseGuardApplied == true
+                if isEditingTotals {
+                    Divider()
+                    totalsRow(
+                        label: String(localized: "Carbs", comment: "Carbs macro"),
+                        value: result.totalCarbs,
+                        unit: "g",
+                        color: .blue,
+                        onCommit: { commitTotal($0, for: \MacroOverride.carbs, in: result) }
                     )
                     Divider()
+                    totalsRow(
+                        label: String(localized: "Fat", comment: "Fat macro"),
+                        value: result.totalFat,
+                        unit: "g",
+                        color: .yellow,
+                        onCommit: { commitTotal($0, for: \MacroOverride.fat, in: result) }
+                    )
+                    Divider()
+                    totalsRow(
+                        label: String(localized: "Protein", comment: "Protein macro"),
+                        value: result.totalProtein,
+                        unit: "g",
+                        color: .red,
+                        onCommit: { commitTotal($0, for: \MacroOverride.protein, in: result) }
+                    )
+                    Divider()
+                    totalsRow(
+                        label: String(localized: "Fiber", comment: "Fiber macro"),
+                        value: result.totalFiber,
+                        unit: "g",
+                        color: .green,
+                        onCommit: { commitTotal($0, for: \MacroOverride.fiber, in: result) }
+                    )
+                    Divider()
+                    totalsRow(
+                        label: String(localized: "Calories", comment: "Calories label"),
+                        value: result.totalCalories,
+                        unit: "kcal",
+                        color: .secondary,
+                        onCommit: { commitTotal($0, for: \MacroOverride.calories, in: result) }
+                    )
+                } else {
+                    carbsHeroView(result)
+                    secondaryMacroSummary(result)
+                        .padding(.top, 8)
+                        .padding(.bottom, 12)
                 }
-                Divider()
-                totalsRow(
-                    label: String(localized: "Fat", comment: "Fat macro"),
-                    value: result.totalFat,
-                    unit: "g",
-                    color: .yellow,
-                    onCommit: { commitTotal($0, for: \MacroOverride.fat, in: result) }
-                )
-                Divider()
-                totalsRow(
-                    label: String(localized: "Protein", comment: "Protein macro"),
-                    value: result.totalProtein,
-                    unit: "g",
-                    color: .red,
-                    onCommit: { commitTotal($0, for: \MacroOverride.protein, in: result) }
-                )
-                Divider()
-                totalsRow(
-                    label: String(localized: "Fiber", comment: "Fiber macro"),
-                    value: result.totalFiber,
-                    unit: "g",
-                    color: .green,
-                    onCommit: { commitTotal($0, for: \MacroOverride.fiber, in: result) }
-                )
-                Divider()
-                totalsRow(
-                    label: String(localized: "Calories", comment: "Calories label"),
-                    value: result.totalCalories,
-                    unit: "kcal",
-                    color: .secondary,
-                    onCommit: { commitTotal($0, for: \MacroOverride.calories, in: result) }
-                )
             }
             .padding(.horizontal)
             .background(
@@ -584,43 +577,100 @@ extension AIInsights {
             .padding(.vertical, 8)
         }
 
-        private func doseGuardRow(
-            lower: Double,
-            upper: Double,
-            uncertaintyUnits: Double?,
-            candidateCount: Int,
-            applied: Bool
-        ) -> some View {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Image(systemName: applied ? "shield.lefthalf.filled" : "chart.bar.xaxis")
-                    .foregroundStyle(.blue)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(String(localized: "Dose-guard range", comment: "FoodFinder dose guard range label"))
-                        .font(.caption.weight(.semibold))
-                    Text(
-                        String(
-                            format: String(localized: "%.0f-%.0fg carbs across %d checks", comment: "FoodFinder dose guard range detail"),
-                            lower,
-                            upper,
-                            candidateCount
-                        )
-                    )
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+        /// Hero carbs readout: the dosing-relevant number gets visual primacy,
+        /// with the dose-guard range, insulin uncertainty, and an
+        /// underestimation hint stacked directly beneath it.
+        @ViewBuilder
+        private func carbsHeroView(_ result: FoodAnalysisResult) -> some View {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(String(format: "%.0f", result.totalCarbs))
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .foregroundStyle(.blue)
+                    Text(String(localized: "g carbs", comment: "FoodFinder carbs hero unit"))
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
                 }
-                Spacer()
-                if let uncertaintyUnits {
-                    Text(
-                        String(
-                            format: String(localized: "±%.1f E", comment: "FoodFinder insulin uncertainty units"),
-                            uncertaintyUnits
+
+                if let candidateCount = result.analysisCandidateCount,
+                   candidateCount > 1,
+                   let lower = result.carbEstimateLowerBound,
+                   let upper = result.carbEstimateUpperBound
+                {
+                    HStack(spacing: 6) {
+                        Image(systemName: result.doseGuardApplied == true ? "shield.lefthalf.filled" : "chart.bar.xaxis")
+                            .font(.caption2)
+                            .foregroundStyle(.blue)
+                        Text(
+                            String(
+                                format: String(localized: "%.0f–%.0f g range", comment: "FoodFinder dose guard range chip"),
+                                lower,
+                                upper
+                            )
                         )
-                    )
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(uncertaintyUnits <= 1.5 ? .green : .orange)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        if let uncertaintyUnits = result.carbEstimateUncertaintyUnits {
+                            Text(
+                                String(
+                                    format: String(localized: "· ±%.1f E", comment: "FoodFinder insulin uncertainty units"),
+                                    uncertaintyUnits
+                                )
+                            )
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(uncertaintyUnits <= 1.5 ? .green : .orange)
+                        }
+                        Text(
+                            String(
+                                format: String(localized: "· %d checks", comment: "FoodFinder dose guard check count"),
+                                candidateCount
+                            )
+                        )
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                    }
+
+                    if upper > result.totalCarbs + 0.5 {
+                        Label(
+                            String(
+                                format: String(localized: "Could be up to %.0f g — adjust before dosing", comment: "FoodFinder underestimation hint"),
+                                upper
+                            ),
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                    }
                 }
             }
-            .padding(.vertical, 7)
+            .padding(.top, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        /// Compact secondary macro line shown under the carbs hero in view mode.
+        private func secondaryMacroSummary(_ result: FoodAnalysisResult) -> some View {
+            HStack(spacing: 16) {
+                compactMacroValue(label: String(localized: "Fat", comment: "Fat macro"), value: result.totalFat, unit: "g", color: .yellow)
+                compactMacroValue(label: String(localized: "Protein", comment: "Protein macro"), value: result.totalProtein, unit: "g", color: .red)
+                compactMacroValue(label: String(localized: "Fiber", comment: "Fiber macro"), value: result.totalFiber, unit: "g", color: .green)
+                compactMacroValue(label: String(localized: "Calories", comment: "Calories label"), value: result.totalCalories, unit: "kcal", color: .secondary)
+                Spacer(minLength: 0)
+            }
+        }
+
+        private func compactMacroValue(label: String, value: Double, unit: String, color: Color) -> some View {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(String(format: "%.0f", value)) \(unit)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
 
         /// Commit one field of the manual totals override. Nil means: fall
@@ -687,60 +737,60 @@ extension AIInsights {
         }
 
         private func foodItemRow(_ item: FoodItem) -> some View {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.name)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(colorScheme == .dark ? .white : .primary)
-                            .lineLimit(2)
-                        Text(item.portion)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                    }
-
-                    Spacer()
-
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
+                    Text(item.name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     sourceBadge(for: item)
+                }
 
+                HStack(spacing: 8) {
+                    Text(item.portion)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
                     portionControl(for: item)
                 }
 
-                HStack(spacing: 14) {
-                    readOnlyIngredientMetric(
-                        label: String(localized: "Carbs", comment: "Carbs macro"),
-                        value: item.adjustedCarbs,
-                        unit: "g",
-                        color: .blue
-                    )
-                    readOnlyIngredientMetric(
-                        label: String(localized: "Fat", comment: "Fat macro"),
-                        value: item.adjustedFat,
-                        unit: "g",
-                        color: .yellow
-                    )
-                    readOnlyIngredientMetric(
-                        label: String(localized: "Protein", comment: "Protein macro"),
-                        value: item.adjustedProtein,
-                        unit: "g",
-                        color: .red
-                    )
-                    readOnlyIngredientMetric(
-                        label: String(localized: "Fiber", comment: "Fiber macro"),
-                        value: item.adjustedFiber,
-                        unit: "g",
-                        color: .green
-                    )
-                    readOnlyIngredientMetric(
-                        label: String(localized: "Calories", comment: "Calories label"),
-                        value: item.adjustedCalories,
-                        unit: "kcal",
-                        color: .secondary
-                    )
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(String(format: "%.0f", item.adjustedCarbs))
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(.blue)
+                        Text(String(localized: "g carbs", comment: "FoodFinder carbs hero unit"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    HStack(spacing: 10) {
+                        ingredientMacroChip(label: String(localized: "F", comment: "Fat abbreviation"), value: item.adjustedFat, unit: "g", color: .yellow)
+                        ingredientMacroChip(label: String(localized: "P", comment: "Protein abbreviation"), value: item.adjustedProtein, unit: "g", color: .red)
+                        ingredientMacroChip(label: String(localized: "Fib", comment: "Fiber abbreviation"), value: item.adjustedFiber, unit: "g", color: .green)
+                        ingredientMacroChip(label: nil, value: item.adjustedCalories, unit: "kcal", color: .secondary)
+                    }
                 }
             }
             .padding(.vertical, 6)
+        }
+
+        /// Compact per-ingredient secondary macro chip (fat/protein/fiber/kcal).
+        /// Carbs is rendered separately with primacy in `foodItemRow`.
+        private func ingredientMacroChip(label: String?, value: Double, unit: String, color: Color) -> some View {
+            HStack(spacing: 2) {
+                if let label {
+                    Text(label)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Text(unit == "kcal" ? "\(String(format: "%.0f", value)) kcal" : "\(String(format: "%.0f", value))\(unit)")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(color)
+            }
+            .lineLimit(1)
         }
 
         @ViewBuilder
@@ -797,27 +847,6 @@ extension AIInsights {
                     color: color,
                     onCommit: onCommit
                 )
-                Text(label)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-
-        /// Calories metric — read-only. Derived from carbs/fat/protein
-        /// automatically in the state model via Atwater factors.
-        private func readOnlyIngredientMetric(
-            label: String,
-            value: Double,
-            unit: String,
-            color: Color
-        ) -> some View {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(String(format: "%.0f", value)) \(unit)")
-                    .font(.caption.bold())
-                    .foregroundStyle(color)
-                    .lineLimit(1)
                 Text(label)
                     .font(.caption2)
                     .foregroundColor(.secondary)

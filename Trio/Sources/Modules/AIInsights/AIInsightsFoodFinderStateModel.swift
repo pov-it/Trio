@@ -675,6 +675,11 @@ extension AIInsights {
             - Include fiber separately — the user's pump system can use net carbs
             - Use the user's text as a strong clue when the photo is ambiguous
             - If a named meal is likely carb-containing (pasta, rice, bread, pizza, potato, fruit, dessert), do not return 0 carbs unless the portion is truly negligible
+            - Treat pure seasonings and zero-carb liquids as ~0 carbs/fat/protein: salt, pepper, herbs, spices, plain or sparkling water, black coffee, plain tea, and calorie-free sweeteners
+            - Count only the edible fraction: when a food is described "with peel/skin/shell" (e.g. unpeeled banana, egg in shell, shrimp in shell), base carbs on the edible part, not the gross weight
+            - When preparation is unspecified, assume the normally-eaten edible/cooked form, not raw dry flour/powder weights (e.g. "rice" means cooked rice, not dry grains; "oats" means prepared, not dry unless stated)
+            - Do not inflate vague labels (vegetable, sauce, curry, dal, vaji, salad, side) into a large starch portion unless the text or image clearly shows a large starch serving
+            - Recognize embedded and hyphenated quantities as exact portions (e.g. "230-gram", "weighing 30 grams", "a 330ml can", "two 25g slices") and honor them precisely
             - If you cannot identify the food, respond with: {"mealName":"Unknown","mealPortion":"Unknown","confidence":0.1,"items":[]}
             - Food names and portion descriptions should match the user's app language when possible
             - Respond ONLY with the JSON object. No markdown, no explanation outside the JSON.
