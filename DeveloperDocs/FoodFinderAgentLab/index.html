@@ -153,6 +153,7 @@
 
     .pill.openFoodFacts { background: color-mix(in srgb, var(--green), transparent 84%); color: #118040; }
     .pill.usda { background: color-mix(in srgb, var(--blue), transparent 84%); color: var(--blue); }
+    .pill.restaurantMenu { background: color-mix(in srgb, var(--green), transparent 78%); color: #087c3b; }
     .pill.aiEstimate { background: color-mix(in srgb, var(--yellow), transparent 80%); color: #9a6500; }
 
     .stack {
@@ -280,6 +281,19 @@
           <input id="usdaKey" type="password" autocomplete="off" placeholder="Enables USDA FoodData Central lookups">
         </label>
 
+        <div class="row">
+          <label>Restaurant / location context
+            <input id="restaurantName" placeholder="e.g. McDonald's, Starbucks, local restaurant name">
+          </label>
+          <label>Nutritionix App ID
+            <input id="nutritionixAppId" type="password" autocomplete="off" placeholder="Optional restaurant menu lookup">
+          </label>
+        </div>
+
+        <label>Nutritionix API key
+          <input id="nutritionixApiKey" type="password" autocomplete="off" placeholder="Optional restaurant menu lookup">
+        </label>
+
         <label>Response language
           <input id="language" value="nl">
         </label>
@@ -296,6 +310,10 @@
         <label class="row" style="grid-template-columns:auto 1fr; display:flex;">
           <input id="useAI" type="checkbox" checked style="width:auto;">
           Use AI for intent parsing and final composition
+        </label>
+        <label class="row" style="grid-template-columns:auto 1fr; display:flex;">
+          <input id="useOpenFoodFacts" type="checkbox" checked style="width:auto;">
+          Use OpenFoodFacts for packaged food lookup
         </label>
 
         <div class="toolbar">
@@ -325,7 +343,7 @@
   </main>
 
   <script>
-    const ids = ["provider", "model", "apiKey", "usdaKey", "language", "mealText", "useAI"];
+    const ids = ["provider", "model", "apiKey", "usdaKey", "nutritionixAppId", "nutritionixApiKey", "restaurantName", "language", "mealText", "useAI", "useOpenFoodFacts"];
     const state = { images: [] };
 
     for (const id of ids) {
@@ -365,8 +383,12 @@
           apiKey: value("apiKey"),
           usdaKey: value("usdaKey"),
           language: value("language"),
+          restaurantName: value("restaurantName"),
+          nutritionixAppId: value("nutritionixAppId"),
+          nutritionixApiKey: value("nutritionixApiKey"),
           mealText: value("mealText"),
           useAI: document.getElementById("useAI").checked,
+          useOpenFoodFacts: document.getElementById("useOpenFoodFacts").checked,
           images: state.images
         };
         const response = await fetch("/api/analyze", {
@@ -414,7 +436,7 @@
             </div>
             <span class="pill ${selected.sourceID}">${sourceTitle(selected.sourceID)} ${Math.round((selected.matchScore || selected.verifiedScore || 0) * 100)}%</span>
           </div>
-          <p>${escapeHTML(selected.name || "No source match")} ${selected.brand ? " - " + escapeHTML(selected.brand) : ""}</p>
+          <p>${escapeHTML(selected.name || "No source match")} ${selected.brand ? " - " + escapeHTML(selected.brand) : ""}${selected.sourcePath ? " · " + escapeHTML(selected.sourcePath) : ""}</p>
           <div class="macros">
             ${macro("Carbs", selected.carbs, "g")}
             ${macro("Fat", selected.fat, "g")}
@@ -463,6 +485,7 @@
 
     function sourceTitle(source) {
       if (source === "openFoodFacts") return "OFF";
+      if (source === "restaurantMenu") return "Menu";
       if (source === "usda") return "USDA";
       return "AI";
     }

@@ -35,7 +35,7 @@ extension AIInsights {
                 barcodeStatusBanner
             }
             .background(appState.trioBackgroundColor(for: colorScheme))
-            .aiInsightsKeyboardAdaptive(bottomSpacing: isComposerExpanded ? 72 : 0)
+            .aiInsightsKeyboardAdaptive(bottomSpacing: isComposerExpanded ? 58 : 0)
             .navigationTitle(currentNavTitle)
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(state.currentResult != nil)
@@ -497,6 +497,20 @@ extension AIInsights {
                     color: .blue,
                     onCommit: { commitTotal($0, for: \MacroOverride.carbs, in: result) }
                 )
+                if let candidateCount = result.analysisCandidateCount,
+                   candidateCount > 1,
+                   let lower = result.carbEstimateLowerBound,
+                   let upper = result.carbEstimateUpperBound
+                {
+                    doseGuardRow(
+                        lower: lower,
+                        upper: upper,
+                        uncertaintyUnits: result.carbEstimateUncertaintyUnits,
+                        candidateCount: candidateCount,
+                        applied: result.doseGuardApplied == true
+                    )
+                    Divider()
+                }
                 Divider()
                 totalsRow(
                     label: String(localized: "Fat", comment: "Fat macro"),
@@ -564,6 +578,45 @@ extension AIInsights {
             }
             .font(.subheadline)
             .padding(.vertical, 8)
+        }
+
+        private func doseGuardRow(
+            lower: Double,
+            upper: Double,
+            uncertaintyUnits: Double?,
+            candidateCount: Int,
+            applied: Bool
+        ) -> some View {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: applied ? "shield.lefthalf.filled" : "chart.bar.xaxis")
+                    .foregroundStyle(.blue)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "Dose-guard range", comment: "FoodFinder dose guard range label"))
+                        .font(.caption.weight(.semibold))
+                    Text(
+                        String(
+                            format: String(localized: "%.0f-%.0fg carbs across %d checks", comment: "FoodFinder dose guard range detail"),
+                            lower,
+                            upper,
+                            candidateCount
+                        )
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let uncertaintyUnits {
+                    Text(
+                        String(
+                            format: String(localized: "±%.1f E", comment: "FoodFinder insulin uncertainty units"),
+                            uncertaintyUnits
+                        )
+                    )
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(uncertaintyUnits <= 1.5 ? .green : .orange)
+                }
+            }
+            .padding(.vertical, 7)
         }
 
         /// Commit one field of the manual totals override. Nil means: fall
