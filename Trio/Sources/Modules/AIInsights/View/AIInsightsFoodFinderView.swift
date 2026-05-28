@@ -37,9 +37,9 @@ extension AIInsights {
             .background(appState.trioBackgroundColor(for: colorScheme))
             // Higher bottomSpacing tightens the gap above the keyboard.
             // Collapsed bar carries its own internal .padding(.bottom, 8), so it
-            // needs a larger value to land at the same visible spacing as the
+            // needs a larger value to snap flush to the keyboard like the
             // expanded composer (which has no internal bottom padding).
-            .aiInsightsKeyboardAdaptive(bottomSpacing: isComposerExpanded ? 50 : 58)
+            .aiInsightsKeyboardAdaptive(bottomSpacing: isComposerExpanded ? 50 : 64)
             .navigationTitle(currentNavTitle)
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(state.currentResult != nil)
@@ -1133,7 +1133,22 @@ extension AIInsights {
                 .padding(.top, isComposerExpanded ? 0 : 8)
                 .padding(.bottom, isComposerExpanded ? 0 : 8)
             }
-            .background(isComposerExpanded ? Color.clear : (colorScheme == .dark ? Color.bgDarkBlue.opacity(0.96) : Color.white.opacity(0.96)))
+            // Collapsed bar: rounded only at the top, snapped flush to the
+            // keyboard at the bottom (same as the expanded composer). The
+            // expanded composer manages its own background, so leave it clear.
+            .background {
+                if !isComposerExpanded {
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 24,
+                        bottomLeadingRadius: 0,
+                        bottomTrailingRadius: 0,
+                        topTrailingRadius: 24,
+                        style: .continuous
+                    )
+                    .fill(colorScheme == .dark ? Color.bgDarkBlue.opacity(0.96) : Color.white.opacity(0.96))
+                    .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.10), radius: 8, y: -2)
+                }
+            }
             .animation(.spring(response: 0.45, dampingFraction: 0.72), value: state.currentResult?.id)
             .animation(.interactiveSpring(response: 0.42, dampingFraction: 0.88, blendDuration: 0.08), value: isComposerExpanded)
         }
