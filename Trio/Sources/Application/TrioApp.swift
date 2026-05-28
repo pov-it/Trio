@@ -492,6 +492,12 @@ extension Notification.Name {
         switch components?.host {
         case "device-select-resp":
             resolver.resolve(NotificationCenter.self)!.post(name: .openFromGarminConnect, object: url)
+        case "foodfinder":
+            // Lock-screen / home-screen widget shortcut → open FoodFinder.
+            resolver.resolve(Router.self)!.mainModalScreen.send(.aiFoodFinder)
+        case "caffeine":
+            // Lock-screen / home-screen widget shortcut → open Caffeine tracker.
+            resolver.resolve(Router.self)!.mainModalScreen.send(.aiCaffeine)
         default: break
         }
     }
