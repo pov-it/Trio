@@ -1817,6 +1817,7 @@ private struct FoodItemEditSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
     @State private var portion: String
+    @State private var weight: String
     @State private var carbs: String
     @State private var fat: String
     @State private var protein: String
@@ -1827,7 +1828,15 @@ private struct FoodItemEditSheet: View {
         self.item = item
         self.onSave = onSave
         _name = State(initialValue: item.name)
-        _portion = State(initialValue: item.portion)
+        // Split the portion into a human label ("2 slices") and an explicit
+        // weight ("90 g") so the user can edit each independently and the macros
+        // stay anchored to the weight rather than a free-form string.
+        _portion = State(initialValue: Self.portionLabel(item.portion))
+        if let grams = Self.grams(from: item.portion) {
+            _weight = State(initialValue: Self.format(grams * item.portionMultiplier))
+        } else {
+            _weight = State(initialValue: "")
+        }
         _carbs = State(initialValue: Self.format(item.adjustedCarbs))
         _fat = State(initialValue: Self.format(item.adjustedFat))
         _protein = State(initialValue: Self.format(item.adjustedProtein))
@@ -1841,6 +1850,16 @@ private struct FoodItemEditSheet: View {
                 Section {
                     TextField(String(localized: "Name", comment: "Food item name field"), text: $name)
                     TextField(String(localized: "Portion", comment: "Food item portion field"), text: $portion)
+                    HStack {
+                        Text(String(localized: "Weight", comment: "Food item weight field"))
+                        Spacer()
+                        TextField("", text: $weight)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                        Text("g")
+                            .foregroundColor(.secondary)
+                    }
                 } header: {
                     Text(String(localized: "Ingredient", comment: "FoodFinder ingredient section"))
                 }
@@ -1854,7 +1873,7 @@ private struct FoodItemEditSheet: View {
                 } header: {
                     Text(String(localized: "Nutrition", comment: "FoodFinder nutrition section"))
                 } footer: {
-                    Text(String(localized: "These values apply to the currently selected portion multiplier.", comment: "FoodFinder edit ingredient footer"))
+                    Text(String(localized: "Enter the macros for the weight above. Saving makes this the 1× portion, so the + / − stepper and gram field scale from here.", comment: "FoodFinder edit ingredient footer"))
                 }
             }
             .navigationTitle(String(localized: "Edit Ingredient", comment: "FoodFinder edit ingredient alert"))
@@ -1877,17 +1896,20 @@ private struct FoodItemEditSheet: View {
     }
 
     private var updatedItem: AIInsights.FoodItem {
-        let multiplier = max(item.portionMultiplier, 0.25)
+        // The macro fields are absolute values for the weight shown. Bake them in
+        // as the new 1× portion so the portion string, weight and macros can never
+        // drift out of sync — the stepper and gram field then scale from here.
+        let enteredGrams = decimalValue(weight)
         return AIInsights.FoodItem(
             id: item.id,
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-            portion: portion.trimmingCharacters(in: .whitespacesAndNewlines).aiInsightsNilIfEmpty ?? item.portion,
-            carbs: max(0, decimalValue(carbs)) / multiplier,
-            fat: max(0, decimalValue(fat)) / multiplier,
-            protein: max(0, decimalValue(protein)) / multiplier,
-            fiber: max(0, decimalValue(fiber)) / multiplier,
-            calories: max(0, decimalValue(calories)) / multiplier,
-            portionMultiplier: item.portionMultiplier,
+            portion: composedPortion(label: portion, grams: enteredGrams),
+            carbs: max(0, decimalValue(carbs)),
+            fat: max(0, decimalValue(fat)),
+            protein: max(0, decimalValue(protein)),
+            fiber: max(0, decimalValue(fiber)),
+            calories: max(0, decimalValue(calories)),
+            portionMultiplier: 1.0,
             source: item.source,
             sourceURL: item.sourceURL,
             sourceVerified: item.sourceVerified,
@@ -1897,6 +1919,49 @@ private struct FoodItemEditSheet: View {
             sourceScore: item.sourceScore,
             alternateMatches: item.alternateMatches
         )
+    }
+
+    /// Combine the human label and an explicit weight into a single portion
+    /// string the rest of the app can re-parse, e.g. "2 slices (40 g)". When no
+    /// weight is given we keep the label as-is; when the label is empty we fall
+    /// back to just the weight ("40 g").
+    private func composedPortion(label: String, grams: Double) -> String {
+        let cleanLabel = Self.portionLabel(label.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard grams > 0 else {
+            return cleanLabel.aiInsightsNilIfEmpty
+                ?? label.trimmingCharacters(in: .whitespacesAndNewlines).aiInsightsNilIfEmpty
+                ?? item.portion
+        }
+        let gramText = String(format: "%.0f g", grams)
+        guard let base = cleanLabel.aiInsightsNilIfEmpty else { return gramText }
+        return "\(base) (\(gramText))"
+    }
+
+    /// First gram/ml value embedded in a portion string, if any.
+    private static func grams(from portion: String) -> Double? {
+        let pattern = #"(\d+(?:[.,]\d+)?)\s*(?:g|gram|grams|ml|milliliter|milliliters)\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let range = NSRange(portion.startIndex ..< portion.endIndex, in: portion)
+        guard let match = regex.firstMatch(in: portion, options: [], range: range),
+              let valueRange = Range(match.range(at: 1), in: portion)
+        else { return nil }
+        return Double(String(portion[valueRange]).replacingOccurrences(of: ",", with: "."))
+    }
+
+    /// Strip any embedded weight token (and a wrapping "(...)") from a portion so
+    /// only the descriptive label remains, e.g. "2 slices (90 g)" -> "2 slices".
+    private static func portionLabel(_ portion: String) -> String {
+        let pattern = #"\s*\(?\s*\d+(?:[.,]\d+)?\s*(?:g|gram|grams|ml|milliliter|milliliters)\b\s*\)?"#
+        let stripped: String
+        if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
+            let range = NSRange(portion.startIndex ..< portion.endIndex, in: portion)
+            stripped = regex.stringByReplacingMatches(in: portion, options: [], range: range, withTemplate: "")
+        } else {
+            stripped = portion
+        }
+        return stripped
+            .trimmingCharacters(in: CharacterSet(charactersIn: " ()-–,"))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func macroField(_ label: String, text: Binding<String>, unit: String) -> some View {

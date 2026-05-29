@@ -46,8 +46,7 @@ private struct AIInsightsKeyboardAdaptive: ViewModifier {
         // `NotificationCenter` protocol (for DI) that shadows the Foundation
         // class at module scope.
         let center = Foundation.NotificationCenter.default
-        center.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification,
-                           object: nil, queue: OperationQueue.main) { note in
+        let apply: (Notification) -> Void = { note in
             guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
             let screenH = UIScreen.main.bounds.height
             // When the keyboard is hidden iOS reports an off-screen frame
@@ -59,6 +58,19 @@ private struct AIInsightsKeyboardAdaptive: ViewModifier {
                 self.keyboardHeight = max(0, visible - bottomInset)
             }
         }
+        // willChange tracks the keyboard live as it animates; didChange/didShow
+        // fire once it has *settled*. Observing both matters when the focused
+        // field swaps mid-animation (FoodFinder expand → collapse keeps the
+        // keyboard up but hands focus between two text views): willChange may
+        // capture a transient frame, and the settle notifications then correct a
+        // height that would otherwise leave the input bar tucked under the
+        // keyboard.
+        center.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification,
+                           object: nil, queue: OperationQueue.main, using: apply)
+        center.addObserver(forName: UIResponder.keyboardDidChangeFrameNotification,
+                           object: nil, queue: OperationQueue.main, using: apply)
+        center.addObserver(forName: UIResponder.keyboardDidShowNotification,
+                           object: nil, queue: OperationQueue.main, using: apply)
         center.addObserver(forName: UIResponder.keyboardWillHideNotification,
                            object: nil, queue: OperationQueue.main) { _ in
             DispatchQueue.main.async {

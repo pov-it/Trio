@@ -144,6 +144,12 @@ extension AIInsights {
         var carbEstimateUncertaintyUnits: Double? = nil
         var analysisCandidateCount: Int? = nil
         var doseGuardApplied: Bool? = nil
+        /// The confidence band captured at analysis time, expressed as a fraction
+        /// of the central carb estimate (e.g. 0.8 / 1.4). Persisting the band as a
+        /// ratio lets us re-derive the absolute g-range whenever the user edits a
+        /// portion or adds/removes an ingredient, so the interval tracks the meal.
+        var carbEstimateLowerRatio: Double? = nil
+        var carbEstimateUpperRatio: Double? = nil
 
         var totalCarbs: Double { manualMacroOverride?.carbs ?? items.reduce(0) { $0 + $1.adjustedCarbs } }
         var totalFat: Double { manualMacroOverride?.fat ?? items.reduce(0) { $0 + $1.adjustedFat } }
@@ -621,6 +627,7 @@ extension AIInsights {
                 )
                 applyDoseGuardDiagnostics(diagnostics, to: &result)
                 applyLearnedPortions(to: &result)
+                rescaleCarbEstimateBounds(&result)
 
                 currentResult = result
                 recentResults.insert(result, at: 0)
@@ -968,7 +975,9 @@ extension AIInsights {
             guard var result = currentResult,
                   let idx = result.items.firstIndex(where: { $0.id == itemId })
             else { return }
-            let clamped = max(0.25, multiplier)
+            // Floor only just above zero so the user can dial a portion down to
+            // any small amount (a few grams of bread, a splash of milk, …).
+            let clamped = max(0.01, multiplier)
             result.items[idx].portionMultiplier = clamped
             storeUpdatedResult(result)
             // Record so future analyses of the same item start at the
@@ -992,7 +1001,10 @@ extension AIInsights {
             else { return }
 
             if let base = gramsFromPortion(result.items[idx].portion), base > 0 {
-                let clamped = max(0.25, grams / base)
+                // No 0.25 floor here: a 90 g "2 slices" base must still be
+                // dialable down to 20 g (≈0.22×) or lower when the user knows
+                // they ate less than the AI assumed.
+                let clamped = max(0.01, grams / base)
                 result.items[idx].portionMultiplier = clamped
                 storeUpdatedResult(result)
                 recordPortionLearning(itemName: result.items[idx].name, multiplier: clamped)
@@ -1284,11 +1296,37 @@ extension AIInsights {
         }
 
         private func storeUpdatedResult(_ result: FoodAnalysisResult) {
+            var result = result
+            rescaleCarbEstimateBounds(&result)
             currentResult = result
             if let idx = recentResults.firstIndex(where: { $0.id == result.id }) {
                 recentResults[idx] = result
                 saveRecentResults()
             }
+        }
+
+        /// Re-derive the absolute carb confidence band from the stored relative
+        /// spread and the meal's current total carbs. Called on every edit so the
+        /// "x–y g range / ±E" chip moves when the user re-scales a portion or
+        /// adds/removes an ingredient. No-op until a band has been captured.
+        private func rescaleCarbEstimateBounds(_ result: inout FoodAnalysisResult) {
+            guard let lowerRatio = result.carbEstimateLowerRatio,
+                  let upperRatio = result.carbEstimateUpperRatio
+            else { return }
+            let center = result.totalCarbs
+            guard center > 0 else {
+                result.carbEstimateLowerBound = nil
+                result.carbEstimateUpperBound = nil
+                result.carbEstimateUncertaintyUnits = nil
+                return
+            }
+            let lower = max(0, center * lowerRatio)
+            let upper = max(lower, center * upperRatio)
+            result.carbEstimateLowerBound = lower
+            result.carbEstimateUpperBound = upper
+            // Carb spread translated to insulin units at I:C 1:10 (matches the
+            // metric reported by the dose-guard at analysis time).
+            result.carbEstimateUncertaintyUnits = max(0, (upper - lower) / 10.0)
         }
 
         func discardCapturedImage() {
@@ -1403,6 +1441,7 @@ extension AIInsights {
                 )
                 applyDoseGuardDiagnostics(diagnostics, to: &result)
                 applyLearnedPortions(to: &result)
+                rescaleCarbEstimateBounds(&result)
                 currentResult = result
                 recentResults.insert(result, at: 0)
                 saveRecentResults()
@@ -1848,6 +1887,17 @@ extension AIInsights {
             result.carbEstimateUncertaintyUnits = diagnostics.uncertaintyUnits
             result.analysisCandidateCount = diagnostics.candidateCount
             result.doseGuardApplied = diagnostics.applied
+
+            // Persist the band as a fraction of the central estimate so it can be
+            // re-scaled when the user later edits portions or ingredients.
+            let center = result.totalCarbs
+            if center > 0,
+               let lower = diagnostics.lowerBound,
+               let upper = diagnostics.upperBound
+            {
+                result.carbEstimateLowerRatio = lower / center
+                result.carbEstimateUpperRatio = upper / center
+            }
 
             guard diagnostics.applied,
                   let lower = diagnostics.lowerBound,
