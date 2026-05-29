@@ -680,6 +680,7 @@ extension AIInsights {
             - When preparation is unspecified, assume the normally-eaten edible/cooked form, not raw dry flour/powder weights (e.g. "rice" means cooked rice, not dry grains; "oats" means prepared, not dry unless stated)
             - Do not inflate vague labels (vegetable, sauce, curry, dal, vaji, salad, side) into a large starch portion unless the text or image clearly shows a large starch serving
             - Recognize embedded and hyphenated quantities as exact portions (e.g. "230-gram", "weighing 30 grams", "a 330ml can", "two 25g slices") and honor them precisely
+            - Always include an approximate weight in grams (or volume in ml for drinks) in every item's "portion" string, e.g. "1 serving (150 g)", "2 slices (60 g)", "1 can (330 ml)". This lets the user re-scale by typing grams. Use a realistic standard weight when none is stated.
             - If you cannot identify the food, respond with: {"mealName":"Unknown","mealPortion":"Unknown","confidence":0.1,"items":[]}
             - Food names and portion descriptions should match the user's app language when possible
             - Respond ONLY with the JSON object. No markdown, no explanation outside the JSON.
@@ -973,6 +974,33 @@ extension AIInsights {
             // Record so future analyses of the same item start at the
             // user's preferred portion automatically.
             recordPortionLearning(itemName: result.items[idx].name, multiplier: clamped)
+        }
+
+        /// Set an ingredient's portion by absolute weight in grams.
+        ///
+        /// If the portion description already carries a gram anchor (e.g.
+        /// "150 g"), we scale the multiplier so the macros track the typed
+        /// weight (500 g of a 150 g serving → 3.33×). If there is no gram
+        /// anchor (e.g. "1 serving"), we honestly cannot derive carbs-per-gram,
+        /// so we record the typed weight as the description and keep the AI's
+        /// macros at 1× — anchoring "this estimate = N grams". Subsequent gram
+        /// edits then scale proportionally.
+        func setPortionGrams(for itemId: UUID, grams: Double) {
+            guard grams > 0,
+                  var result = currentResult,
+                  let idx = result.items.firstIndex(where: { $0.id == itemId })
+            else { return }
+
+            if let base = gramsFromPortion(result.items[idx].portion), base > 0 {
+                let clamped = max(0.25, grams / base)
+                result.items[idx].portionMultiplier = clamped
+                storeUpdatedResult(result)
+                recordPortionLearning(itemName: result.items[idx].name, multiplier: clamped)
+            } else {
+                result.items[idx].portion = String(format: "%.0f g", grams)
+                result.items[idx].portionMultiplier = 1.0
+                storeUpdatedResult(result)
+            }
         }
 
         func updateItemName(for itemId: UUID, name: String) {

@@ -39,7 +39,7 @@ extension AIInsights {
             // Collapsed bar carries its own internal .padding(.bottom, 8), so it
             // needs a larger value to snap flush to the keyboard like the
             // expanded composer (which has no internal bottom padding).
-            .aiInsightsKeyboardAdaptive(bottomSpacing: isComposerExpanded ? 50 : 64)
+            .aiInsightsKeyboardAdaptive(bottomSpacing: isComposerExpanded ? 50 : 84)
             .navigationTitle(currentNavTitle)
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(state.currentResult != nil)
@@ -875,9 +875,13 @@ extension AIInsights {
                     .buttonStyle(.borderless)
                     .contentShape(Rectangle())
 
-                    Text(String(format: "%.2f×", item.portionMultiplier))
-                        .font(.caption.monospacedDigit())
-                        .frame(width: 46)
+                    // Tap the factor to type any value directly (not just ±0.25 steps).
+                    EditableMultiplierField(
+                        multiplier: item.portionMultiplier,
+                        onCommit: { newValue in
+                            state.updatePortion(for: item.id, multiplier: newValue)
+                        }
+                    )
 
                     Button {
                         state.updatePortion(for: item.id, multiplier: item.portionMultiplier + 0.25)
@@ -889,16 +893,15 @@ extension AIInsights {
                     .contentShape(Rectangle())
                 }
 
-                if let base {
-                    LinkedGramsField(
-                        modelGrams: base * item.portionMultiplier,
-                        baseGrams: base,
-                        onCommit: { newGrams in
-                            let multiplier = max(0.1, newGrams / base)
-                            state.updatePortion(for: item.id, multiplier: multiplier)
-                        }
-                    )
-                }
+                // Absolute gram entry — always available. When the portion has
+                // a gram anchor the value scales the macros; otherwise the typed
+                // weight is recorded as the portion (see setPortionGrams).
+                PortionGramsField(
+                    grams: base.map { $0 * item.portionMultiplier },
+                    onCommit: { newGrams in
+                        state.setPortionGrams(for: item.id, grams: newGrams)
+                    }
+                )
             }
         }
 
@@ -2059,23 +2062,87 @@ private struct EditableDoubleField: View {
     }
 }
 
-private struct LinkedGramsField: View {
-    let modelGrams: Double
-    let baseGrams: Double
+/// Editable portion-multiplier field. Shows "X.XX×" and, when tapped, lets the
+/// user type any factor directly instead of being limited to ±0.25 steps.
+private struct EditableMultiplierField: View {
+    let multiplier: Double
     let onCommit: (Double) -> Void
 
     @State private var text: String = ""
     @FocusState private var focused: Bool
 
     var body: some View {
-        TextField("", text: $text)
+        HStack(spacing: 1) {
+            TextField("", text: $text)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.center)
+                .font(.caption.monospacedDigit())
+                .focused($focused)
+                .frame(width: 38)
+                .onAppear { syncText() }
+                .onChange(of: multiplier) {
+                    if !focused { syncText() }
+                }
+                .onChange(of: focused) {
+                    if !focused { commit() }
+                }
+                .onSubmit { focused = false }
+            Text("×")
+                .font(.caption.monospacedDigit())
+                .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 2)
+        .padding(.horizontal, 3)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(focused ? Color.accentColor : Color.clear, lineWidth: 1)
+        )
+        .toolbar {
+            if focused {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button(String(localized: "Done", comment: "Dismiss keyboard")) {
+                        focused = false
+                    }
+                    .bold()
+                }
+            }
+        }
+    }
+
+    private func syncText() {
+        text = String(format: "%.2f", multiplier)
+    }
+
+    private func commit() {
+        let normalized = text.replacingOccurrences(of: ",", with: ".")
+        if let value = Double(normalized), value > 0 {
+            onCommit(value)
+        } else {
+            syncText()
+        }
+    }
+}
+
+/// Absolute gram entry for a portion. `grams` is nil when the portion has no
+/// gram anchor yet — the field then shows a placeholder so the user can still
+/// type a weight (the state model records it; see setPortionGrams).
+private struct PortionGramsField: View {
+    let grams: Double?
+    let onCommit: (Double) -> Void
+
+    @State private var text: String = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField(String(localized: "g", comment: "Grams placeholder"), text: $text)
             .keyboardType(.decimalPad)
             .multilineTextAlignment(.center)
             .font(.caption.monospacedDigit())
             .focused($focused)
             .frame(width: 60)
             .onAppear { syncText() }
-            .onChange(of: modelGrams) {
+            .onChange(of: grams) {
                 if !focused { syncText() }
             }
             .onChange(of: focused) {
@@ -2093,7 +2160,7 @@ private struct LinkedGramsField: View {
                     .font(.caption2)
                     .foregroundColor(.secondary)
                     .padding(.trailing, 3)
-                    .opacity(focused ? 0 : 1)
+                    .opacity(focused || text.isEmpty ? 0 : 1)
             }
             .toolbar {
                 if focused {
@@ -2109,13 +2176,17 @@ private struct LinkedGramsField: View {
     }
 
     private func syncText() {
-        text = String(format: "%.0f", modelGrams)
+        if let grams {
+            text = String(format: "%.0f", grams)
+        } else {
+            text = ""
+        }
     }
 
     private func commit() {
         let normalized = text.replacingOccurrences(of: ",", with: ".")
-        if let grams = Double(normalized), grams > 0 {
-            onCommit(grams)
+        if let value = Double(normalized), value > 0 {
+            onCommit(value)
         } else {
             syncText()
         }
