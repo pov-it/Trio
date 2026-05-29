@@ -1,12 +1,16 @@
 ---
-description: Push current work to feature/ai-insights, run Build Trio workflow, monitor, fix on failure, retry until green.
+description: Push current work to the active ai-insights branch, run Build Trio workflow, monitor to completion, fix on failure, retry until green.
 argument-hint: "[optional commit message]"
 allowed-tools: Bash, Read, Edit, Write, Grep, Glob, WebFetch
 ---
 
-# /ship-ai-insights — Push to feature/ai-insights and babysit GitHub Actions build
+# /ship-ai-insights — Push to the active ai-insights branch and babysit GitHub Actions build
 
-You are running the **ship-ai-insights** workflow. Goal: get current work onto `feature/ai-insights` and produce a green build on `4. Build Trio` GitHub Actions workflow. Retry-on-failure is automatic — keep iterating until green OR until you hit a blocker you cannot resolve without the user.
+You are running the **ship-ai-insights** workflow. Goal: get current work onto the active ai-insights branch and produce a green build on `4. Build Trio` GitHub Actions workflow. Retry-on-failure is automatic — keep iterating until green OR until you hit a blocker you cannot resolve without the user.
+
+## Active branch
+
+There are two long-lived experiment branches: `feature/ai-insights` (lean) and `feature/ai-insights+oref-swift` (oref-swift merged in). **The current default build branch is `feature/ai-insights+oref-swift`** — confirm the checked-out branch first and ship to whichever the user is actually on. Never run both builds in parallel: they share `APP_DEV_VERSION 0.8.0` and collide on the TestFlight upload step.
 
 ## Inputs
 
@@ -17,25 +21,28 @@ User-supplied commit message (optional): `$ARGUMENTS`. If empty, derive a concis
 ### 1. Pre-flight
 
 - `git status` and `git branch --show-current`.
-- If branch ≠ `feature/ai-insights`: ask user before switching. They may want changes shipped via a different branch first (e.g. they are on a worktree branch and want it merged forward).
+- Ship to the **currently checked-out** ai-insights branch (normally `feature/ai-insights+oref-swift`). Do NOT switch branches. Only ask the user if the checked-out branch is something unexpected (not an ai-insights branch).
 - If working tree dirty: stage tracked changes (`git add -u`) plus any obviously-relevant new files. **Never** `git add .` or `-A` (avoids secrets/large bins). Show diff stat before committing.
 - If clean and branch already matches remote: skip to step 3 (no-op push, but still trigger build if user explicitly asked).
 
 ### 2. Commit + push
 
-- Create a single commit on `feature/ai-insights` (or current branch if user redirected). Conventional message, no Claude attribution unless requested.
-- `git push origin feature/ai-insights`. If push rejected (non-fast-forward), STOP and ask user — do not force-push. Fork is `pov-it/Trio`.
+- Create a single commit on the active branch (the one currently checked out). Conventional message, no Claude attribution unless requested.
+- `git push origin <current-branch>`. If push rejected (non-fast-forward), STOP and ask user — do not force-push. Fork is `pov-it/Trio`.
 
 ### 3. Trigger build
 
-- Trigger via: `gh workflow run "4. Build Trio" --repo pov-it/Trio --ref feature/ai-insights`.
-- Capture the run ID: poll `gh run list --workflow="4. Build Trio" --repo pov-it/Trio --branch feature/ai-insights --limit 1 --json databaseId,status,conclusion,headSha` until `headSha` matches `git rev-parse HEAD`. Up to 30s wait.
+- Trigger via: `gh workflow run "4. Build Trio" --repo pov-it/Trio --ref <current-branch>`.
+- Capture the run ID: poll `gh run list --workflow="4. Build Trio" --repo pov-it/Trio --branch <current-branch> --limit 1 --json databaseId,status,conclusion,headSha` until `headSha` matches `git rev-parse HEAD`. Up to 30s wait.
 
-### 4. Monitor
+### 4. Monitor — MANDATORY, to completion
 
-- Poll run status with `gh run view <runId> --repo pov-it/Trio --json status,conclusion,jobs` every ~120s.
-- Build is long (~30–60 min). Use Bash `run_in_background` only if appropriate; otherwise just sleep 270s between polls (stays in cache window).
-- Stream progress to user every 2–3 polls: "Build still running, job X at step Y" — terse.
+**This is not optional. Dispatching the build is NOT "done". You MUST watch it to a terminal state (success or failure) and report the outcome.** Past failures of this command have been: triggering the build and then walking away without confirming it went green. Do not do that.
+
+- Preferred: `gh run watch <runId> --repo pov-it/Trio --exit-status` via Bash `run_in_background`. You will be notified when it finishes — do not poll, do not sleep-loop.
+- If `gh run watch` is unavailable/unreliable, poll `gh run view <runId> --repo pov-it/Trio --json status,conclusion,jobs`; sleep 270s between polls (stays in cache window). Build is long (~30–60 min).
+- Treat the authoritative outcome as `gh run view <runId> --json status,conclusion` (`completed`/`success`). A background watcher reporting a nonzero exit is NOT authoritative on its own — re-check with `gh run view` before declaring failure.
+- Stream progress to user every few polls: "Build still running, job X at step Y" — terse. Do NOT end your turn until the build reaches a terminal state and you've reported it.
 
 ### 5. On success
 
@@ -53,7 +60,7 @@ User-supplied commit message (optional): `$ARGUMENTS`. If empty, derive a concis
   - Signing/secrets in GH Actions: NOT your fix — surface to user.
   - Browser build specifics: see https://loopkit.github.io/loopdocs/browser/edit-browser/ — fetch if relevant.
 - Edit code locally. Do NOT skip hooks. Re-commit ("fix: <what>") and push.
-- Re-trigger build (step 3). Repeat up to **5 build attempts** total before bailing to user with a summary of what was tried.
+- Re-trigger build (step 3) and go back to step 4 — monitor the new run to completion too. Repeat up to **5 build attempts** total before bailing to user with a summary of what was tried.
 
 ### 7. Bail conditions
 
