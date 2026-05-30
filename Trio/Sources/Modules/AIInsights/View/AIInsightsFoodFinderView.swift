@@ -31,15 +31,18 @@ extension AIInsights {
         var body: some View {
             ZStack(alignment: .bottom) {
                 contentArea
-                foodInputBar
                 barcodeStatusBanner
             }
+            // safeAreaInset places the bar at the top of the current bottom safe
+            // area — which includes the keyboard when it is visible — so it works
+            // correctly in every presentation context: NavigationStack, sheet,
+            // AnyView wrapper, and URL-scheme modal, without screen-coordinate
+            // arithmetic. The bar's background extends into the home-indicator
+            // region via .ignoresSafeArea(edges: .bottom) on the fill shapes.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                foodInputBar
+            }
             .background(appState.trioBackgroundColor(for: colorScheme))
-            // Higher bottomSpacing tightens the gap above the keyboard.
-            // Collapsed bar carries its own internal .padding(.bottom, 8), so it
-            // needs a larger value to snap flush to the keyboard like the
-            // expanded composer (which has no internal bottom padding).
-            .aiInsightsKeyboardAdaptive(bottomSpacing: isComposerExpanded ? 50 : 84)
             .navigationTitle(currentNavTitle)
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(state.currentResult != nil)
@@ -205,7 +208,9 @@ extension AIInsights {
                         .shadow(color: Color.black.opacity(0.16), radius: 12, y: 5)
                 )
                 .padding(.horizontal, 18)
-                .padding(.bottom, isComposerExpanded ? 12 : 76)
+                // safeAreaInset already keeps the bar above the content;
+                // just add a small gap so the banner floats above the bar.
+                .padding(.bottom, 8)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .zIndex(3)
             }
@@ -1136,9 +1141,10 @@ extension AIInsights {
                 .padding(.top, isComposerExpanded ? 0 : 8)
                 .padding(.bottom, isComposerExpanded ? 0 : 8)
             }
-            // Collapsed bar: rounded only at the top, snapped flush to the
-            // keyboard at the bottom (same as the expanded composer). The
-            // expanded composer manages its own background, so leave it clear.
+            // Collapsed bar: rounded only at the top (flush at the bottom).
+            // Background extends into the home-indicator area so there is no
+            // visible gap between the bar and the screen edge when keyboard
+            // is hidden. Expanded composer manages its own background.
             .background {
                 if !isComposerExpanded {
                     UnevenRoundedRectangle(
@@ -1150,6 +1156,12 @@ extension AIInsights {
                     )
                     .fill(colorScheme == .dark ? Color.bgDarkBlue.opacity(0.96) : Color.white.opacity(0.96))
                     .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.10), radius: 8, y: -2)
+                    .ignoresSafeArea(edges: .bottom)
+                } else {
+                    // Expanded composer: fill home-indicator area with the
+                    // same background colour used by the composer itself.
+                    (colorScheme == .dark ? Color.bgDarkBlue : Color.white)
+                        .ignoresSafeArea(edges: .bottom)
                 }
             }
             .animation(.spring(response: 0.45, dampingFraction: 0.72), value: state.currentResult?.id)

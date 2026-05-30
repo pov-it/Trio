@@ -163,8 +163,12 @@ final class AIInsights_CaffeineTracker: ObservableObject, @unchecked Sendable {
         rebuildMergedEntries()
         // If the user opted in via Settings → AutoPresets → Caffeine, ask the
         // coordinator to apply the configured override preset for the
-        // sensitivity-reduction window. No-op when disabled or below threshold.
-        AutoPresetsCoordinator.shared.scheduleCaffeineOverride(mg: milligrams, at: timestamp)
+        // sensitivity-reduction window. Compare against the *cumulative*
+        // estimated level (accounting for all prior entries and half-life
+        // decay) rather than this single entry, so a second cup of coffee
+        // that brings the running total above the threshold also triggers.
+        let cumulativeMg = currentState(at: timestamp).currentLevelMg
+        AutoPresetsCoordinator.shared.scheduleCaffeineOverride(mg: cumulativeMg, at: timestamp)
     }
 
     func removeEntry(_ entry: AIInsightsCaffeineEntry) {
