@@ -1992,7 +1992,8 @@ extension AIInsights {
                 maxTokens: 2048,
                 imageData: imageData,
                 additionalImageData: additionalImageData,
-                responseFormat: foodFinderResponseFormat
+                responseFormat: foodFinderResponseFormat,
+                disableThinking: true
             )
 
             let response = try await AIServiceAdapter.send(
@@ -2074,7 +2075,8 @@ extension AIInsights {
                     maxTokens: 2048,
                     imageData: round == 0 ? imageData : nil,
                     additionalImageData: round == 0 ? additionalImageData : [],
-                    responseFormat: nil
+                    responseFormat: nil,
+                    disableThinking: true
                 )
                 let response = try await AIServiceAdapter.send(
                     request: request,
@@ -2140,7 +2142,8 @@ extension AIInsights {
                 maxTokens: 2048,
                 imageData: nil,
                 additionalImageData: [],
-                responseFormat: nil
+                responseFormat: nil,
+                disableThinking: true
             )
             let finalResponse = try await AIServiceAdapter.send(
                 request: finalRequest,
@@ -2180,7 +2183,8 @@ extension AIInsights {
                 maxTokens: 2048,
                 imageData: imageData,
                 additionalImageData: additionalImageData,
-                responseFormat: nil
+                responseFormat: nil,
+                disableThinking: true
             )
             let response = try await AIServiceAdapter.send(
                 request: request,

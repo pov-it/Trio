@@ -23,6 +23,11 @@ extension AIInsights {
             var imageData: Data? = nil
             var additionalImageData: [Data] = []
             var responseFormat: [String: Any]? = nil
+            /// When true, ask Gemini to skip "thinking" (thinkingBudget 0).
+            /// Thinking models otherwise spend the output-token budget on hidden
+            /// reasoning — slower and prone to truncating the JSON answer. Only
+            /// affects Gemini; ignored by other providers.
+            var disableThinking: Bool = false
 
             /// All images this request carries, in order — convenience for the
             /// provider serializers.
@@ -65,6 +70,10 @@ extension AIInsights {
             let id: String
             let name: String
             let argumentsJSON: String
+            /// Gemini thinking models attach a signature to each functionCall
+            /// part; it MUST be echoed back when the call is replayed in the
+            /// conversation history or Gemini rejects the request (HTTP 400).
+            var thoughtSignature: String? = nil
         }
 
         struct AIResponse {
@@ -449,12 +458,17 @@ extension AIInsights {
                 // Assistant turn that requested tools → functionCall parts.
                 if msg.role == .assistant, let calls = msg.toolCalls, !calls.isEmpty {
                     for call in calls {
-                        parts.append([
+                        var fcPart: [String: Any] = [
                             "functionCall": [
                                 "name": call.name,
                                 "args": jsonObject(from: call.argumentsJSON)
                             ]
-                        ])
+                        ]
+                        // Echo the thinking-model signature back, required on replay.
+                        if let signature = call.thoughtSignature {
+                            fcPart["thoughtSignature"] = signature
+                        }
+                        parts.append(fcPart)
                     }
                     if !msg.content.isEmpty { parts.append(["text": msg.content]) }
                 } else {
@@ -521,6 +535,9 @@ extension AIInsights {
             if request.responseFormat != nil, toolEntries.isEmpty {
                 genConfig["responseMimeType"] = "application/json"
             }
+            if request.disableThinking {
+                genConfig["thinkingConfig"] = ["thinkingBudget": 0]
+            }
             if !genConfig.isEmpty {
                 body["generationConfig"] = genConfig
             }
@@ -559,7 +576,13 @@ extension AIInsights {
                 guard let fc = part["functionCall"] as? [String: Any],
                       let name = fc["name"] as? String else { continue }
                 let args = fc["args"] as? [String: Any] ?? [:]
-                toolCalls.append(ToolCall(id: "\(name)-\(idx)", name: name, argumentsJSON: jsonString(from: args)))
+                let identifier = fc["id"] as? String ?? "\(name)-\(idx)"
+                toolCalls.append(ToolCall(
+                    id: identifier,
+                    name: name,
+                    argumentsJSON: jsonString(from: args),
+                    thoughtSignature: part["thoughtSignature"] as? String
+                ))
             }
 
             guard !text.isEmpty || !toolCalls.isEmpty else {
