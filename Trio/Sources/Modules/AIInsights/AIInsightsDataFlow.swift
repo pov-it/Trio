@@ -160,7 +160,10 @@ enum AIInsights {
 
         var defaultModel: String {
             switch self {
-            case .google: return "gemini-2.0-flash"
+            // gemini-2.0-flash was retired by Google (returns 404 on
+            // generateContent); 2.5-flash is the current vision + tool-calling
+            // model.
+            case .google: return "gemini-2.5-flash"
             case .openai: return "gpt-4o"
             case .anthropic: return "claude-sonnet-4-20250514"
             case .custom: return ""
@@ -169,7 +172,7 @@ enum AIInsights {
 
         var defaultDictationModel: String {
             switch self {
-            case .google: return "gemini-2.0-flash"
+            case .google: return "gemini-2.5-flash"
             case .openai: return "gpt-4o-transcribe"
             case .anthropic: return defaultModel
             case .custom: return ""
@@ -186,7 +189,7 @@ enum AIInsights {
         var defaultEndpoint: String {
             switch self {
             case .google:
-                return "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+                return "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
             case .openai, .anthropic, .custom:
                 return defaultBaseURL
             }

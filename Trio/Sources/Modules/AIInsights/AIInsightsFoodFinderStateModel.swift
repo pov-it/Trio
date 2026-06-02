@@ -1872,6 +1872,22 @@ extension AIInsights {
                 }
             }
 
+            // Web-search fallback (Gemini): if the database tool loop resolved
+            // nothing, try a grounding-only pass — useful for obscure dishes the
+            // food databases don't carry — before the plain legacy path.
+            if candidates.isEmpty, isFoodLookupAgentEnabled, providerType == .google {
+                do {
+                    let parsed = try await runGroundingOnlyAnalysis(
+                        prompt: prompt,
+                        imageData: imageData,
+                        additionalImageData: additionalImageData
+                    )
+                    candidates.append(FoodAnalysisCandidate(parsed: parsed, rawResponse: ""))
+                } catch {
+                    lastError = error
+                }
+            }
+
             // Fallback (agentic failed / unsupported) or aiEstimateOnly mode:
             // the original sequential estimate-then-verify pipeline.
             if candidates.isEmpty {
@@ -2025,49 +2041,16 @@ extension AIInsights {
         }
 
         /// One agentic candidate: a ReAct loop where the model grounds itself via
-        /// tools, then returns the final JSON meal. Throws on failure so the
-        /// caller can fall back to the legacy pipeline. Google Search grounding
-        /// is attempted first on Gemini; if a model rejects combining grounding
-        /// with function declarations, it retries once without grounding before
-        /// giving up (so we don't lose agentic grounding entirely on that model).
+        /// the search_food_database tool, then returns the final JSON meal.
+        /// Throws on failure so the caller can fall back. NOTE: Gemini rejects
+        /// combining Google Search grounding with function declarations in the
+        /// same request (HTTP 400), so this loop never enables grounding — web
+        /// search is offered separately via `runGroundingOnlyAnalysis`.
         private func runAgenticAnalysis(
             prompt: String,
             imageData: Data?,
             additionalImageData: [Data],
             cache: FoodLookupCache
-        ) async throws -> ParsedFoodAnalysis {
-            // Google Search grounding helps identify obscure named dishes from
-            // text, but for a photo the database tool is what matters — web
-            // search only adds latency (and can clash with function calls +
-            // images on some models), so skip grounding when an image is present.
-            let hasImage = imageData != nil || !additionalImageData.isEmpty
-            let preferGrounding = providerType == .google && !hasImage
-            do {
-                return try await runAgenticAnalysis(
-                    prompt: prompt,
-                    imageData: imageData,
-                    additionalImageData: additionalImageData,
-                    cache: cache,
-                    grounding: preferGrounding
-                )
-            } catch {
-                guard preferGrounding else { throw error }
-                return try await runAgenticAnalysis(
-                    prompt: prompt,
-                    imageData: imageData,
-                    additionalImageData: additionalImageData,
-                    cache: cache,
-                    grounding: false
-                )
-            }
-        }
-
-        private func runAgenticAnalysis(
-            prompt: String,
-            imageData: Data?,
-            additionalImageData: [Data],
-            cache: FoodLookupCache,
-            grounding: Bool
         ) async throws -> ParsedFoodAnalysis {
             var messages: [AIServiceAdapter.ChatMessagePayload] = [
                 AIServiceAdapter.ChatMessagePayload(role: .system, content: foodFinderAgentSystemPrompt),
@@ -2099,7 +2082,7 @@ extension AIInsights {
                     baseURL: baseURL,
                     apiKey: apiKey,
                     tools: tools,
-                    geminiGrounding: grounding
+                    geminiGrounding: false
                 )
 
                 // No tool calls → treat as the final answer.
@@ -2168,6 +2151,46 @@ extension AIInsights {
                 geminiGrounding: false
             )
             let parsed = parseFoodAnalysis(from: finalResponse.text)
+            guard !parsed.items.isEmpty else { throw AIServiceAdapter.AIError.noContent }
+            return parsed
+        }
+
+        /// Web-search grounded analysis (Gemini Google Search), used as a
+        /// fallback when the database tool loop can't resolve a meal — e.g. an
+        /// obscure restaurant or homemade dish the food databases don't carry.
+        /// Runs WITHOUT function tools, because Gemini forbids combining Google
+        /// Search grounding with function declarations in one request.
+        private func runGroundingOnlyAnalysis(
+            prompt: String,
+            imageData: Data?,
+            additionalImageData: [Data]
+        ) async throws -> ParsedFoodAnalysis {
+            let request = AIServiceAdapter.AIRequest(
+                model: model,
+                messages: [
+                    AIServiceAdapter.ChatMessagePayload(role: .system, content: foodFinderSystemPrompt),
+                    AIServiceAdapter.ChatMessagePayload(
+                        role: .user,
+                        content: prompt + "\n\nUse web search if it helps you identify the dish or its nutrition. Then return ONLY the final JSON meal object."
+                    )
+                ],
+                temperature: 0.0,
+                topP: 0.85,
+                topK: nil,
+                maxTokens: 2048,
+                imageData: imageData,
+                additionalImageData: additionalImageData,
+                responseFormat: nil
+            )
+            let response = try await AIServiceAdapter.send(
+                request: request,
+                provider: providerType,
+                baseURL: baseURL,
+                apiKey: apiKey,
+                tools: [],
+                geminiGrounding: providerType == .google
+            )
+            let parsed = parseFoodAnalysis(from: response.text)
             guard !parsed.items.isEmpty else { throw AIServiceAdapter.AIError.noContent }
             return parsed
         }
