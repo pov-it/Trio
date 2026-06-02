@@ -19,7 +19,7 @@ enum AIInsights {
         }
     }
 
-    enum FoodSourceID: String, CaseIterable, Identifiable, Codable, JSON {
+    enum FoodSourceID: String, CaseIterable, Identifiable, Codable, JSON, Sendable {
         case aiEstimate
         case openFoodFacts
         case usda
@@ -54,7 +54,7 @@ enum AIInsights {
         }
     }
 
-    struct FoodLookupResult: Identifiable, Codable, Equatable {
+    struct FoodLookupResult: Identifiable, Codable, Equatable, Sendable {
         var id: UUID = UUID()
         var sourceID: FoodSourceID
         var name: String

@@ -37,18 +37,43 @@ extension AIInsights {
         struct ChatMessagePayload {
             let role: Role
             let content: String
+            /// Populated on an `assistant` turn that requested one or more tools.
+            var toolCalls: [ToolCall]? = nil
+            /// On a `.tool` result turn: which tool call this message answers.
+            var toolCallID: String? = nil
+            /// On a `.tool` result turn: the tool/function name (Gemini needs it).
+            var toolName: String? = nil
 
             enum Role: String {
                 case system
                 case user
                 case assistant
+                case tool
             }
+        }
+
+        /// A tool the model may call. `parameters` is a JSON-Schema object.
+        struct ToolSpec {
+            let name: String
+            let description: String
+            let parameters: [String: Any]
+        }
+
+        /// A tool invocation requested by the model. Arguments are kept as a raw
+        /// JSON string so the value is trivially Sendable and parsed on demand.
+        struct ToolCall: Sendable {
+            let id: String
+            let name: String
+            let argumentsJSON: String
         }
 
         struct AIResponse {
             let text: String
             let model: String?
             let usage: Usage?
+            /// Non-empty when the model asked to call one or more tools instead
+            /// of (or in addition to) emitting final text.
+            var toolCalls: [ToolCall] = []
 
             struct Usage {
                 let promptTokens: Int?
@@ -107,6 +132,53 @@ extension AIInsights {
             case .anthropic:
                 return try await sendAnthropic(request: request, baseURL: baseURL, apiKey: apiKey)
             }
+        }
+
+        /// Tool-enabled variant used by the FoodFinder agentic loop. The model
+        /// may respond with `toolCalls`; the caller executes them and sends the
+        /// growing conversation back until the model returns final text.
+        static func send(
+            request: AIRequest,
+            provider: AIProvider,
+            baseURL: String,
+            apiKey: String,
+            tools: [ToolSpec],
+            geminiGrounding: Bool
+        ) async throws -> AIResponse {
+            guard !apiKey.isEmpty else { throw AIError.noAPIKey }
+
+            switch provider {
+            case .google:
+                return try await sendGemini(
+                    request: request, baseURL: baseURL, apiKey: apiKey,
+                    tools: tools, grounding: geminiGrounding
+                )
+            case .openai, .custom:
+                return try await sendOpenAICompatible(
+                    request: request, baseURL: baseURL, apiKey: apiKey, tools: tools
+                )
+            case .anthropic:
+                return try await sendAnthropic(
+                    request: request, baseURL: baseURL, apiKey: apiKey, tools: tools
+                )
+            }
+        }
+
+        // MARK: - JSON helpers (tool arguments / results)
+
+        private static func jsonString(from object: Any) -> String {
+            guard JSONSerialization.isValidJSONObject(object),
+                  let data = try? JSONSerialization.data(withJSONObject: object),
+                  let string = String(data: data, encoding: .utf8)
+            else { return "{}" }
+            return string
+        }
+
+        private static func jsonObject(from string: String) -> [String: Any] {
+            guard let data = string.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return [:] }
+            return object
         }
 
         private static func addTemperaturePreferredSampling(
@@ -326,7 +398,9 @@ extension AIInsights {
         private static func sendGemini(
             request: AIRequest,
             baseURL: String,
-            apiKey: String
+            apiKey: String,
+            tools: [ToolSpec] = [],
+            grounding: Bool = false
         ) async throws -> AIResponse {
             // Build the URL: baseURL should end with the model-specific endpoint
             // e.g. https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent
@@ -345,16 +419,47 @@ extension AIInsights {
             urlRequest.httpMethod = "POST"
             urlRequest.addValue("application/json", forHTTPHeaderField: "Content-Type")
 
-            // Build Gemini request body
+            // Build Gemini request body. Gemini uses "user"/"model" roles only;
+            // the system prompt goes in systemInstruction. Tool results are sent
+            // as a "user" content carrying a functionResponse part.
             var contents: [[String: Any]] = []
-            // Gemini uses "user" role for all messages; system prompt goes in systemInstruction
             let userMessages = request.messages.filter { $0.role == .user }
             let lastUserIndex = userMessages.indices.last
             var userMessageCounter = -1
             for msg in request.messages {
                 if msg.role == .system { continue } // handled separately
+
+                // Tool result turn → functionResponse part under a "user" content.
+                if msg.role == .tool {
+                    contents.append([
+                        "role": "user",
+                        "parts": [[
+                            "functionResponse": [
+                                "name": msg.toolName ?? "tool",
+                                "response": ["result": msg.content]
+                            ]
+                        ]]
+                    ])
+                    continue
+                }
+
                 let role = msg.role == .assistant ? "model" : "user"
-                var parts: [[String: Any]] = [["text": msg.content]]
+                var parts: [[String: Any]] = []
+
+                // Assistant turn that requested tools → functionCall parts.
+                if msg.role == .assistant, let calls = msg.toolCalls, !calls.isEmpty {
+                    for call in calls {
+                        parts.append([
+                            "functionCall": [
+                                "name": call.name,
+                                "args": jsonObject(from: call.argumentsJSON)
+                            ]
+                        ])
+                    }
+                    if !msg.content.isEmpty { parts.append(["text": msg.content]) }
+                } else {
+                    parts.append(["text": msg.content])
+                }
 
                 // Attach any images to the LAST user message so the model sees
                 // them in context of the most recent prompt.
@@ -386,13 +491,36 @@ extension AIInsights {
                 body["systemInstruction"] = ["parts": [["text": systemMsg.content]]]
             }
 
-            // Generation config
+            // Tools: function declarations + optional built-in Google Search.
+            var toolEntries: [[String: Any]] = []
+            if !tools.isEmpty {
+                toolEntries.append([
+                    "functionDeclarations": tools.map { tool in
+                        [
+                            "name": tool.name,
+                            "description": tool.description,
+                            "parameters": tool.parameters
+                        ] as [String: Any]
+                    }
+                ])
+            }
+            if grounding {
+                toolEntries.append(["google_search": [String: Any]()])
+            }
+            if !toolEntries.isEmpty {
+                body["tools"] = toolEntries
+            }
+
+            // Generation config. Note: Gemini rejects responseMimeType=json when
+            // function declarations are present, so skip it whenever tools are set.
             var genConfig: [String: Any] = [:]
             if let temp = request.temperature { genConfig["temperature"] = temp }
             if let topP = request.topP { genConfig["topP"] = topP }
             if let topK = request.topK { genConfig["topK"] = topK }
             if let maxTokens = request.maxTokens { genConfig["maxOutputTokens"] = maxTokens }
-            if request.responseFormat != nil { genConfig["responseMimeType"] = "application/json" }
+            if request.responseFormat != nil, toolEntries.isEmpty {
+                genConfig["responseMimeType"] = "application/json"
+            }
             if !genConfig.isEmpty {
                 body["generationConfig"] = genConfig
             }
@@ -415,15 +543,26 @@ extension AIInsights {
                 throw AIError.httpError(statusCode: httpResponse.statusCode, body: errorBody)
             }
 
-            // Parse Gemini response
+            // Parse Gemini response. Parts may contain text and/or functionCall.
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let candidates = json["candidates"] as? [[String: Any]],
                   let firstCandidate = candidates.first,
                   let content = firstCandidate["content"] as? [String: Any],
-                  let parts = content["parts"] as? [[String: Any]],
-                  let firstPart = parts.first,
-                  let text = firstPart["text"] as? String
+                  let parts = content["parts"] as? [[String: Any]]
             else {
+                throw AIError.parsingError("Could not parse Gemini response")
+            }
+
+            let text = parts.compactMap { $0["text"] as? String }.joined()
+            var toolCalls: [ToolCall] = []
+            for (idx, part) in parts.enumerated() {
+                guard let fc = part["functionCall"] as? [String: Any],
+                      let name = fc["name"] as? String else { continue }
+                let args = fc["args"] as? [String: Any] ?? [:]
+                toolCalls.append(ToolCall(id: "\(name)-\(idx)", name: name, argumentsJSON: jsonString(from: args)))
+            }
+
+            guard !text.isEmpty || !toolCalls.isEmpty else {
                 throw AIError.parsingError("Could not parse Gemini response")
             }
 
@@ -439,7 +578,8 @@ extension AIInsights {
             return AIResponse(
                 text: text,
                 model: json["modelVersion"] as? String,
-                usage: usage
+                usage: usage,
+                toolCalls: toolCalls
             )
         }
 
@@ -448,7 +588,8 @@ extension AIInsights {
         private static func sendOpenAICompatible(
             request: AIRequest,
             baseURL: String,
-            apiKey: String
+            apiKey: String,
+            tools: [ToolSpec] = []
         ) async throws -> AIResponse {
             guard let url = URL(string: baseURL) else { throw AIError.invalidURL }
 
@@ -468,6 +609,32 @@ extension AIInsights {
 
             var messagesPayload: [[String: Any]] = []
             for (idx, msg) in request.messages.enumerated() {
+                // Tool result turn → role "tool" with tool_call_id.
+                if msg.role == .tool {
+                    messagesPayload.append([
+                        "role": "tool",
+                        "tool_call_id": msg.toolCallID ?? "",
+                        "content": msg.content
+                    ])
+                    continue
+                }
+
+                // Assistant turn that requested tools → message with tool_calls.
+                if msg.role == .assistant, let calls = msg.toolCalls, !calls.isEmpty {
+                    messagesPayload.append([
+                        "role": "assistant",
+                        "content": msg.content,
+                        "tool_calls": calls.map { call in
+                            [
+                                "id": call.id,
+                                "type": "function",
+                                "function": ["name": call.name, "arguments": call.argumentsJSON]
+                            ] as [String: Any]
+                        }
+                    ])
+                    continue
+                }
+
                 if msg.role == .user, idx == lastUserIndex, !images.isEmpty {
                     // Multimodal: send images + text as a content array.
                     var contentParts: [[String: Any]] = images.map { img in
@@ -493,6 +660,18 @@ extension AIInsights {
             addTemperaturePreferredSampling(from: request, to: &body, topPKey: "top_p")
             if let maxTokens = request.maxTokens { body["max_tokens"] = maxTokens }
             if let responseFormat = request.responseFormat { body["response_format"] = responseFormat }
+            if !tools.isEmpty {
+                body["tools"] = tools.map { tool in
+                    [
+                        "type": "function",
+                        "function": [
+                            "name": tool.name,
+                            "description": tool.description,
+                            "parameters": tool.parameters
+                        ]
+                    ] as [String: Any]
+                }
+            }
 
             urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -515,9 +694,24 @@ extension AIInsights {
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let choices = json["choices"] as? [[String: Any]],
                   let firstChoice = choices.first,
-                  let message = firstChoice["message"] as? [String: Any],
-                  let content = message["content"] as? String
+                  let message = firstChoice["message"] as? [String: Any]
             else {
+                throw AIError.parsingError("Could not parse OpenAI response")
+            }
+
+            let content = message["content"] as? String ?? ""
+            var toolCalls: [ToolCall] = []
+            if let rawCalls = message["tool_calls"] as? [[String: Any]] {
+                for call in rawCalls {
+                    guard let function = call["function"] as? [String: Any],
+                          let name = function["name"] as? String else { continue }
+                    let id = call["id"] as? String ?? name
+                    let args = function["arguments"] as? String ?? "{}"
+                    toolCalls.append(ToolCall(id: id, name: name, argumentsJSON: args))
+                }
+            }
+
+            guard !content.isEmpty || !toolCalls.isEmpty else {
                 throw AIError.parsingError("Could not parse OpenAI response")
             }
 
@@ -533,7 +727,8 @@ extension AIInsights {
             return AIResponse(
                 text: content,
                 model: json["model"] as? String,
-                usage: usage
+                usage: usage,
+                toolCalls: toolCalls
             )
         }
 
@@ -542,7 +737,8 @@ extension AIInsights {
         private static func sendAnthropic(
             request: AIRequest,
             baseURL: String,
-            apiKey: String
+            apiKey: String,
+            tools: [ToolSpec] = []
         ) async throws -> AIResponse {
             guard let url = URL(string: baseURL) else { throw AIError.invalidURL }
 
@@ -563,6 +759,37 @@ extension AIInsights {
 
             var messagesPayload: [[String: Any]] = []
             for (idx, msg) in chatMessages.enumerated() {
+                // Tool result turn → a "user" message carrying a tool_result block.
+                if msg.role == .tool {
+                    messagesPayload.append([
+                        "role": "user",
+                        "content": [[
+                            "type": "tool_result",
+                            "tool_use_id": msg.toolCallID ?? "",
+                            "content": msg.content
+                        ]]
+                    ])
+                    continue
+                }
+
+                // Assistant turn that requested tools → tool_use blocks.
+                if msg.role == .assistant, let calls = msg.toolCalls, !calls.isEmpty {
+                    var blocks: [[String: Any]] = []
+                    if !msg.content.isEmpty {
+                        blocks.append(["type": "text", "text": msg.content])
+                    }
+                    for call in calls {
+                        blocks.append([
+                            "type": "tool_use",
+                            "id": call.id,
+                            "name": call.name,
+                            "input": jsonObject(from: call.argumentsJSON)
+                        ])
+                    }
+                    messagesPayload.append(["role": "assistant", "content": blocks])
+                    continue
+                }
+
                 if msg.role == .user, idx == lastUserIdx, !images.isEmpty {
                     var contentBlocks: [[String: Any]] = images.map { img in
                         [
@@ -592,6 +819,15 @@ extension AIInsights {
 
             if let systemContent = systemMessages.first?.content {
                 body["system"] = systemContent
+            }
+            if !tools.isEmpty {
+                body["tools"] = tools.map { tool in
+                    [
+                        "name": tool.name,
+                        "description": tool.description,
+                        "input_schema": tool.parameters
+                    ] as [String: Any]
+                }
             }
             addAnthropicSampling(from: request, to: &body)
 
@@ -623,7 +859,16 @@ extension AIInsights {
             let text = contentArray
                 .compactMap { $0["text"] as? String }
                 .joined(separator: "\n")
-            guard !text.isEmpty else {
+
+            var toolCalls: [ToolCall] = []
+            for block in contentArray where (block["type"] as? String) == "tool_use" {
+                guard let name = block["name"] as? String else { continue }
+                let id = block["id"] as? String ?? name
+                let input = block["input"] as? [String: Any] ?? [:]
+                toolCalls.append(ToolCall(id: id, name: name, argumentsJSON: jsonString(from: input)))
+            }
+
+            guard !text.isEmpty || !toolCalls.isEmpty else {
                 throw AIError.parsingError("Could not parse Anthropic response")
             }
 
@@ -639,7 +884,8 @@ extension AIInsights {
             return AIResponse(
                 text: text,
                 model: json["model"] as? String,
-                usage: usage
+                usage: usage,
+                toolCalls: toolCalls
             )
         }
 
