@@ -816,11 +816,18 @@ extension AIInsights {
         private func enrichFoodItemsWithLookup(_ items: [FoodItem]) async -> [FoodItem] {
             guard isFoodLookupAgentEnabled else { return items }
 
-            var enriched: [FoodItem] = []
-            for item in items {
-                enriched.append(await enrichFoodItemWithLookup(item))
+            // Enrich every item CONCURRENTLY (each lookup is a slow ~3s network
+            // round-trip), preserving original order. Keeps the fallback path
+            // fast too, so a 6-item meal verifies in ~one lookup's time instead
+            // of the sum of all of them.
+            return await withTaskGroup(of: (Int, FoodItem).self) { group -> [FoodItem] in
+                for (index, item) in items.enumerated() {
+                    group.addTask { [self] in (index, await enrichFoodItemWithLookup(item)) }
+                }
+                var indexed: [(Int, FoodItem)] = []
+                for await pair in group { indexed.append(pair) }
+                return indexed.sorted { $0.0 < $1.0 }.map(\.1)
             }
-            return enriched
         }
 
         private func enrichFoodItemWithLookup(_ item: FoodItem) async -> FoodItem {
@@ -2010,9 +2017,10 @@ extension AIInsights {
 
 
             TOOLS:
-            - You can call search_food_database(query) to fetch verified per-portion nutrition facts from OpenFoodFacts and USDA. Use it to ground items whose macros you are unsure of before finalizing. You may issue several calls (one per uncertain item); calls are cheap and de-duplicated.
+            - You can call search_food_database(query) to fetch verified per-portion nutrition facts from OpenFoodFacts and USDA. Use it to ground items whose macros you are unsure of before finalizing.
+            - IMPORTANT FOR SPEED: identify every item first, then request ALL the lookups you need in ONE single turn (emit multiple search_food_database calls together). Do NOT look items up one at a time across many turns — each round adds several seconds of latency. One batch of tool calls, then finalize.
             - Prefer verified database values over guesses. Scale the database's reference portion to the actual amount the user ate.
-            - When you have enough information, STOP calling tools and reply with ONLY the final JSON meal object described above — no tool calls, no prose.
+            - When you have the tool results, STOP calling tools and reply with ONLY the final JSON meal object described above — no tool calls, no prose.
             """
         }
 
@@ -2028,7 +2036,12 @@ extension AIInsights {
             additionalImageData: [Data],
             cache: FoodLookupCache
         ) async throws -> ParsedFoodAnalysis {
-            let preferGrounding = providerType == .google
+            // Google Search grounding helps identify obscure named dishes from
+            // text, but for a photo the database tool is what matters — web
+            // search only adds latency (and can clash with function calls +
+            // images on some models), so skip grounding when an image is present.
+            let hasImage = imageData != nil || !additionalImageData.isEmpty
+            let preferGrounding = providerType == .google && !hasImage
             do {
                 return try await runAgenticAnalysis(
                     prompt: prompt,
@@ -2061,9 +2074,14 @@ extension AIInsights {
                 AIServiceAdapter.ChatMessagePayload(role: .user, content: prompt)
             ]
             let tools = foodFinderTools
-            let maxToolRounds = 4
+            let maxToolRounds = 3
 
-            for _ in 0 ..< maxToolRounds {
+            for round in 0 ..< maxToolRounds {
+                // Attach the image only on the FIRST request. The model
+                // identifies items from the photo in round 0; later rounds only
+                // ground those named items via tool results and don't need the
+                // image re-uploaded — this avoids re-sending/re-processing it
+                // every round (a major multimodal latency source).
                 let request = AIServiceAdapter.AIRequest(
                     model: model,
                     messages: messages,
@@ -2071,8 +2089,8 @@ extension AIInsights {
                     topP: 0.85,
                     topK: nil,
                     maxTokens: 2048,
-                    imageData: imageData,
-                    additionalImageData: additionalImageData,
+                    imageData: round == 0 ? imageData : nil,
+                    additionalImageData: round == 0 ? additionalImageData : [],
                     responseFormat: nil
                 )
                 let response = try await AIServiceAdapter.send(
@@ -2122,7 +2140,10 @@ extension AIInsights {
                 }
             }
 
-            // Round cap reached — force a final JSON answer with no tools.
+            // Round cap reached — force a final JSON answer. Keep `tools`
+            // declared (no image): providers like Gemini reject a request whose
+            // history contains function calls if the tools are no longer
+            // declared, so we keep them but tell the model to stop calling them.
             messages.append(AIServiceAdapter.ChatMessagePayload(
                 role: .user,
                 content: "Return ONLY the final JSON meal object now. Do not call any more tools."
@@ -2134,15 +2155,17 @@ extension AIInsights {
                 topP: 0.85,
                 topK: nil,
                 maxTokens: 2048,
-                imageData: imageData,
-                additionalImageData: additionalImageData,
-                responseFormat: foodFinderResponseFormat
+                imageData: nil,
+                additionalImageData: [],
+                responseFormat: nil
             )
             let finalResponse = try await AIServiceAdapter.send(
                 request: finalRequest,
                 provider: providerType,
                 baseURL: baseURL,
-                apiKey: apiKey
+                apiKey: apiKey,
+                tools: tools,
+                geminiGrounding: false
             )
             let parsed = parseFoodAnalysis(from: finalResponse.text)
             guard !parsed.items.isEmpty else { throw AIServiceAdapter.AIError.noContent }
