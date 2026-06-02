@@ -7,7 +7,7 @@ import Swinject
 extension AIInsights {
     // MARK: - FoodFinder Data Types
 
-    struct FoodItem: Identifiable, Codable {
+    struct FoodItem: Identifiable, Codable, Sendable {
         var id: UUID = UUID()
         var name: String
         var portion: String
@@ -288,14 +288,14 @@ extension AIInsights {
         @ObservationIgnored private var aiDictationAudioURL: URL?
         @ObservationIgnored private var isUsingAIDictation = false
 
-        private struct ParsedFoodAnalysis {
+        private struct ParsedFoodAnalysis: Sendable {
             var items: [FoodItem]
             var mealName: String?
             var mealPortion: String?
             var confidence: Double?
         }
 
-        private struct FoodAnalysisCandidate {
+        private struct FoodAnalysisCandidate: Sendable {
             var parsed: ParsedFoodAnalysis
             var rawResponse: String
 
@@ -840,20 +840,30 @@ extension AIInsights {
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return [] }
 
-            var results: [FoodLookupResult] = []
-            for source in enabledFoodSourcesInPreferenceOrder {
-                do {
-                    switch source {
-                    case .openFoodFacts:
-                        results.append(contentsOf: try await lookupOpenFoodFactsResults(trimmed))
-                    case .usda:
-                        results.append(contentsOf: try await lookupUSDAResults(trimmed))
-                    case .aiEstimate:
-                        break
+            // Query every enabled source concurrently instead of serially —
+            // OpenFoodFacts and USDA round-trips no longer stack up.
+            let sources = enabledFoodSourcesInPreferenceOrder
+            let results = await withTaskGroup(of: [FoodLookupResult].self) { group -> [FoodLookupResult] in
+                for source in sources {
+                    group.addTask { [self] in
+                        do {
+                            switch source {
+                            case .openFoodFacts:
+                                return try await lookupOpenFoodFactsResults(trimmed)
+                            case .usda:
+                                return try await lookupUSDAResults(trimmed)
+                            case .aiEstimate:
+                                return []
+                            }
+                        } catch {
+                            debugPrint("FoodFinder lookup failed for \(source.rawValue): \(error)")
+                            return []
+                        }
                     }
-                } catch {
-                    debugPrint("FoodFinder lookup failed for \(source.rawValue): \(error)")
                 }
+                var all: [FoodLookupResult] = []
+                for await partial in group { all.append(contentsOf: partial) }
+                return all
             }
             return results.sorted { $0.verifiedScore > $1.verifiedScore }
         }
@@ -1827,18 +1837,50 @@ extension AIInsights {
             var candidates: [FoodAnalysisCandidate] = []
             var lastError: Error?
 
-            for _ in 0 ..< count {
-                do {
-                    let response = try await requestFoodAnalysis(
-                        prompt: prompt,
-                        imageData: imageData,
-                        additionalImageData: additionalImageData
-                    )
-                    var parsed = parseFoodAnalysis(from: response)
-                    parsed.items = await enrichFoodItemsWithLookup(parsed.items)
-                    candidates.append(FoodAnalysisCandidate(parsed: parsed, rawResponse: response))
-                } catch {
-                    lastError = error
+            // Agentic path: run `count` tool-using agents CONCURRENTLY, all
+            // sharing one lookup cache so identical ingredient lookups (rice,
+            // broccoli, chicken …) hit the network only once across the ensemble.
+            // Only engages when the verified-lookup agent is enabled.
+            if isFoodLookupAgentEnabled {
+                let cache = FoodLookupCache()
+                candidates = await withTaskGroup(of: FoodAnalysisCandidate?.self) { group -> [FoodAnalysisCandidate] in
+                    for _ in 0 ..< count {
+                        group.addTask { [self] in
+                            do {
+                                let parsed = try await runAgenticAnalysis(
+                                    prompt: prompt,
+                                    imageData: imageData,
+                                    additionalImageData: additionalImageData,
+                                    cache: cache
+                                )
+                                return FoodAnalysisCandidate(parsed: parsed, rawResponse: "")
+                            } catch {
+                                return nil
+                            }
+                        }
+                    }
+                    var out: [FoodAnalysisCandidate] = []
+                    for await candidate in group { if let candidate { out.append(candidate) } }
+                    return out
+                }
+            }
+
+            // Fallback (agentic failed / unsupported) or aiEstimateOnly mode:
+            // the original sequential estimate-then-verify pipeline.
+            if candidates.isEmpty {
+                for _ in 0 ..< count {
+                    do {
+                        let response = try await requestFoodAnalysis(
+                            prompt: prompt,
+                            imageData: imageData,
+                            additionalImageData: additionalImageData
+                        )
+                        var parsed = parseFoodAnalysis(from: response)
+                        parsed.items = await enrichFoodItemsWithLookup(parsed.items)
+                        candidates.append(FoodAnalysisCandidate(parsed: parsed, rawResponse: response))
+                    } catch {
+                        lastError = error
+                    }
                 }
             }
 
@@ -1937,6 +1979,222 @@ extension AIInsights {
                 apiKey: apiKey
             )
             return response.text
+        }
+
+        // MARK: - Agentic grounding loop
+
+        /// Tools the FoodFinder agent may call to ground its estimate.
+        private var foodFinderTools: [AIServiceAdapter.ToolSpec] {
+            [
+                AIServiceAdapter.ToolSpec(
+                    name: "search_food_database",
+                    description: "Look up verified nutrition facts (carbs, fat, protein, fiber, calories and the reference portion in grams) for ONE food or ingredient from OpenFoodFacts and USDA. Call this to ground any item whose macros you are unsure about — branded products, restaurant dishes, anything ambiguous — before finalizing. Returns the top matches; pick the closest and scale to the actual portion eaten.",
+                    parameters: [
+                        "type": "object",
+                        "properties": [
+                            "query": [
+                                "type": "string",
+                                "description": "The single food or ingredient to look up, e.g. 'cooked white rice' or 'Alpro soy yogurt vanilla'."
+                            ]
+                        ],
+                        "required": ["query"]
+                    ]
+                )
+            ]
+        }
+
+        /// System prompt for the agentic path: the base schema prompt plus
+        /// tool-usage guidance.
+        private var foodFinderAgentSystemPrompt: String {
+            foodFinderSystemPrompt + """
+
+
+            TOOLS:
+            - You can call search_food_database(query) to fetch verified per-portion nutrition facts from OpenFoodFacts and USDA. Use it to ground items whose macros you are unsure of before finalizing. You may issue several calls (one per uncertain item); calls are cheap and de-duplicated.
+            - Prefer verified database values over guesses. Scale the database's reference portion to the actual amount the user ate.
+            - When you have enough information, STOP calling tools and reply with ONLY the final JSON meal object described above — no tool calls, no prose.
+            """
+        }
+
+        /// One agentic candidate: a ReAct loop where the model grounds itself via
+        /// tools, then returns the final JSON meal. Throws on failure so the
+        /// caller can fall back to the legacy pipeline. Google Search grounding
+        /// is attempted first on Gemini; if a model rejects combining grounding
+        /// with function declarations, it retries once without grounding before
+        /// giving up (so we don't lose agentic grounding entirely on that model).
+        private func runAgenticAnalysis(
+            prompt: String,
+            imageData: Data?,
+            additionalImageData: [Data],
+            cache: FoodLookupCache
+        ) async throws -> ParsedFoodAnalysis {
+            let preferGrounding = providerType == .google
+            do {
+                return try await runAgenticAnalysis(
+                    prompt: prompt,
+                    imageData: imageData,
+                    additionalImageData: additionalImageData,
+                    cache: cache,
+                    grounding: preferGrounding
+                )
+            } catch {
+                guard preferGrounding else { throw error }
+                return try await runAgenticAnalysis(
+                    prompt: prompt,
+                    imageData: imageData,
+                    additionalImageData: additionalImageData,
+                    cache: cache,
+                    grounding: false
+                )
+            }
+        }
+
+        private func runAgenticAnalysis(
+            prompt: String,
+            imageData: Data?,
+            additionalImageData: [Data],
+            cache: FoodLookupCache,
+            grounding: Bool
+        ) async throws -> ParsedFoodAnalysis {
+            var messages: [AIServiceAdapter.ChatMessagePayload] = [
+                AIServiceAdapter.ChatMessagePayload(role: .system, content: foodFinderAgentSystemPrompt),
+                AIServiceAdapter.ChatMessagePayload(role: .user, content: prompt)
+            ]
+            let tools = foodFinderTools
+            let maxToolRounds = 4
+
+            for _ in 0 ..< maxToolRounds {
+                let request = AIServiceAdapter.AIRequest(
+                    model: model,
+                    messages: messages,
+                    temperature: 0.0,
+                    topP: 0.85,
+                    topK: nil,
+                    maxTokens: 2048,
+                    imageData: imageData,
+                    additionalImageData: additionalImageData,
+                    responseFormat: nil
+                )
+                let response = try await AIServiceAdapter.send(
+                    request: request,
+                    provider: providerType,
+                    baseURL: baseURL,
+                    apiKey: apiKey,
+                    tools: tools,
+                    geminiGrounding: grounding
+                )
+
+                // No tool calls → treat as the final answer.
+                if response.toolCalls.isEmpty {
+                    let parsed = parseFoodAnalysis(from: response.text)
+                    guard !parsed.items.isEmpty else { throw AIServiceAdapter.AIError.noContent }
+                    return parsed
+                }
+
+                // Record the assistant tool-call turn, then run the requested
+                // lookups CONCURRENTLY through the shared cache.
+                messages.append(AIServiceAdapter.ChatMessagePayload(
+                    role: .assistant,
+                    content: response.text,
+                    toolCalls: response.toolCalls
+                ))
+
+                let outputs = await withTaskGroup(
+                    of: (AIServiceAdapter.ToolCall, String).self
+                ) { group -> [(AIServiceAdapter.ToolCall, String)] in
+                    for call in response.toolCalls {
+                        group.addTask { [self] in
+                            (call, await executeFoodTool(call, cache: cache))
+                        }
+                    }
+                    var collected: [(AIServiceAdapter.ToolCall, String)] = []
+                    for await pair in group { collected.append(pair) }
+                    return collected
+                }
+
+                for (call, output) in outputs {
+                    messages.append(AIServiceAdapter.ChatMessagePayload(
+                        role: .tool,
+                        content: output,
+                        toolCallID: call.id,
+                        toolName: call.name
+                    ))
+                }
+            }
+
+            // Round cap reached — force a final JSON answer with no tools.
+            messages.append(AIServiceAdapter.ChatMessagePayload(
+                role: .user,
+                content: "Return ONLY the final JSON meal object now. Do not call any more tools."
+            ))
+            let finalRequest = AIServiceAdapter.AIRequest(
+                model: model,
+                messages: messages,
+                temperature: 0.0,
+                topP: 0.85,
+                topK: nil,
+                maxTokens: 2048,
+                imageData: imageData,
+                additionalImageData: additionalImageData,
+                responseFormat: foodFinderResponseFormat
+            )
+            let finalResponse = try await AIServiceAdapter.send(
+                request: finalRequest,
+                provider: providerType,
+                baseURL: baseURL,
+                apiKey: apiKey
+            )
+            let parsed = parseFoodAnalysis(from: finalResponse.text)
+            guard !parsed.items.isEmpty else { throw AIServiceAdapter.AIError.noContent }
+            return parsed
+        }
+
+        /// Execute one tool call requested by the agent. Lookups are routed
+        /// through the shared cache so identical queries across the candidate
+        /// ensemble hit the network only once.
+        private func executeFoodTool(_ call: AIServiceAdapter.ToolCall, cache: FoodLookupCache) async -> String {
+            switch call.name {
+            case "search_food_database":
+                let args = parseToolArguments(call.argumentsJSON)
+                let query = (args["query"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !query.isEmpty else { return #"{"matches": []}"# }
+                let matches = await cache.results(for: query) { [self] in
+                    await lookupFoodSources(query: query)
+                }
+                return foodToolResultJSON(query: query, matches: matches)
+            default:
+                return #"{"error": "unknown tool"}"#
+            }
+        }
+
+        private func parseToolArguments(_ json: String) -> [String: Any] {
+            guard let data = json.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return [:] }
+            return object
+        }
+
+        private func foodToolResultJSON(query: String, matches: [FoodLookupResult]) -> String {
+            let top = matches.prefix(5).map { match -> [String: Any] in
+                [
+                    "name": match.name,
+                    "brand": match.brand ?? "",
+                    "source": match.sourceID.rawValue,
+                    "portion": match.portion,
+                    "portion_grams": match.portionGrams ?? 0,
+                    "carbs_g": match.carbs,
+                    "fat_g": match.fat,
+                    "protein_g": match.protein,
+                    "fiber_g": match.fiber,
+                    "calories": match.calories,
+                    "score": match.verifiedScore
+                ]
+            }
+            let payload: [String: Any] = ["query": query, "matches": Array(top)]
+            guard let data = try? JSONSerialization.data(withJSONObject: payload),
+                  let string = String(data: data, encoding: .utf8)
+            else { return #"{"query": "", "matches": []}"# }
+            return string
         }
 
         private func searchIngredient(named name: String, existingPortion: String?) async throws -> FoodItem? {
@@ -2200,6 +2458,30 @@ extension AIInsights {
                 return Double(string.replacingOccurrences(of: ",", with: ".")) ?? 0
             }
             return 0
+        }
+    }
+}
+
+extension AIInsights {
+    /// De-duplicating lookup cache shared across the candidate agents in a
+    /// single analysis. Stores the in-flight `Task` per normalized query so
+    /// concurrent identical lookups (e.g. every candidate detecting "rice")
+    /// await the same network call instead of firing duplicates.
+    actor FoodLookupCache {
+        private var inFlight: [String: Task<[FoodLookupResult], Never>] = [:]
+
+        func results(
+            for query: String,
+            compute: @escaping @Sendable () async -> [FoodLookupResult]
+        ) async -> [FoodLookupResult] {
+            let key = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else { return [] }
+            if let existing = inFlight[key] {
+                return await existing.value
+            }
+            let task = Task { await compute() }
+            inFlight[key] = task
+            return await task.value
         }
     }
 }
