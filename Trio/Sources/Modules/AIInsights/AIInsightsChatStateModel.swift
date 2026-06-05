@@ -60,6 +60,9 @@ extension AIInsights {
             loadConversations()
             startNewConversation()
             loadKnowledgeBase()
+
+            // Decay/expire stale memory facts on open (lightweight, on-device).
+            UserMemoryStore.shared.runUpkeep()
         }
 
         func saveAPIKey() {
@@ -459,19 +462,10 @@ extension AIInsights {
 
                 var responseText = response.text
 
-                // Extract and process any <KNOWLEDGE> blocks updated by the AI
+                // Defensive: strip any legacy <KNOWLEDGE> block the model might
+                // still emit (the prompt no longer asks for one — memory is now
+                // captured out of band by extractAndMergeMemory below).
                 if let knowledgeRange = responseText.range(of: "(?s)<KNOWLEDGE>(.*?)</KNOWLEDGE>", options: .regularExpression) {
-                    let newKnowledge = String(responseText[knowledgeRange])
-                        .replacingOccurrences(of: "<KNOWLEDGE>", with: "")
-                        .replacingOccurrences(of: "</KNOWLEDGE>", with: "")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    
-                    if !newKnowledge.isEmpty {
-                        // The AI outputs the ENTIRE updated knowledge base, so we overwrite it completely
-                        knowledgeBase = newKnowledge
-                        saveKnowledgeBase()
-                    }
-                    // Remove the block so the user doesn't see the internal RAG working
                     responseText.removeSubrange(knowledgeRange)
                     responseText = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
                 } else if let start = responseText.range(of: "<KNOWLEDGE>") {
@@ -496,10 +490,98 @@ extension AIInsights {
                 messages.append(assistantMessage)
                 saveMessages()
 
+                // Capture durable memory OUT of band so it never delays or
+                // competes with the visible answer (Phase 2 "decouple capture").
+                let capturedInput = input
+                let capturedResponse = responseText
+                Task { [weak self] in
+                    await self?.extractAndMergeMemory(userText: capturedInput, assistantText: capturedResponse)
+                }
+
             } catch let error as AIServiceAdapter.AIError {
                 errorMessage = error.errorDescription ?? error.localizedDescription
             } catch {
                 errorMessage = String(localized: "Error: \(error.localizedDescription)", comment: "AI error")
+            }
+        }
+
+        /// Background memory capture: a small, cheap AI call that extracts only
+        /// durable personal facts from the latest turn and merges them into the
+        /// on-device `UserMemoryStore`. Runs off the critical path; silent on
+        /// failure. Replaces the old inline "rewrite the whole knowledge base"
+        /// instruction that cost answer tokens/latency every turn.
+        private func extractAndMergeMemory(userText: String, assistantText: String) async {
+            guard aiEnabled, !apiKey.isEmpty, provider != nil else { return }
+            let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.count > 2 else { return }
+
+            let system = """
+            You extract DURABLE personal facts about a person with Type 1 diabetes from one chat turn, to remember long-term.
+            Output ONLY a JSON array (it may be empty) of objects:
+            [{"category":"diabetesProfile|lifestyleDiet|routineActivity|preferences|goalsContext","text":"concise third-person fact","timeBound":false}]
+            Rules:
+            - Only durable, reusable facts: habits, routine, diet, sport/activity, work pattern, preferences, goals, relevant context.
+            - NO transient glucose/IOB/COB numbers, NO one-off events unless they imply a lasting fact, NO dosing decisions, NO medical advice.
+            - Set timeBound=true only for a dated plan that will later become past (e.g. "is travelling to Spain next week").
+            - If nothing is worth remembering, return [].
+            - Each fact one short sentence. Max 6 facts.
+            """
+            let userMsg = "USER: \(userText)\nASSISTANT: \(assistantText)\n\nReturn the JSON array of durable facts."
+
+            let request = AIServiceAdapter.AIRequest(
+                model: model,
+                messages: [
+                    AIServiceAdapter.ChatMessagePayload(role: .system, content: system),
+                    AIServiceAdapter.ChatMessagePayload(role: .user, content: userMsg)
+                ],
+                temperature: 0.0,
+                topP: 0.9,
+                topK: nil,
+                maxTokens: 512,
+                disableThinking: true
+            )
+
+            do {
+                let response = try await AIServiceAdapter.send(
+                    request: request,
+                    provider: providerType,
+                    baseURL: baseURL,
+                    apiKey: apiKey
+                )
+                let candidates = Self.parseMemoryCandidates(from: response.text)
+                if !candidates.isEmpty {
+                    UserMemoryStore.shared.merge(candidates: candidates)
+                }
+            } catch {
+                // Memory capture is best-effort; never surface errors to the user.
+            }
+        }
+
+        private static func parseMemoryCandidates(from text: String) -> [MemoryFact] {
+            let cleaned = text
+                .replacingOccurrences(of: "```json", with: "")
+                .replacingOccurrences(of: "```", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let start = cleaned.firstIndex(of: "["),
+                  let end = cleaned.lastIndex(of: "]"),
+                  start < end,
+                  let data = String(cleaned[start ... end]).data(using: .utf8),
+                  let raw = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+            else { return [] }
+
+            return raw.compactMap { object -> MemoryFact? in
+                guard let text = (object["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      text.count > 2 else { return nil }
+                let category = (object["category"] as? String)
+                    .flatMap { MemoryCategory(rawValue: $0) } ?? .lifestyleDiet
+                let timeBound = (object["timeBound"] as? Bool) ?? false
+                return MemoryFact(
+                    category: category,
+                    text: text,
+                    salience: 0.6,
+                    timeBound: timeBound,
+                    expiresAt: timeBound ? Date().addingTimeInterval(30 * 24 * 3600) : nil
+                )
             }
         }
 
@@ -839,7 +921,7 @@ extension AIInsights {
             - Put every bullet point on its own line. Never place two bullet points inside the same paragraph.
             - Do not output markdown horizontal separators such as "-----".
             - When you include structured suggestions, keep the visible answer concise enough that the hidden block is not truncated.
-            - Finish the visible answer in complete sentences before any hidden XML-style blocks. Never start <KNOWLEDGE> or <TRIO_SUGGESTIONS> until the user-facing answer is fully complete.
+            - Finish the visible answer in complete sentences before any hidden XML-style blocks. Never start <TRIO_SUGGESTIONS> until the user-facing answer is fully complete.
 
             CURRENT DATA (last \(stats.periodDays) days):
             - Average glucose: \(String(format: "%.1f", stats.averageGlucose)) \(unitsStr)
@@ -862,12 +944,9 @@ extension AIInsights {
             - Target: \(stats.currentTarget)
             """
 
-            if !knowledgeBase.isEmpty {
-                prompt += """
-
-                USER PROFILE & KNOWLEDGE BASE (Continuously Updated):
-                \(knowledgeBase)
-                """
+            let memoryNarrative = UserMemoryStore.shared.narrativeForPrompt()
+            if !memoryNarrative.isEmpty {
+                prompt += "\n\n" + memoryNarrative
             }
 
             let caffeineContext = AIInsights_CaffeineTracker.shared.buildCaffeinePromptContext()
@@ -913,19 +992,12 @@ extension AIInsights {
                 prompt += "- COB: \(String(format: "%.0f", cob)) g\n"
             }
 
-            prompt += """
+            // Note: the user-memory profile above is maintained OUT of band by a
+            // background extraction pass (extractAndMergeMemory) — the model is no
+            // longer asked to rewrite a knowledge base inline, which kept it from
+            // spending the answer's tokens/latency on bookkeeping every turn.
 
-            KNOWLEDGE BASE INSTRUCTION (RAG):
-            You maintain a living, concise Knowledge Base about the user's demographic, lifestyle, diet, and habits.
-            If the USER QUESTION implies new facts or changes to existing facts, you must REWRITE the ENTIRE Knowledge Base to include the new information, resolve any conflicting old information, and keep it compact (maximum 10 bullet points). 
-            Output the newly updated complete knowledge base at the very end of your response, formatted exactly like this:
-            
-            <KNOWLEDGE>
-            - [Fact 1]
-            - [Fact 2]
-            </KNOWLEDGE>
-            
-            Only output this block if the knowledge base needs to be updated. Do NOT output it if nothing has changed.
+            prompt += """
 
             STRUCTURED SUGGESTIONS:
             \(structuredSuggestionInstruction(allowTherapy: allowTherapySuggestions, allowAdjustments: allowAdjustmentSuggestions))
@@ -965,6 +1037,248 @@ extension AIInsights {
             </TRIO_SUGGESTIONS>
             Do not mention the hidden block to the user.
             """
+        }
+    }
+}
+
+// MARK: - User Memory ("dreaming"-inspired long-term context)
+
+extension AIInsights {
+    /// Categories the user profile is organized into, mirroring the narrative
+    /// "dossier" idea: a coherent prose block per area instead of a flat list.
+    enum MemoryCategory: String, Codable, CaseIterable, Sendable {
+        case diabetesProfile
+        case lifestyleDiet
+        case routineActivity
+        case preferences
+        case goalsContext
+
+        var promptHeading: String {
+            switch self {
+            case .diabetesProfile: return "Diabetes profile"
+            case .lifestyleDiet: return "Lifestyle & diet"
+            case .routineActivity: return "Routine & activity"
+            case .preferences: return "Preferences"
+            case .goalsContext: return "Goals & context"
+            }
+        }
+    }
+
+    /// A single durable fact remembered about the user. Carries the metadata the
+    /// consolidation/"dreaming" pass needs: when it was last confirmed, how
+    /// salient it is (decays over time), whether it is time-bound (a planned
+    /// event that should later flip to past/expire), and whether the user edited
+    /// it (so background consolidation never silently overwrites a manual edit).
+    struct MemoryFact: Codable, Identifiable, Equatable, Sendable {
+        var id: UUID = UUID()
+        var category: MemoryCategory
+        var text: String
+        var createdAt: Date = Date()
+        var lastConfirmedAt: Date = Date()
+        var salience: Double = 0.6
+        var timeBound: Bool = false
+        var expiresAt: Date? = nil
+        var archived: Bool = false
+        var userEdited: Bool = false
+
+        var isLive: Bool {
+            guard !archived else { return false }
+            if let expiresAt { return expiresAt > Date() }
+            return true
+        }
+    }
+
+    /// On-device store for the user-memory profile. Thread-safe via a lock so it
+    /// can be read on the chat turn and written from the background extraction
+    /// task. Nothing here leaves the device.
+    final class UserMemoryStore {
+        static let shared = UserMemoryStore()
+
+        private static let storageKey = "ai_insights_user_memory_v1"
+        private static let legacyKey = "ai_insights_knowledge_base"
+        private static let maxPerCategory = 12
+
+        private let lock = NSLock()
+        private var facts: [MemoryFact] = []
+
+        private init() {
+            load()
+        }
+
+        // MARK: Persistence
+
+        private func load() {
+            if let data = UserDefaults.standard.data(forKey: Self.storageKey),
+               let saved = try? JSONDecoder().decode([MemoryFact].self, from: data)
+            {
+                facts = saved
+                return
+            }
+            // First run on the new store: migrate the legacy flat knowledge base.
+            migrateLegacyLocked()
+        }
+
+        private func persistLocked() {
+            if let data = try? JSONEncoder().encode(facts) {
+                UserDefaults.standard.set(data, forKey: Self.storageKey)
+            }
+        }
+
+        private func migrateLegacyLocked() {
+            let legacy = UserDefaults.standard.string(forKey: Self.legacyKey) ?? ""
+            guard !legacy.isEmpty else { return }
+            let lines = legacy
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " -•\t")) }
+                .filter { $0.count > 2 }
+            facts = lines.map { MemoryFact(category: .lifestyleDiet, text: $0) }
+            persistLocked()
+        }
+
+        // MARK: Read
+
+        var allFacts: [MemoryFact] {
+            lock.lock(); defer { lock.unlock() }
+            return facts
+        }
+
+        /// Categorized narrative block injected into the chat system prompt.
+        /// Only the most salient + recently-confirmed live facts per category.
+        func narrativeForPrompt(maxPerCategory: Int = 6) -> String {
+            lock.lock()
+            let live = facts.filter { $0.isLive }
+            lock.unlock()
+            guard !live.isEmpty else { return "" }
+
+            var blocks: [String] = []
+            for category in MemoryCategory.allCases {
+                let picked = live
+                    .filter { $0.category == category }
+                    .sorted { lhs, rhs in
+                        lhs.salience != rhs.salience
+                            ? lhs.salience > rhs.salience
+                            : lhs.lastConfirmedAt > rhs.lastConfirmedAt
+                    }
+                    .prefix(maxPerCategory)
+                guard !picked.isEmpty else { continue }
+                let lines = picked.map { "- \($0.text)" }.joined(separator: "\n")
+                blocks.append("[\(category.promptHeading)]\n\(lines)")
+            }
+            guard !blocks.isEmpty else { return "" }
+            return "USER MEMORY (learned over time; correct it if wrong):\n" + blocks.joined(separator: "\n\n")
+        }
+
+        // MARK: Write
+
+        /// Merge freshly extracted candidate facts: confirm/strengthen existing
+        /// near-duplicates, otherwise add; then run upkeep and persist.
+        func merge(candidates: [MemoryFact]) {
+            guard !candidates.isEmpty else { return }
+            lock.lock(); defer { lock.unlock() }
+
+            for candidate in candidates {
+                let normalized = Self.normalize(candidate.text)
+                guard !normalized.isEmpty else { continue }
+                if let idx = facts.firstIndex(where: {
+                    $0.category == candidate.category &&
+                        Self.similarity(Self.normalize($0.text), normalized) >= 0.6
+                }) {
+                    // Re-confirm: bump recency + salience; keep the more specific
+                    // wording; never overwrite a user-edited fact's text.
+                    facts[idx].lastConfirmedAt = Date()
+                    facts[idx].salience = min(1, facts[idx].salience + 0.15)
+                    facts[idx].archived = false
+                    if !facts[idx].userEdited, candidate.text.count > facts[idx].text.count {
+                        facts[idx].text = candidate.text
+                    }
+                    if candidate.timeBound { facts[idx].timeBound = true; facts[idx].expiresAt = candidate.expiresAt }
+                } else {
+                    facts.append(candidate)
+                }
+            }
+
+            upkeepLocked()
+            // Cap each category, dropping the lowest-salience live facts.
+            for category in MemoryCategory.allCases {
+                let categoryFacts = facts.enumerated().filter { $0.element.category == category && $0.element.isLive }
+                if categoryFacts.count > Self.maxPerCategory {
+                    let toArchive = categoryFacts
+                        .sorted { $0.element.salience < $1.element.salience }
+                        .prefix(categoryFacts.count - Self.maxPerCategory)
+                    for item in toArchive { facts[item.offset].archived = true }
+                }
+            }
+            persistLocked()
+        }
+
+        /// Background upkeep: expire time-bound facts whose date has passed and
+        /// gently decay salience of facts not confirmed recently. Public entry
+        /// runs it under the lock and persists.
+        func runUpkeep() {
+            lock.lock(); defer { lock.unlock() }
+            upkeepLocked()
+            persistLocked()
+        }
+
+        private func upkeepLocked() {
+            let now = Date()
+            let thirtyDays: TimeInterval = 30 * 24 * 3600
+            for index in facts.indices {
+                if let expires = facts[index].expiresAt, expires <= now, !facts[index].userEdited {
+                    facts[index].archived = true
+                }
+                // Decay ~0.05 per 30 days since last confirmation (user-edited
+                // facts are pinned and never decayed).
+                if !facts[index].userEdited {
+                    let age = now.timeIntervalSince(facts[index].lastConfirmedAt)
+                    if age > thirtyDays {
+                        let periods = age / thirtyDays
+                        facts[index].salience = max(0, facts[index].salience - 0.05 * periods)
+                        if facts[index].salience <= 0.05 { facts[index].archived = true }
+                    }
+                }
+            }
+        }
+
+        // MARK: User edits (used by the memory page in a later phase)
+
+        func upsert(_ fact: MemoryFact) {
+            lock.lock(); defer { lock.unlock() }
+            var edited = fact
+            edited.userEdited = true
+            edited.lastConfirmedAt = Date()
+            if let idx = facts.firstIndex(where: { $0.id == fact.id }) {
+                facts[idx] = edited
+            } else {
+                facts.append(edited)
+            }
+            persistLocked()
+        }
+
+        func archive(id: UUID) {
+            lock.lock(); defer { lock.unlock() }
+            if let idx = facts.firstIndex(where: { $0.id == id }) {
+                facts[idx].archived = true
+                persistLocked()
+            }
+        }
+
+        // MARK: Text helpers
+
+        private static func normalize(_ text: String) -> String {
+            text.lowercased()
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+        }
+
+        private static func similarity(_ a: String, _ b: String) -> Double {
+            let setA = Set(a.split(separator: " "))
+            let setB = Set(b.split(separator: " "))
+            guard !setA.isEmpty, !setB.isEmpty else { return 0 }
+            let intersection = setA.intersection(setB).count
+            let union = setA.union(setB).count
+            return union > 0 ? Double(intersection) / Double(union) : 0
         }
     }
 }
