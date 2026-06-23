@@ -65933,6 +65933,9 @@
         }
       }
     },
+    "Carbs on Board (COB)": {
+      "comment": "Live Activity widget icon label for Carbs on Board (COB)"
+    },
     "Carbs On Board (COB)": {
       "localizations": {
         "bg": {
@@ -127937,6 +127940,9 @@
         }
       }
     },
+    "Glucose and Trend, no Delta": {
+      "comment": "Live Activity widget icon label for Glucose and Trend, no Delta"
+    },
     "Glucose Calculation": {
       "localizations": {
         "bg": {
@@ -131453,6 +131459,9 @@
           }
         }
       }
+    },
+    "Glucose, Trend, Delta": {
+      "comment": "Live Activity widget icon label for Glucose, Trend, Delta"
     },
     "Glucose: %@": {
       "comment": "Glucose: %@",
@@ -145959,6 +145968,9 @@
         }
       }
     },
+    "Insulin on Board (IOB)": {
+      "comment": "Live Activity widget icon label for Insulin on Board (IOB)"
+    },
     "Insulin On Board (IOB)": {
       "localizations": {
         "bg": {
@@ -151762,6 +151774,9 @@
           }
         }
       }
+    },
+    "Last Updated": {
+      "comment": "Live Activity widget icon label for Last Updated"
     },
     "Latest dev: %@": {
       "localizations": {

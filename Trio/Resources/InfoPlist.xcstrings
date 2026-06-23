@@ -1,6 +1,5 @@
 {
   "sourceLanguage": "en",
-  "version": "1.0",
   "strings": {
     "CFBundleDisplayName": {
       "comment": "Bundle display name",
@@ -1859,5 +1858,6 @@
         }
       }
     }
-  }
+  },
+  "version": "1.0"
 }
