@@ -750,9 +750,18 @@ extension Treatments.StateModel: DeterminationObserver, BolusFailureObserver {
         DispatchQueue.main.async {
             debug(.bolusState, "bolusDidFail fired")
             self.isAwaitingDeterminationResult = false
-            if self.addButtonPressed {
-                self.hideModal()
-            }
+            // A failed pump action (e.g. Dana "pump busy", suspended, or an
+            // unreachable pump) must NOT dismiss the bolus screen — that throws
+            // away the user's typed amount and forces re-entry of a custom dose.
+            // Keep the sheet open with the amount intact, clear the in-flight
+            // flag so the user can retry immediately, and explain what happened
+            // via the existing failure alert.
+            self.addButtonPressed = false
+            self.determinationFailureMessage = String(
+                localized: "The bolus could not be delivered. The pump may be busy, suspended, or out of range. Your entered amount has been kept — check the pump and try again.",
+                comment: "Bolus delivery failure message shown on the bolus screen"
+            )
+            self.showDeterminationFailureAlert = true
         }
     }
 }

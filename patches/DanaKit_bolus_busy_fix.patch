@@ -1,0 +1,48 @@
+diff --git a/DanaKit/DanaKit/PumpManager/DanaKitPumpManager.swift b/DanaKit/DanaKit/PumpManager/DanaKitPumpManager.swift
+index a0e7a9e..7a018e2 100644
+--- a/DanaKit/DanaKit/PumpManager/DanaKitPumpManager.swift
++++ b/DanaKit/DanaKit/PumpManager/DanaKitPumpManager.swift
+@@ -62,6 +62,11 @@ public class DanaKitPumpManager: DeviceManager {
+     private var isPriming = false
+     private var doseReporter: DanaKitDoseProgressReporter?
+     private var doseEntry: UnfinalizedDose?
++    // When the most recent bolus entered the transient `.initiating` state.
++    // Used to recover from a stale `.initiating` left behind by a dropped BLE
++    // connection (or restored from persisted state after a crash), which would
++    // otherwise make the next bolus falsely report "pump busy".
++    private var bolusInitiationTimestamp: Date?
+ 
+     public var isOnboarded: Bool {
+         state.isOnBoarded
+@@ -636,6 +641,23 @@ extension DanaKitPumpManager: PumpManager {
+         activationType: BolusActivationType,
+         completion: @escaping (PumpManagerError?) -> Void
+     ) {
++        // Recover from a stale `.initiating` state. `.initiating` is only ever
++        // set transiently right before connecting to start a bolus, so if it has
++        // lingered it means the previous attempt never completed (a dropped BLE
++        // connection left it stuck, or it was restored from persisted state after
++        // the app was killed) — no insulin was confirmed delivered for it, since
++        // delivery only advances the state to `.inProgress` after the pump
++        // acknowledges. Reset it so a new bolus is not falsely refused as "pump
++        // busy". A genuinely active bolus is `.inProgress` (or `.canceling`) and
++        // is deliberately left untouched. A missing timestamp (e.g. after an app
++        // restart) is treated as stale.
++        if state.bolusState == .initiating,
++           bolusInitiationTimestamp.map({ Date().timeIntervalSince($0) > 30 }) ?? true
++        {
++            log.error("Resetting stale .initiating bolus state before starting a new bolus")
++            state.bolusState = .noBolus
++        }
++
+         guard state.bolusState == .noBolus else {
+             log.error("Pump already busy bolussing")
+             completion(.deviceState(DanaKitPumpManagerError.pumpIsBusy))
+@@ -649,6 +671,7 @@ extension DanaKitPumpManager: PumpManager {
+             self.logDeviceCommunication("Enact bolus, units: \(units)U, duration: \(duration)sec", type: .delegate)
+ 
+             self.state.bolusState = .initiating
++            self.bolusInitiationTimestamp = Date()
+             self.notifyStateDidChange()
+ 
+             self.bluetooth.ensureConnected { result in
