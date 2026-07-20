@@ -1,0 +1,472 @@
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* merge/sync-upstream-dev-20260720 4. Build Trio pov-it/Trio#4 · 29734920390
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+✓ Check status to decide whether to build in 8s (ID 88327880479)
+  ✓ Set up job
+  ✓ Access
+  ✓ Checkout target repo
+  ✓ Sync upstream changes
+  - New commits found
+  ✓ No new commits
+  ✓ Show value of 'has_new_commits'
+  - Show scheduled build configuration message
+  ✓ Check if this is the second time this day-of-week happens this month
+  ✓ Post Checkout target repo
+  ✓ Complete job
+* Check certificates / Validate / Access (ID 88327910921)
+  ✓ Set up job
+  ✓ Validate Access Token
+  * Validate Match-Secrets
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* merge/sync-upstream-dev-20260720 4. Build Trio pov-it/Trio#4 · 29734920390
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+✓ Check status to decide whether to build in 8s (ID 88327880479)
+  ✓ Set up job
+  ✓ Access
+  ✓ Checkout target repo
+  ✓ Sync upstream changes
+  - New commits found
+  ✓ No new commits
+  ✓ Show value of 'has_new_commits'
+  - Show scheduled build configuration message
+  ✓ Check if this is the second time this day-of-week happens this month
+  ✓ Post Checkout target repo
+  ✓ Complete job
+✓ Check certificates / Validate / Access in 5s (ID 88327910921)
+  ✓ Set up job
+  ✓ Validate Access Token
+  ✓ Validate Match-Secrets
+  ✓ Complete job
+✓ Check certificates / Validate / Fastlane in 22s (ID 88327933794)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  ✓ Validate Fastlane Secrets
+  ✓ Post Checkout Repo
+  ✓ Complete job
+* Check certificates / Certificates (ID 88328010256)
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* merge/sync-upstream-dev-20260720 4. Build Trio pov-it/Trio#4 · 29734920390
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+✓ Check status to decide whether to build in 8s (ID 88327880479)
+  ✓ Set up job
+  ✓ Access
+  ✓ Checkout target repo
+  ✓ Sync upstream changes
+  - New commits found
+  ✓ No new commits
+  ✓ Show value of 'has_new_commits'
+  - Show scheduled build configuration message
+  ✓ Check if this is the second time this day-of-week happens this month
+  ✓ Post Checkout target repo
+  ✓ Complete job
+✓ Check certificates / Validate / Access in 5s (ID 88327910921)
+  ✓ Set up job
+  ✓ Validate Access Token
+  ✓ Validate Match-Secrets
+  ✓ Complete job
+✓ Check certificates / Validate / Fastlane in 22s (ID 88327933794)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  ✓ Validate Fastlane Secrets
+  ✓ Post Checkout Repo
+  ✓ Complete job
+* Check certificates / Certificates (ID 88328010256)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Patch Match Tables
+  ✓ Install Project Dependencies
+  ✓ Check and create or update Distribution certificate and profiles if needed
+  * Check Distribution certificate and launch Nuke certificates if needed
+  * Set output and annotations based on Fastlane result
+  * Post Checkout Repo
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* merge/sync-upstream-dev-20260720 4. Build Trio pov-it/Trio#4 · 29734920390
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+✓ Check status to decide whether to build in 8s (ID 88327880479)
+  ✓ Set up job
+  ✓ Access
+  ✓ Checkout target repo
+  ✓ Sync upstream changes
+  - New commits found
+  ✓ No new commits
+  ✓ Show value of 'has_new_commits'
+  - Show scheduled build configuration message
+  ✓ Check if this is the second time this day-of-week happens this month
+  ✓ Post Checkout target repo
+  ✓ Complete job
+✓ Check certificates / Validate / Access in 5s (ID 88327910921)
+  ✓ Set up job
+  ✓ Validate Access Token
+  ✓ Validate Match-Secrets
+  ✓ Complete job
+✓ Check certificates / Validate / Fastlane in 22s (ID 88327933794)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  ✓ Validate Fastlane Secrets
+  ✓ Post Checkout Repo
+  ✓ Complete job
+✓ Check certificates / Certificates in 38s (ID 88328010256)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Patch Match Tables
+  ✓ Install Project Dependencies
+  ✓ Check and create or update Distribution certificate and profiles if needed
+  ✓ Check Distribution certificate and launch Nuke certificates if needed
+  ✓ Set output and annotations based on Fastlane result
+  ✓ Post Checkout Repo
+  ✓ Complete job
+* Build (ID 88328139360)
+  ✓ Set up job
+  ✓ Select Xcode version
+  * Checkout Repo for building
+  * Customize Trio
+  * Patch Match Tables
+  * Install Project Dependencies
+  * Sync clock
+  * Fastlane Build & Archive
+  * Fastlane upload to TestFlight
+  * Upload build log, IPA and Symbol artifacts
+  * Post Checkout Repo for building
+- Check certificates / Nuke certificates in 0s (ID 88328139780)
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* merge/sync-upstream-dev-20260720 4. Build Trio pov-it/Trio#4 · 29734920390
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+✓ Check status to decide whether to build in 8s (ID 88327880479)
+  ✓ Set up job
+  ✓ Access
+  ✓ Checkout target repo
+  ✓ Sync upstream changes
+  - New commits found
+  ✓ No new commits
+  ✓ Show value of 'has_new_commits'
+  - Show scheduled build configuration message
+  ✓ Check if this is the second time this day-of-week happens this month
+  ✓ Post Checkout target repo
+  ✓ Complete job
+✓ Check certificates / Validate / Access in 5s (ID 88327910921)
+  ✓ Set up job
+  ✓ Validate Access Token
+  ✓ Validate Match-Secrets
+  ✓ Complete job
+✓ Check certificates / Validate / Fastlane in 22s (ID 88327933794)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  ✓ Validate Fastlane Secrets
+  ✓ Post Checkout Repo
+  ✓ Complete job
+✓ Check certificates / Certificates in 38s (ID 88328010256)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Patch Match Tables
+  ✓ Install Project Dependencies
+  ✓ Check and create or update Distribution certificate and profiles if needed
+  ✓ Check Distribution certificate and launch Nuke certificates if needed
+  ✓ Set output and annotations based on Fastlane result
+  ✓ Post Checkout Repo
+  ✓ Complete job
+* Build (ID 88328139360)
+  ✓ Set up job
+  ✓ Select Xcode version
+  ✓ Checkout Repo for building
+  ✓ Customize Trio
+  ✓ Patch Match Tables
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  * Fastlane Build & Archive
+  * Fastlane upload to TestFlight
+  * Upload build log, IPA and Symbol artifacts
+  * Post Checkout Repo for building
+- Check certificates / Nuke certificates in 0s (ID 88328139780)
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* merge/sync-upstream-dev-20260720 4. Build Trio pov-it/Trio#4 · 29734920390
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+✓ Check status to decide whether to build in 8s (ID 88327880479)
+  ✓ Set up job
+  ✓ Access
+  ✓ Checkout target repo
+  ✓ Sync upstream changes
+  - New commits found
+  ✓ No new commits
+  ✓ Show value of 'has_new_commits'
+  - Show scheduled build configuration message
+  ✓ Check if this is the second time this day-of-week happens this month
+  ✓ Post Checkout target repo
+  ✓ Complete job
+✓ Check certificates / Validate / Access in 5s (ID 88327910921)
+  ✓ Set up job
+  ✓ Validate Access Token
+  ✓ Validate Match-Secrets
+  ✓ Complete job
+✓ Check certificates / Validate / Fastlane in 22s (ID 88327933794)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  ✓ Validate Fastlane Secrets
+  ✓ Post Checkout Repo
+  ✓ Complete job
+✓ Check certificates / Certificates in 38s (ID 88328010256)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Patch Match Tables
+  ✓ Install Project Dependencies
+  ✓ Check and create or update Distribution certificate and profiles if needed
+  ✓ Check Distribution certificate and launch Nuke certificates if needed
+  ✓ Set output and annotations based on Fastlane result
+  ✓ Post Checkout Repo
+  ✓ Complete job
+* Build (ID 88328139360)
+  ✓ Set up job
+  ✓ Select Xcode version
+  ✓ Checkout Repo for building
+  ✓ Customize Trio
+  ✓ Patch Match Tables
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  * Fastlane Build & Archive
+  * Fastlane upload to TestFlight
+  * Upload build log, IPA and Symbol artifacts
+  * Post Checkout Repo for building
+- Check certificates / Nuke certificates in 0s (ID 88328139780)
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* merge/sync-upstream-dev-20260720 4. Build Trio pov-it/Trio#4 · 29734920390
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+✓ Check status to decide whether to build in 8s (ID 88327880479)
+  ✓ Set up job
+  ✓ Access
+  ✓ Checkout target repo
+  ✓ Sync upstream changes
+  - New commits found
+  ✓ No new commits
+  ✓ Show value of 'has_new_commits'
+  - Show scheduled build configuration message
+  ✓ Check if this is the second time this day-of-week happens this month
+  ✓ Post Checkout target repo
+  ✓ Complete job
+✓ Check certificates / Validate / Access in 5s (ID 88327910921)
+  ✓ Set up job
+  ✓ Validate Access Token
+  ✓ Validate Match-Secrets
+  ✓ Complete job
+✓ Check certificates / Validate / Fastlane in 22s (ID 88327933794)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  ✓ Validate Fastlane Secrets
+  ✓ Post Checkout Repo
+  ✓ Complete job
+✓ Check certificates / Certificates in 38s (ID 88328010256)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Patch Match Tables
+  ✓ Install Project Dependencies
+  ✓ Check and create or update Distribution certificate and profiles if needed
+  ✓ Check Distribution certificate and launch Nuke certificates if needed
+  ✓ Set output and annotations based on Fastlane result
+  ✓ Post Checkout Repo
+  ✓ Complete job
+* Build (ID 88328139360)
+  ✓ Set up job
+  ✓ Select Xcode version
+  ✓ Checkout Repo for building
+  ✓ Customize Trio
+  ✓ Patch Match Tables
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  * Fastlane Build & Archive
+  * Fastlane upload to TestFlight
+  * Upload build log, IPA and Symbol artifacts
+  * Post Checkout Repo for building
+- Check certificates / Nuke certificates in 0s (ID 88328139780)
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* merge/sync-upstream-dev-20260720 4. Build Trio pov-it/Trio#4 · 29734920390
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+✓ Check status to decide whether to build in 8s (ID 88327880479)
+  ✓ Set up job
+  ✓ Access
+  ✓ Checkout target repo
+  ✓ Sync upstream changes
+  - New commits found
+  ✓ No new commits
+  ✓ Show value of 'has_new_commits'
+  - Show scheduled build configuration message
+  ✓ Check if this is the second time this day-of-week happens this month
+  ✓ Post Checkout target repo
+  ✓ Complete job
+✓ Check certificates / Validate / Access in 5s (ID 88327910921)
+  ✓ Set up job
+  ✓ Validate Access Token
+  ✓ Validate Match-Secrets
+  ✓ Complete job
+✓ Check certificates / Validate / Fastlane in 22s (ID 88327933794)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  ✓ Validate Fastlane Secrets
+  ✓ Post Checkout Repo
+  ✓ Complete job
+✓ Check certificates / Certificates in 38s (ID 88328010256)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Patch Match Tables
+  ✓ Install Project Dependencies
+  ✓ Check and create or update Distribution certificate and profiles if needed
+  ✓ Check Distribution certificate and launch Nuke certificates if needed
+  ✓ Set output and annotations based on Fastlane result
+  ✓ Post Checkout Repo
+  ✓ Complete job
+* Build (ID 88328139360)
+  ✓ Set up job
+  ✓ Select Xcode version
+  ✓ Checkout Repo for building
+  ✓ Customize Trio
+  ✓ Patch Match Tables
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  * Fastlane Build & Archive
+  * Fastlane upload to TestFlight
+  * Upload build log, IPA and Symbol artifacts
+  * Post Checkout Repo for building
+- Check certificates / Nuke certificates in 0s (ID 88328139780)
+Refreshing run status every 30 seconds. Press Ctrl+C to quit.
+
+* merge/sync-upstream-dev-20260720 4. Build Trio pov-it/Trio#4 · 29734920390
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+✓ Check status to decide whether to build in 8s (ID 88327880479)
+  ✓ Set up job
+  ✓ Access
+  ✓ Checkout target repo
+  ✓ Sync upstream changes
+  - New commits found
+  ✓ No new commits
+  ✓ Show value of 'has_new_commits'
+  - Show scheduled build configuration message
+  ✓ Check if this is the second time this day-of-week happens this month
+  ✓ Post Checkout target repo
+  ✓ Complete job
+✓ Check certificates / Validate / Access in 5s (ID 88327910921)
+  ✓ Set up job
+  ✓ Validate Access Token
+  ✓ Validate Match-Secrets
+  ✓ Complete job
+✓ Check certificates / Validate / Fastlane in 22s (ID 88327933794)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  ✓ Validate Fastlane Secrets
+  ✓ Post Checkout Repo
+  ✓ Complete job
+✓ Check certificates / Certificates in 38s (ID 88328010256)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Patch Match Tables
+  ✓ Install Project Dependencies
+  ✓ Check and create or update Distribution certificate and profiles if needed
+  ✓ Check Distribution certificate and launch Nuke certificates if needed
+  ✓ Set output and annotations based on Fastlane result
+  ✓ Post Checkout Repo
+  ✓ Complete job
+* Build (ID 88328139360)
+  ✓ Set up job
+  ✓ Select Xcode version
+  ✓ Checkout Repo for building
+  ✓ Customize Trio
+  ✓ Patch Match Tables
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  * Fastlane Build & Archive
+  * Fastlane upload to TestFlight
+  * Upload build log, IPA and Symbol artifacts
+  * Post Checkout Repo for building
+- Check certificates / Nuke certificates in 0s (ID 88328139780)
+X merge/sync-upstream-dev-20260720 4. Build Trio pov-it/Trio#4 · 29734920390
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+✓ Check status to decide whether to build in 8s (ID 88327880479)
+  ✓ Set up job
+  ✓ Access
+  ✓ Checkout target repo
+  ✓ Sync upstream changes
+  - New commits found
+  ✓ No new commits
+  ✓ Show value of 'has_new_commits'
+  - Show scheduled build configuration message
+  ✓ Check if this is the second time this day-of-week happens this month
+  ✓ Post Checkout target repo
+  ✓ Complete job
+✓ Check certificates / Validate / Access in 5s (ID 88327910921)
+  ✓ Set up job
+  ✓ Validate Access Token
+  ✓ Validate Match-Secrets
+  ✓ Complete job
+✓ Check certificates / Validate / Fastlane in 22s (ID 88327933794)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  ✓ Validate Fastlane Secrets
+  ✓ Post Checkout Repo
+  ✓ Complete job
+✓ Check certificates / Certificates in 38s (ID 88328010256)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Patch Match Tables
+  ✓ Install Project Dependencies
+  ✓ Check and create or update Distribution certificate and profiles if needed
+  ✓ Check Distribution certificate and launch Nuke certificates if needed
+  ✓ Set output and annotations based on Fastlane result
+  ✓ Post Checkout Repo
+  ✓ Complete job
+X Build in 3m17s (ID 88328139360)
+  ✓ Set up job
+  ✓ Select Xcode version
+  ✓ Checkout Repo for building
+  ✓ Customize Trio
+  ✓ Patch Match Tables
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  X Fastlane Build & Archive
+  - Fastlane upload to TestFlight
+  ✓ Upload build log, IPA and Symbol artifacts
+  ✓ Post Checkout Repo for building
+  ✓ Complete job
+- Check certificates / Nuke certificates in 0s (ID 88328139780)
+BUILD2_EXIT=1
