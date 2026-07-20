@@ -20,6 +20,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, ObservableObject, UNUserNoti
         Crashlytics.crashlytics().setCrashlyticsCollectionEnabled(crashReportingEnabled)
         Crashlytics.crashlytics().setCustomValue(Bundle.main.appDevVersion ?? "unknown", forKey: "app_dev_version")
 
+        // Resume AutoPresets monitoring if the user previously enabled it.
+        AutoPresetsCoordinator.shared.startIfConfigured()
+
         // Telemetry: record this cold launch into the sliding 7-day window,
         // then drive cadence via three layered triggers — listed below in
         // priority of reliability:

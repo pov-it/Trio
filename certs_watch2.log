@@ -1,0 +1,121 @@
+Refreshing run status every 20 seconds. Press Ctrl+C to quit.
+
+* merge/sync-upstream-dev-20260720 3. Create Certificates pov-it/Trio#4 · 29736602442
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+✓ Validate / Access in 3s (ID 88333300319)
+  ✓ Set up job
+  ✓ Validate Access Token
+  ✓ Validate Match-Secrets
+  ✓ Complete job
+* Validate / Fastlane (ID 88333316130)
+  ✓ Set up job
+  ✓ Checkout Repo
+  * Install Project Dependencies
+  * Sync clock
+  * Validate Fastlane Secrets
+  * Post Checkout Repo
+Refreshing run status every 20 seconds. Press Ctrl+C to quit.
+
+* merge/sync-upstream-dev-20260720 3. Create Certificates pov-it/Trio#4 · 29736602442
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+✓ Validate / Access in 3s (ID 88333300319)
+  ✓ Set up job
+  ✓ Validate Access Token
+  ✓ Validate Match-Secrets
+  ✓ Complete job
+* Validate / Fastlane (ID 88333316130)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  * Validate Fastlane Secrets
+  * Post Checkout Repo
+Refreshing run status every 20 seconds. Press Ctrl+C to quit.
+
+* merge/sync-upstream-dev-20260720 3. Create Certificates pov-it/Trio#4 · 29736602442
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+✓ Validate / Access in 3s (ID 88333300319)
+  ✓ Set up job
+  ✓ Validate Access Token
+  ✓ Validate Match-Secrets
+  ✓ Complete job
+✓ Validate / Fastlane in 33s (ID 88333316130)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  ✓ Validate Fastlane Secrets
+  ✓ Post Checkout Repo
+  ✓ Complete job
+* Certificates (ID 88333429270)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Patch Match Tables
+  * Install Project Dependencies
+  * Check and create or update Distribution certificate and profiles if needed
+  * Check Distribution certificate and launch Nuke certificates if needed
+  * Set output and annotations based on Fastlane result
+  * Post Checkout Repo
+Refreshing run status every 20 seconds. Press Ctrl+C to quit.
+
+* merge/sync-upstream-dev-20260720 3. Create Certificates pov-it/Trio#4 · 29736602442
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+✓ Validate / Access in 3s (ID 88333300319)
+  ✓ Set up job
+  ✓ Validate Access Token
+  ✓ Validate Match-Secrets
+  ✓ Complete job
+✓ Validate / Fastlane in 33s (ID 88333316130)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  ✓ Validate Fastlane Secrets
+  ✓ Post Checkout Repo
+  ✓ Complete job
+* Certificates (ID 88333429270)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Patch Match Tables
+  ✓ Install Project Dependencies
+  * Check and create or update Distribution certificate and profiles if needed
+  * Check Distribution certificate and launch Nuke certificates if needed
+  * Set output and annotations based on Fastlane result
+  * Post Checkout Repo
+✓ merge/sync-upstream-dev-20260720 3. Create Certificates pov-it/Trio#4 · 29736602442
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+✓ Validate / Access in 3s (ID 88333300319)
+  ✓ Set up job
+  ✓ Validate Access Token
+  ✓ Validate Match-Secrets
+  ✓ Complete job
+✓ Validate / Fastlane in 33s (ID 88333316130)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Install Project Dependencies
+  ✓ Sync clock
+  ✓ Validate Fastlane Secrets
+  ✓ Post Checkout Repo
+  ✓ Complete job
+✓ Certificates in 43s (ID 88333429270)
+  ✓ Set up job
+  ✓ Checkout Repo
+  ✓ Patch Match Tables
+  ✓ Install Project Dependencies
+  ✓ Check and create or update Distribution certificate and profiles if needed
+  ✓ Check Distribution certificate and launch Nuke certificates if needed
+  ✓ Set output and annotations based on Fastlane result
+  ✓ Post Checkout Repo
+  ✓ Complete job
+- Nuke certificates in 0s (ID 88333569548)
+CERTS_EXIT=0
