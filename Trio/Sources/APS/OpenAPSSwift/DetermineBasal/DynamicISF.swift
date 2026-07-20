@@ -143,7 +143,7 @@ enum DynamicIsfState {
 }
 
 extension Preferences {
-    func dynamicIsfState(profile: Profile, trioCustomOrefVariables: TrioCustomOrefVariables) -> DynamicIsfState {
+    func dynamicIsfState(profile: Profile, trioCustomOrefVariables _: TrioCustomOrefVariables) -> DynamicIsfState {
         guard useNewFormula else { return .off }
 
         // Turn off when autosens.min = autosens.max
@@ -154,13 +154,6 @@ extension Preferences {
         let minLimit = min(profile.autosensMax, profile.autosensMin)
         let maxLimit = max(profile.autosensMax, profile.autosensMin)
         if maxLimit == minLimit || minLimit > 1 || maxLimit < 1 {
-            return .off
-        }
-
-        // checks for 'exercise mode' like conditions
-        if profile.highTemptargetRaisesSensitivity,
-           let profileTarget = profile.profileTarget(trioCustomOrefVariables: trioCustomOrefVariables), profileTarget >= 118
-        {
             return .off
         }
 

@@ -19,6 +19,12 @@ protocol FetchGlucoseManager: SourceInfoProvider {
     var cgmGlucosePluginId: String { get }
     var settingsManager: SettingsManager! { get }
     var shouldSyncToRemoteService: Bool { get }
+    var cgmDisplayState: CurrentValueSubject<CgmDisplayState?, Never> { get }
+    var cgmProgressHighlight: CurrentValueSubject<DeviceLifecycleProgress?, Never> { get }
+    /// Routes CGMManager-issued alerts (sensor failure, signal loss, expiry,
+    /// etc.) into the unified `TrioAlertManager` pipeline. Read by
+    /// `PluginSource.issueAlert` / `retractAlert`.
+    var trioAlertManager: TrioAlertManager! { get }
 }
 
 extension FetchGlucoseManager {
@@ -40,6 +46,7 @@ final class BaseFetchGlucoseManager: FetchGlucoseManager, Injectable {
     @Injected() var deviceDataManager: DeviceDataManager!
     @Injected() var pluginCGMManager: PluginManager!
     @Injected() var calibrationService: CalibrationService!
+    @Injected() var trioAlertManager: TrioAlertManager!
 
     private var lifetime = Lifetime()
     private let timer = DispatchTimer(timeInterval: 1.minutes.timeInterval)
@@ -55,8 +62,6 @@ final class BaseFetchGlucoseManager: FetchGlucoseManager, Injectable {
     @PersistedProperty(key: "CGMManagerState") var rawCGMManager: CGMManager.RawValue?
 
     private lazy var simulatorSource = GlucoseSimulatorSource()
-
-    private let context = CoreDataStack.shared.newTaskContext()
 
     /// Enforce mutual exclusion on calls to glucoseStoreAndHeartDecision
     private let glucoseStoreAndHeartLock = DispatchSemaphore(value: 1)
@@ -148,7 +153,27 @@ final class BaseFetchGlucoseManager: FetchGlucoseManager, Injectable {
         }
     }
 
-    var glucoseSource: GlucoseSource?
+    let cgmDisplayState = CurrentValueSubject<CgmDisplayState?, Never>(nil)
+    let cgmProgressHighlight = CurrentValueSubject<DeviceLifecycleProgress?, Never>(nil)
+    private var cgmStatusSubscriptions = Set<AnyCancellable>()
+
+    var glucoseSource: GlucoseSource? {
+        didSet {
+            // Drop prior subscriptions so source swaps don't dupe emissions.
+            cgmStatusSubscriptions.removeAll()
+            cgmDisplayState.value = glucoseSource?.cgmDisplayState.value
+            cgmProgressHighlight.value = glucoseSource?.cgmProgressHighlight.value
+            guard let glucoseSource else { return }
+            glucoseSource.cgmDisplayState
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] state in self?.cgmDisplayState.value = state }
+                .store(in: &cgmStatusSubscriptions)
+            glucoseSource.cgmProgressHighlight
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] progress in self?.cgmProgressHighlight.value = progress }
+                .store(in: &cgmStatusSubscriptions)
+        }
+    }
 
     func removeCalibrations() {
         calibrationService.removeAllCalibrations()
@@ -278,7 +303,9 @@ final class BaseFetchGlucoseManager: FetchGlucoseManager, Injectable {
         try await glucoseStorage.storeGlucose(filtered)
 
         if settingsManager.settings.smoothGlucose {
-            await exponentialSmoothingGlucose(context: context)
+            let smoothingContext = CoreDataStack.shared.newTaskContext()
+            smoothingContext.name = "exponentialSmoothingGlucose"
+            await exponentialSmoothingGlucose(context: smoothingContext)
         }
 
         deviceDataManager.heartbeat(date: Date())
@@ -355,7 +382,9 @@ extension BaseFetchGlucoseManager: SettingsObserver {
 
             self.glucoseStoreAndHeartLock.wait()
             Task {
-                await self.exponentialSmoothingGlucose(context: self.context)
+                let context = CoreDataStack.shared.newTaskContext()
+                context.name = "exponentialSmoothingGlucose"
+                await self.exponentialSmoothingGlucose(context: context)
                 self.glucoseStoreAndHeartLock.signal()
             }
         }
