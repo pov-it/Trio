@@ -70,6 +70,32 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var bolusShortcut: BolusShortcutLimit = .notAllowed
     var timeInRangeType: TimeInRangeType = .timeInTightRange
     var requireAdjustmentsConfirmation: Bool = false
+    var aiProvider: AIInsights.AIProvider = .google
+    var aiModel: String = AIInsights.AIProvider.google.defaultModel
+    var aiBaseURL: String = AIInsights.AIProvider.google.defaultEndpoint
+    var aiDictationEnabled: Bool = false
+    var aiDictationUsesSeparateProvider: Bool = false
+    var aiDictationProvider: AIInsights.AIProvider = .google
+    var aiDictationModel: String = AIInsights.AIProvider.google.defaultDictationModel
+    var aiDictationBaseURL: String = AIInsights.AIProvider.google.defaultEndpoint
+    var aiSystemPrompt: String = AIInsights.defaultChatSystemPrompt
+    var aiEnabled: Bool = false
+    var aiAnalysisPeriodDays: Int = 7
+    var aiPersonality: AIPersonality = .clinicalExpert
+    var openFoodFactsBaseURL: String = AIInsights.defaultOpenFoodFactsBaseURL
+    var foodFinderLookupMode: AIInsights.FoodFinderLookupMode = .verifiedAgent
+    var foodFinderOpenFoodFactsEnabled: Bool = true
+    var foodFinderUSDAEnabled: Bool = false
+    var foodFinderPreferredSource: AIInsights.FoodSourceID = .openFoodFacts
+    var foodFinderDoseGuardEnabled: Bool = true
+    var foodFinderDoseGuardSamples: Int = 2
+    /// Inject reverse-geocoded venue/locality into AI chat prompt. Off by default; first use triggers iOS Location permission prompt.
+    var aiLocationContextEnabled: Bool = false
+    /// Read dietaryCaffeine from Apple Health and merge with manual caffeine entries.
+    /// First enable triggers HealthKit read-authorization prompt.
+    var aiHealthKitCaffeineEnabled: Bool = false
+    /// Read numberOfAlcoholicBeverages from Apple Health and merge with manual entries.
+    var aiHealthKitAlcoholEnabled: Bool = false
 
     /// Selected Garmin watchface (Trio or SwissAlpine)
     var garminWatchface: GarminWatchface = .trio
@@ -352,6 +378,141 @@ extension TrioSettings: Decodable {
             settings.isWatchfaceDataEnabled = isWatchfaceDataEnabled
         }
 
+        if let aiProvider = try? container.decode(AIInsights.AIProvider.self, forKey: .aiProvider) {
+            settings.aiProvider = aiProvider
+        }
+
+        if let aiModel = try? container.decode(String.self, forKey: .aiModel) {
+            settings.aiModel = aiModel
+        }
+
+        if let aiBaseURL = try? container.decode(String.self, forKey: .aiBaseURL) {
+            settings.aiBaseURL = aiBaseURL
+        }
+
+        if let aiDictationEnabled = try? container.decode(Bool.self, forKey: .aiDictationEnabled) {
+            settings.aiDictationEnabled = aiDictationEnabled
+        }
+
+        if let aiDictationUsesSeparateProvider = try? container.decode(
+            Bool.self,
+            forKey: .aiDictationUsesSeparateProvider
+        ) {
+            settings.aiDictationUsesSeparateProvider = aiDictationUsesSeparateProvider
+        }
+
+        if let aiDictationProvider = try? container.decode(AIInsights.AIProvider.self, forKey: .aiDictationProvider) {
+            settings.aiDictationProvider = aiDictationProvider
+        }
+
+        if let aiDictationModel = try? container.decode(String.self, forKey: .aiDictationModel) {
+            settings.aiDictationModel = aiDictationModel
+        }
+
+        if let aiDictationBaseURL = try? container.decode(String.self, forKey: .aiDictationBaseURL) {
+            settings.aiDictationBaseURL = aiDictationBaseURL
+        }
+
+        if let aiSystemPrompt = try? container.decode(String.self, forKey: .aiSystemPrompt) {
+            settings.aiSystemPrompt = aiSystemPrompt
+        }
+
+        if let aiEnabled = try? container.decode(Bool.self, forKey: .aiEnabled) {
+            settings.aiEnabled = aiEnabled
+        }
+
+        if let aiAnalysisPeriodDays = try? container.decode(Int.self, forKey: .aiAnalysisPeriodDays) {
+            settings.aiAnalysisPeriodDays = aiAnalysisPeriodDays
+        }
+
+        if let aiPersonality = try? container.decode(AIPersonality.self, forKey: .aiPersonality) {
+            settings.aiPersonality = aiPersonality
+        }
+
+        if let openFoodFactsBaseURL = try? container.decode(String.self, forKey: .openFoodFactsBaseURL) {
+            settings.openFoodFactsBaseURL = openFoodFactsBaseURL
+        }
+
+        if let foodFinderLookupMode = try? container.decode(
+            AIInsights.FoodFinderLookupMode.self,
+            forKey: .foodFinderLookupMode
+        ) {
+            settings.foodFinderLookupMode = foodFinderLookupMode
+        }
+
+        if let foodFinderOpenFoodFactsEnabled = try? container.decode(
+            Bool.self,
+            forKey: .foodFinderOpenFoodFactsEnabled
+        ) {
+            settings.foodFinderOpenFoodFactsEnabled = foodFinderOpenFoodFactsEnabled
+        }
+
+        if let foodFinderUSDAEnabled = try? container.decode(Bool.self, forKey: .foodFinderUSDAEnabled) {
+            settings.foodFinderUSDAEnabled = foodFinderUSDAEnabled
+        }
+
+        if let foodFinderPreferredSource = try? container.decode(
+            AIInsights.FoodSourceID.self,
+            forKey: .foodFinderPreferredSource
+        ) {
+            settings.foodFinderPreferredSource = foodFinderPreferredSource
+        }
+
+        if let foodFinderDoseGuardEnabled = try? container.decode(
+            Bool.self,
+            forKey: .foodFinderDoseGuardEnabled
+        ) {
+            settings.foodFinderDoseGuardEnabled = foodFinderDoseGuardEnabled
+        }
+
+        if let foodFinderDoseGuardSamples = try? container.decode(
+            Int.self,
+            forKey: .foodFinderDoseGuardSamples
+        ) {
+            settings.foodFinderDoseGuardSamples = min(3, max(1, foodFinderDoseGuardSamples))
+        }
+
+        if let aiLocationContextEnabled = try? container.decode(Bool.self, forKey: .aiLocationContextEnabled) {
+            settings.aiLocationContextEnabled = aiLocationContextEnabled
+        }
+
+        if let aiHealthKitCaffeineEnabled = try? container.decode(Bool.self, forKey: .aiHealthKitCaffeineEnabled) {
+            settings.aiHealthKitCaffeineEnabled = aiHealthKitCaffeineEnabled
+        }
+
+        if let aiHealthKitAlcoholEnabled = try? container.decode(Bool.self, forKey: .aiHealthKitAlcoholEnabled) {
+            settings.aiHealthKitAlcoholEnabled = aiHealthKitAlcoholEnabled
+        }
+
         self = settings
+    }
+}
+
+// MARK: - AI Personality
+
+enum AIPersonality: String, CaseIterable, Identifiable, Codable, JSON {
+    case clinicalExpert = "Clinical Expert"
+    case supportiveCoach = "Supportive Coach"
+    case dryWit = "Dry Wit"
+    case toughLove = "Tough Love"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .clinicalExpert: return String(localized: "Clinical Expert", comment: "AI personality style")
+        case .supportiveCoach: return String(localized: "Supportive Coach", comment: "AI personality style")
+        case .dryWit: return String(localized: "Dry Wit", comment: "AI personality style")
+        case .toughLove: return String(localized: "Tough Love", comment: "AI personality style")
+        }
+    }
+
+    var systemPromptSuffix: String {
+        switch self {
+        case .clinicalExpert: return "Use precise medical terminology. Be concise and evidence-based."
+        case .supportiveCoach: return "Be warm and encouraging. Acknowledge the effort of managing diabetes. Use supportive language."
+        case .dryWit: return "Use dry humor where appropriate. Keep it factual but not boring. A light touch helps with tough topics."
+        case .toughLove: return "Be direct and honest. If settings are clearly off, say so plainly. No sugar-coating."
+        }
     }
 }
