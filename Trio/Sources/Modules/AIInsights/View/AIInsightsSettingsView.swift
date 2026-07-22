@@ -45,10 +45,23 @@ extension AIInsights {
                             state.saveAPIKey()
                         }
 
-                    TextField(String(localized: "Model", comment: "Model field placeholder"), text: $state.model)
+                    if state.providerType.selectableModels.isEmpty {
+                        TextField(String(localized: "Model", comment: "Model field placeholder"), text: $state.model)
+                            .onChange(of: state.model) {
+                                state.saveSettings()
+                            }
+                            .autocorrectionDisabled()
+                            .autocapitalization(.none)
+                    } else {
+                        Picker(String(localized: "Upstream Model", comment: "TillyAI upstream model picker label"), selection: $state.model) {
+                            ForEach(state.providerType.selectableModels, id: \.self) { model in
+                                Text(model).tag(model)
+                            }
+                        }
                         .onChange(of: state.model) {
                             state.saveSettings()
                         }
+                    }
 
                     TextField(String(localized: "Endpoint URL", comment: "URL field placeholder"), text: $state.baseURL, axis: .vertical)
                         .lineLimit(1...5)

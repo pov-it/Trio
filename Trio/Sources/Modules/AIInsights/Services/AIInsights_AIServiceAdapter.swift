@@ -23,7 +23,7 @@ extension AIInsights {
             var imageData: Data? = nil
             var additionalImageData: [Data] = []
             var responseFormat: [String: Any]? = nil
-            /// When true, ask Gemini to skip "thinking" (thinkingBudget 0).
+            /// When true, minimize Gemini thinking using the model generation's supported API.
             /// Thinking models otherwise spend the output-token budget on hidden
             /// reasoning — slower and prone to truncating the JSON answer. Only
             /// affects Gemini; ignored by other providers.
@@ -136,7 +136,7 @@ extension AIInsights {
             switch provider {
             case .google:
                 return try await sendGemini(request: request, baseURL: baseURL, apiKey: apiKey)
-            case .openai, .custom:
+            case .openai, .tilly, .custom:
                 return try await sendOpenAICompatible(request: request, baseURL: baseURL, apiKey: apiKey)
             case .anthropic:
                 return try await sendAnthropic(request: request, baseURL: baseURL, apiKey: apiKey)
@@ -162,7 +162,7 @@ extension AIInsights {
                     request: request, baseURL: baseURL, apiKey: apiKey,
                     tools: tools, grounding: geminiGrounding
                 )
-            case .openai, .custom:
+            case .openai, .tilly, .custom:
                 return try await sendOpenAICompatible(
                     request: request, baseURL: baseURL, apiKey: apiKey, tools: tools
                 )
@@ -269,8 +269,8 @@ extension AIInsights {
                     apiKey: apiKey,
                     languageHint: languageHint
                 )
-            case .anthropic:
-                throw AIError.parsingError("Anthropic does not support audio transcription in this FoodFinder flow.")
+            case .anthropic, .tilly:
+                throw AIError.parsingError("The selected provider does not support audio transcription in this FoodFinder flow.")
             }
         }
 
@@ -301,6 +301,10 @@ extension AIInsights {
             Language hint: \(languageHint).
             Return only the transcript. Do not translate, summarize, add punctuation notes, or wrap it in JSON.
             """
+            var generationConfig: [String: Any] = ["maxOutputTokens": 512]
+            if !usesModernGeminiParameters(model: model, baseURL: baseURL) {
+                generationConfig["temperature"] = 0
+            }
             let body: [String: Any] = [
                 "contents": [[
                     "role": "user",
@@ -314,10 +318,7 @@ extension AIInsights {
                         ["text": prompt]
                     ]
                 ]],
-                "generationConfig": [
-                    "temperature": 0,
-                    "maxOutputTokens": 512
-                ]
+                "generationConfig": generationConfig
             ]
             urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -444,6 +445,7 @@ extension AIInsights {
                         "role": "user",
                         "parts": [[
                             "functionResponse": [
+                                "id": msg.toolCallID ?? msg.toolName ?? "tool",
                                 "name": msg.toolName ?? "tool",
                                 "response": ["result": msg.content]
                             ]
@@ -528,15 +530,20 @@ extension AIInsights {
             // Generation config. Note: Gemini rejects responseMimeType=json when
             // function declarations are present, so skip it whenever tools are set.
             var genConfig: [String: Any] = [:]
-            if let temp = request.temperature { genConfig["temperature"] = temp }
-            if let topP = request.topP { genConfig["topP"] = topP }
-            if let topK = request.topK { genConfig["topK"] = topK }
+            let usesModernParameters = usesModernGeminiParameters(model: request.model, baseURL: baseURL)
+            if !usesModernParameters {
+                if let temp = request.temperature { genConfig["temperature"] = temp }
+                if let topP = request.topP { genConfig["topP"] = topP }
+                if let topK = request.topK { genConfig["topK"] = topK }
+            }
             if let maxTokens = request.maxTokens { genConfig["maxOutputTokens"] = maxTokens }
             if request.responseFormat != nil, toolEntries.isEmpty {
                 genConfig["responseMimeType"] = "application/json"
             }
             if request.disableThinking {
-                genConfig["thinkingConfig"] = ["thinkingBudget": 0]
+                genConfig["thinkingConfig"] = usesModernParameters
+                    ? ["thinkingLevel": "minimal"]
+                    : ["thinkingBudget": 0]
             }
             if !genConfig.isEmpty {
                 body["generationConfig"] = genConfig
@@ -604,6 +611,13 @@ extension AIInsights {
                 usage: usage,
                 toolCalls: toolCalls
             )
+        }
+
+        private static func usesModernGeminiParameters(model: String, baseURL: String) -> Bool {
+            let identifier = "\(model) \(baseURL)".lowercased()
+            return identifier.contains("gemini-flash-latest")
+                || identifier.contains("gemini-3.6-")
+                || identifier.contains("gemini-3.5-flash-lite")
         }
 
         // MARK: - OpenAI Compatible

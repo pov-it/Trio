@@ -733,7 +733,7 @@ extension AIInsights {
                     ]
                 ]
                 ]
-            case .anthropic, .custom:
+            case .anthropic, .tilly, .custom:
                 return nil
             }
         }

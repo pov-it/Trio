@@ -145,6 +145,7 @@ enum AIInsights {
         case google = "Google Gemini"
         case openai = "OpenAI"
         case anthropic = "Anthropic"
+        case tilly = "TillyAI (Raspberry Pi)"
         case custom = "Custom"
 
         var id: String { rawValue }
@@ -154,28 +155,36 @@ enum AIInsights {
             case .google: return "https://generativelanguage.googleapis.com/v1beta/models/"
             case .openai: return "https://api.openai.com/v1/chat/completions"
             case .anthropic: return "https://api.anthropic.com/v1/messages"
+            case .tilly: return "https://tillycode-pi.taila48ece.ts.net/v1/chat/completions"
             case .custom: return ""
             }
         }
 
         var defaultModel: String {
             switch self {
-            // gemini-2.0-flash was retired by Google (returns 404 on
-            // generateContent); 2.5-flash is the current vision + tool-calling
-            // model.
-            case .google: return "gemini-2.5-flash"
+            case .google: return "gemini-3.6-flash"
             case .openai: return "gpt-4o"
             case .anthropic: return "claude-sonnet-4-20250514"
+            case .tilly: return "gpt-5.5"
             case .custom: return ""
             }
         }
 
         var defaultDictationModel: String {
             switch self {
-            case .google: return "gemini-2.5-flash"
+            case .google: return "gemini-3.6-flash"
             case .openai: return "gpt-4o-transcribe"
-            case .anthropic: return defaultModel
+            case .anthropic, .tilly: return defaultModel
             case .custom: return ""
+            }
+        }
+
+        var selectableModels: [String] {
+            switch self {
+            case .tilly:
+                return ["gpt-5.5", "gpt-4.1", "Mistral-Large-3", "claude-opus-4-8", "tilburg-chatbot"]
+            default:
+                return []
             }
         }
 
@@ -185,12 +194,12 @@ enum AIInsights {
 
         /// Full endpoint URL for the provider, combining baseURL with the model name.
         /// For Google Gemini, this constructs the generateContent endpoint.
-        /// For OpenAI/Anthropic/Custom, the model is sent in the request body.
+        /// For OpenAI/Anthropic/TillyAI/Custom, the model is sent in the request body.
         var defaultEndpoint: String {
             switch self {
             case .google:
-                return "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-            case .openai, .anthropic, .custom:
+                return "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
+            case .openai, .anthropic, .tilly, .custom:
                 return defaultBaseURL
             }
         }
