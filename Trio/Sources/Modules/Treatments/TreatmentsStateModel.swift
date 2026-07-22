@@ -269,6 +269,7 @@ extension Treatments {
                     self.setupDeterminationController()
                     self.setupLastBolusController()
                 }
+                await self.applyFoodFinderHandoffIfNeeded()
             }
         }
 
@@ -331,6 +332,30 @@ extension Treatments {
                     }
                 }
             }
+        }
+
+        @MainActor func applyFoodFinderHandoffIfNeeded() async {
+            guard let handoff = AIInsights.FoodBolusHandoff.consume() else { return }
+
+            carbs = min(Decimal(handoff.carbs), maxCarbs)
+            fat = min(Decimal(handoff.fat), maxFat)
+            protein = min(Decimal(handoff.protein), maxProtein)
+            note = String(handoff.note.prefix(25))
+            date = handoff.createdAt
+
+            if fat > 0 || protein > 0 {
+                useFPUconversion = true
+            }
+
+            let shouldUseReducedBolus = handoff.useReducedBolus
+                ?? AIInsights.foodFinderReducedBolusRecommended(fat: handoff.fat, protein: handoff.protein)
+            if fattyMeals && shouldUseReducedBolus {
+                useFattyMealCorrectionFactor = true
+                useSuperBolus = false
+            }
+
+            insulinCalculated = await calculateInsulin()
+            await updateForecasts()
         }
 
         private func registerObservers() {

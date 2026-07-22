@@ -853,6 +853,64 @@ extension Home {
             }
         }
 
+        private var aiChatButton: some View {
+            NavigationLink {
+                AIInsights.HubView(resolver: resolver)
+            } label: {
+                ZStack {
+                    Circle()
+                        .stroke(
+                            AngularGradient(
+                                colors: [
+                                    Color(red: 0.7215686275, green: 0.3411764706, blue: 1),
+                                    Color(red: 0.6235294118, green: 0.4235294118, blue: 0.9803921569),
+                                    Color(red: 0.4862745098, green: 0.5450980392, blue: 0.9529411765),
+                                    Color(red: 0.3411764706, green: 0.6666666667, blue: 0.9254901961),
+                                    Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902),
+                                    Color(red: 0.7215686275, green: 0.3411764706, blue: 1)
+                                ],
+                                center: .center,
+                                startAngle: .degrees(270),
+                                endAngle: .degrees(-90)
+                            ),
+                            lineWidth: 2.5
+                        )
+                    Circle()
+                        .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color.insulin.opacity(0.15))
+
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 20))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.7215686275, green: 0.3411764706, blue: 1),
+                                    Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
+                .frame(width: 52, height: 52)
+            }
+            .accessibilityLabel(String(localized: "AI Hub", comment: "AI Hub accessibility label"))
+        }
+
+        @ViewBuilder func bottomStatusRow(geo: GeometryProxy, bolusProgress: Decimal?) -> some View {
+            HStack(alignment: .center, spacing: 0) {
+                if let bolusProgress {
+                    bolusView(geo: geo, bolusProgress)
+                } else {
+                    adjustmentView(geo: geo)
+                }
+
+                aiChatButton
+                    .frame(width: 74, alignment: .center)
+            }
+            .padding(.trailing, 10)
+            .padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
+        }
+
         @ViewBuilder func alertSafetyNotificationsView(geo: GeometryProxy) -> some View {
             ZStack {
                 /// rectangle as background
@@ -962,12 +1020,7 @@ extension Home {
                     )
                 }.padding([.horizontal, .bottom])
 
-                if let progress = state.bolusProgress {
-                    bolusView(geo: geo, progress)
-                        .padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
-                } else {
-                    adjustmentView(geo: geo).padding(.bottom, UIDevice.adjustPadding(min: nil, max: 40))
-                }
+                bottomStatusRow(geo: geo, bolusProgress: state.bolusProgress)
             }
             .background(appState.trioBackgroundColor(for: colorScheme))
             .onReceive(

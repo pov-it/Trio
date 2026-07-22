@@ -19,7 +19,7 @@ extension Treatments {
 
         @State var state = StateModel()
 
-        @State private var showPresetSheet = false
+        @State private var showFoodFinder = false
         @State private var autofocus: Bool = true
         @State private var calculatorDetent = PresentationDetent.large
         @State private var pushed: Bool = false
@@ -407,17 +407,13 @@ extension Treatments {
                         Text("Close")
                     }
                 }
-                if state.displayPresets {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button(action: {
-                            showPresetSheet = true
-                        }, label: {
-                            HStack {
-                                Text("Presets")
-                                Image(systemName: "plus")
-                            }
-                        })
-                    }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: {
+                        showFoodFinder = true
+                    }, label: {
+                        Image(systemName: "fork.knife.circle")
+                    })
+                    .accessibilityLabel(String(localized: "FoodFinder", comment: "FoodFinder toolbar button"))
                 }
             })
             .onAppear {
@@ -442,10 +438,14 @@ extension Treatments {
             .sheet(isPresented: $state.showInfo) {
                 PopupView(state: state)
             }
-            .sheet(isPresented: $showPresetSheet, onDismiss: {
-                showPresetSheet = false
+            .sheet(isPresented: $showFoodFinder, onDismiss: {
+                Task { await state.applyFoodFinderHandoffIfNeeded() }
             }) {
-                MealPresetView(state: state)
+                NavigationStack {
+                    AIInsights.FoodFinderView(resolver: resolver, onHandoffComplete: {
+                        showFoodFinder = false
+                    })
+                }
             }
             .alert("Error while processing Treatment", isPresented: $state.showDeterminationFailureAlert) {
                 Button("OK", role: .cancel) {
