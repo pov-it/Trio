@@ -155,7 +155,7 @@ enum AIInsights {
             case .google: return "https://generativelanguage.googleapis.com/v1beta/models/"
             case .openai: return "https://api.openai.com/v1/chat/completions"
             case .anthropic: return "https://api.anthropic.com/v1/messages"
-            case .tilly: return "https://tillycode-pi.taila48ece.ts.net/v1/chat/completions"
+            case .tilly: return "https://chat.pov-it.tech/v1/chat/completions"
             case .custom: return ""
             }
         }

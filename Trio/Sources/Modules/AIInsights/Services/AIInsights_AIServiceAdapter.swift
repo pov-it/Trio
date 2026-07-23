@@ -568,13 +568,24 @@ extension AIInsights {
             }
 
             // Parse Gemini response. Parts may contain text and/or functionCall.
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let candidates = json["candidates"] as? [[String: Any]],
+            let rawBody = String(data: data, encoding: .utf8) ?? "<non-utf8 body>"
+            let bodyPreview = rawBody.count > 500 ? String(rawBody.prefix(500)) + "…" : rawBody
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw AIError.parsingError("Gemini returned a non-JSON 200 response: \(bodyPreview)")
+            }
+            // Gemini can return 200 with no candidates when the prompt is blocked
+            // (safety / recitation) or the model name is not a valid generateContent
+            // model — surface the real reason instead of a generic parse failure.
+            guard let candidates = json["candidates"] as? [[String: Any]],
                   let firstCandidate = candidates.first,
                   let content = firstCandidate["content"] as? [String: Any],
                   let parts = content["parts"] as? [[String: Any]]
             else {
-                throw AIError.parsingError("Could not parse Gemini response")
+                if let promptFeedback = json["promptFeedback"] as? [String: Any],
+                   let blockReason = promptFeedback["blockReason"] as? String {
+                    throw AIError.parsingError("Gemini blocked the request (\(blockReason)). Body: \(bodyPreview)")
+                }
+                throw AIError.parsingError("Gemini response had no usable candidates. Check the model name is valid. Body: \(bodyPreview)")
             }
 
             let text = parts.compactMap { $0["text"] as? String }.joined()
@@ -593,7 +604,8 @@ extension AIInsights {
             }
 
             guard !text.isEmpty || !toolCalls.isEmpty else {
-                throw AIError.parsingError("Could not parse Gemini response")
+                let finishReason = (candidates.first?["finishReason"] as? String) ?? "unknown"
+                throw AIError.parsingError("Gemini returned an empty candidate (finishReason: \(finishReason)). Body: \(bodyPreview)")
             }
 
             var usage: AIResponse.Usage?
