@@ -297,11 +297,11 @@ extension AIInsights {
         var foodFinderOpenFoodFactsEnabled: Bool = true
         var foodFinderUSDAEnabled: Bool = false
         var foodFinderPreferredSource: FoodSourceID = .openFoodFacts
-        var foodFinderUSDAAPIKey: *** = ""
+        var foodFinderUSDAAPIKey: String = ""
         /// Bearer token for Marijn's self-hosted Albert Heijn nutrition endpoint
         /// (foodfinder.pov-it.tech). Loaded from / saved to the keychain under
         /// `ai_foodfinder_ah_token`, mirroring the USDA key; never in TrioSettings.
-        var foodFinderAHToken: *** = ""
+        var foodFinderAHToken: String = ""
         var foodFinderDoseGuardEnabled: Bool = true
         var foodFinderDoseGuardSamples: Int = 2
         var maxFoodFinderImages: Int { max(1, providerType.foodFinderImageLimit) }
