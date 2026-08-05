@@ -25,7 +25,22 @@ extension AIInsights {
         var sourceImageURL: URL?
         var sourceScore: Double?
         var alternateMatches: [FoodLookupResult] = []
+        /// The unit the stored macros are expressed in. When `.isScalable` and
+        /// `basisAmount > 0`, the stored `carbs`/`fat`/… are the macros for
+        /// `basisAmount` of `basisUnit`, so typing a new amount X re-scales the
+        /// portion via `multiplier = X / basisAmount`. `.unknown` means the
+        /// basis was never established (a bare AI estimate): the amount field
+        /// must NOT silently rescale macros — it only records what was eaten
+        /// until the user promotes it to a real unit on the edit screen.
+        var basisUnit: MeasurementUnit = .unknown
+        /// The amount of `basisUnit` the stored macros correspond to (e.g. 100
+        /// for "per 100 g", or the real serving grams). 0 means "not set".
+        var basisAmount: Double = 0
 
+        // NOTE: `adjusted*` is deliberately kept as `stored * portionMultiplier`
+        // (unchanged). `basisUnit`/`basisAmount` only govern how the amount
+        // field is *interpreted* into a multiplier — they never change the
+        // adjusted math for already-persisted meals, so no existing dose moves.
         var adjustedCarbs: Double { carbs * portionMultiplier }
         var adjustedFat: Double { fat * portionMultiplier }
         var adjustedProtein: Double { protein * portionMultiplier }
@@ -49,7 +64,9 @@ extension AIInsights {
             sourceBrand: String? = nil,
             sourceImageURL: URL? = nil,
             sourceScore: Double? = nil,
-            alternateMatches: [FoodLookupResult] = []
+            alternateMatches: [FoodLookupResult] = [],
+            basisUnit: MeasurementUnit = .unknown,
+            basisAmount: Double = 0
         ) {
             self.id = id
             self.name = name
@@ -68,6 +85,8 @@ extension AIInsights {
             self.sourceImageURL = sourceImageURL
             self.sourceScore = sourceScore
             self.alternateMatches = alternateMatches
+            self.basisUnit = basisUnit
+            self.basisAmount = basisAmount
         }
 
         enum CodingKeys: String, CodingKey {
@@ -88,6 +107,8 @@ extension AIInsights {
             case sourceImageURL
             case sourceScore
             case alternateMatches
+            case basisUnit
+            case basisAmount
         }
 
         init(from decoder: Decoder) throws {
@@ -109,6 +130,8 @@ extension AIInsights {
             sourceImageURL = try container.decodeIfPresent(URL.self, forKey: .sourceImageURL)
             sourceScore = try container.decodeIfPresent(Double.self, forKey: .sourceScore)
             alternateMatches = try container.decodeIfPresent([FoodLookupResult].self, forKey: .alternateMatches) ?? []
+            basisUnit = try container.decodeIfPresent(MeasurementUnit.self, forKey: .basisUnit) ?? .unknown
+            basisAmount = try container.decodeIfPresent(Double.self, forKey: .basisAmount) ?? 0
         }
     }
 
@@ -915,6 +938,21 @@ extension AIInsights {
                     : item.portion
             }
 
+            // Establish a scalable nutrition basis (Feature A). After the `scale`
+            // above, the stored macros correspond to whatever gram amount the
+            // `portion` describes: the user's existing grams when we scaled to
+            // them, otherwise the lookup's own reference grams. OFF/USDA report
+            // grams (not ml), so the basis unit is `.gram`. When neither side
+            // gives a gram figure we leave the basis unknown so the amount field
+            // won't fabricate a scale.
+            let basisGrams: Double = {
+                if let existingGrams, let lookupGrams, lookupGrams > 0 {
+                    return max(0.05, existingGrams)
+                }
+                return lookup.portionGrams ?? 0
+            }()
+            let basisUnit: MeasurementUnit = basisGrams > 0 ? .gram : .unknown
+
             return FoodItem(
                 id: item.id,
                 name: item.name,
@@ -932,7 +970,9 @@ extension AIInsights {
                 sourceBrand: lookup.brand,
                 sourceImageURL: lookup.imageURL,
                 sourceScore: lookup.verifiedScore,
-                alternateMatches: alternates
+                alternateMatches: alternates,
+                basisUnit: basisUnit,
+                basisAmount: basisGrams
             )
         }
 
@@ -1012,24 +1052,69 @@ extension AIInsights {
         /// macros at 1× — anchoring "this estimate = N grams". Subsequent gram
         /// edits then scale proportionally.
         func setPortionGrams(for itemId: UUID, grams: Double) {
-            guard grams > 0,
+            setPortionAmount(for: itemId, amount: grams, unit: nil)
+        }
+
+        /// Set an ingredient's portion by an absolute amount, optionally in an
+        /// explicit unit. Scaling priority (safety-critical — see Feature A):
+        ///
+        /// 1. Explicit scalable basis (`basisUnit.isScalable && basisAmount>0`):
+        ///    the stored macros are per `basisAmount` of `basisUnit`, so the
+        ///    multiplier is exactly `amount / basisAmount`. This is the correct
+        ///    path for OpenFoodFacts / USDA / AH items and anything the user
+        ///    pinned to a unit on the edit screen. A `unit` argument that
+        ///    disagrees with the stored `basisUnit` (e.g. user types ml on a
+        ///    per-100-g item) is NOT auto-converted — we keep the stored basis
+        ///    and just scale the number, because g⇄ml needs a density we don't
+        ///    have and guessing could inflate carbs.
+        /// 2. Legacy gram anchor parsed from the portion string ("150 g"):
+        ///    unchanged historical behaviour so already-saved meals still track.
+        /// 3. No basis at all (`.unknown`, no parseable anchor): record the
+        ///    amount as the portion label but DO NOT rescale macros and DO NOT
+        ///    reset the multiplier. This fixes the anchor bug where a per-100
+        ///    item with an unrecognised portion was silently treated as if the
+        ///    typed amount were its whole basis (then re-scaled on the next
+        ///    edit), which could massively over- or under-count carbs.
+        func setPortionAmount(for itemId: UUID, amount: Double, unit: MeasurementUnit?) {
+            guard amount > 0,
                   var result = currentResult,
                   let idx = result.items.firstIndex(where: { $0.id == itemId })
             else { return }
 
-            if let base = gramsFromPortion(result.items[idx].portion), base > 0 {
-                // No 0.25 floor here: a 90 g "2 slices" base must still be
-                // dialable down to 20 g (≈0.22×) or lower when the user knows
-                // they ate less than the AI assumed.
-                let clamped = max(0.01, grams / base)
+            let item = result.items[idx]
+
+            // 1. Explicit scalable basis → exact linear rescale.
+            if item.basisUnit.isScalable, item.basisAmount > 0 {
+                let clamped = max(0.01, amount / item.basisAmount)
+                result.items[idx].portionMultiplier = clamped
+                result.items[idx].portion = portionLabel(amount: amount, unit: unit ?? item.basisUnit)
+                storeUpdatedResult(result)
+                recordPortionLearning(itemName: result.items[idx].name, multiplier: clamped)
+                return
+            }
+
+            // 2. Legacy gram/ml anchor embedded in the portion string.
+            if let base = gramsFromPortion(item.portion), base > 0 {
+                let clamped = max(0.01, amount / base)
                 result.items[idx].portionMultiplier = clamped
                 storeUpdatedResult(result)
                 recordPortionLearning(itemName: result.items[idx].name, multiplier: clamped)
-            } else {
-                result.items[idx].portion = String(format: "%.0f g", grams)
-                result.items[idx].portionMultiplier = 1.0
-                storeUpdatedResult(result)
+                return
             }
+
+            // 3. Unknown basis → record the amount, never rescale or reset.
+            result.items[idx].portion = portionLabel(amount: amount, unit: unit)
+            storeUpdatedResult(result)
+        }
+
+        /// Human-readable portion label for an amount + unit. Falls back to a
+        /// bare gram label when the unit is unknown (matches the old "%.0f g").
+        private func portionLabel(amount: Double, unit: MeasurementUnit?) -> String {
+            let abbrev = (unit?.isScalable == true) ? unit!.abbreviation : "g"
+            let trimmed = amount.rounded() == amount
+                ? String(format: "%.0f", amount)
+                : String(format: "%.2f", amount)
+            return "\(trimmed) \(abbrev)"
         }
 
         func updateItemName(for itemId: UUID, name: String) {

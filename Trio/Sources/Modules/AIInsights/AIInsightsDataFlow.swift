@@ -54,6 +54,51 @@ enum AIInsights {
         }
     }
 
+    /// The measurement unit a food's macros are expressed in. `.gram` / `.milliliter`
+    /// are *scalable* bases (macros are per-`basisAmount` of that unit, so typing a
+    /// new amount re-scales linearly). `.piece` / `.serving` are *discrete* units
+    /// (macros describe one whole piece/serving; the amount is a count, not a weight).
+    /// `.unknown` means the basis was never established (a bare AI estimate) — the
+    /// UI must ask the user to pick a real unit before it may scale anything.
+    enum MeasurementUnit: String, CaseIterable, Identifiable, Codable, JSON, Sendable {
+        case gram
+        case milliliter
+        case piece
+        case serving
+        case unknown
+
+        var id: String { rawValue }
+
+        /// Whether macros may be linearly re-scaled when the amount changes.
+        /// Weight/volume scale; discrete counts scale too (2 pieces = 2×);
+        /// only `.unknown` must not silently scale.
+        var isScalable: Bool { self != .unknown }
+
+        /// Units the edit-screen dropdown offers (excludes `.unknown`, which is
+        /// an internal "not yet set" marker the user resolves by picking a real one).
+        static var selectable: [MeasurementUnit] { [.gram, .milliliter, .piece, .serving] }
+
+        var abbreviation: String {
+            switch self {
+            case .gram: return "g"
+            case .milliliter: return "ml"
+            case .piece: return String(localized: "pc", comment: "Piece unit abbreviation")
+            case .serving: return String(localized: "srv", comment: "Serving unit abbreviation")
+            case .unknown: return ""
+            }
+        }
+
+        var localizedTitle: String {
+            switch self {
+            case .gram: return String(localized: "Grams (g)", comment: "Gram unit")
+            case .milliliter: return String(localized: "Milliliters (ml)", comment: "Milliliter unit")
+            case .piece: return String(localized: "Pieces", comment: "Piece unit")
+            case .serving: return String(localized: "Servings", comment: "Serving unit")
+            case .unknown: return String(localized: "Not set", comment: "Unknown unit")
+            }
+        }
+    }
+
     struct FoodLookupResult: Identifiable, Codable, Equatable, Sendable {
         var id: UUID = UUID()
         var sourceID: FoodSourceID

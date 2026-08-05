@@ -1830,6 +1830,11 @@ private struct FoodItemEditSheet: View {
     @State private var name: String
     @State private var portion: String
     @State private var weight: String
+    // Feature B: an explicit unit + amount replace the old free-text portion /
+    // weight fields. The macros the user types are the macros for exactly this
+    // amount of this unit (the item's nutrition basis), so scaling is unambiguous.
+    @State private var basisUnitSelection: AIInsights.MeasurementUnit
+    @State private var amount: String
     @State private var carbs: String
     @State private var fat: String
     @State private var protein: String
@@ -1840,15 +1845,38 @@ private struct FoodItemEditSheet: View {
         self.item = item
         self.onSave = onSave
         _name = State(initialValue: item.name)
-        // Split the portion into a human label ("2 slices") and an explicit
-        // weight ("90 g") so the user can edit each independently and the macros
-        // stay anchored to the weight rather than a free-form string.
+        // Retained (hidden) so composedPortion/legacy helpers still resolve; the
+        // visible editor now uses the unit picker + amount field below.
         _portion = State(initialValue: Self.portionLabel(item.portion))
         if let grams = Self.grams(from: item.portion) {
             _weight = State(initialValue: Self.format(grams * item.portionMultiplier))
         } else {
             _weight = State(initialValue: "")
         }
+
+        // Seed the unit picker from the item's stored basis when it has one,
+        // else infer grams from an embedded weight token, else default to grams.
+        let seededUnit: AIInsights.MeasurementUnit = {
+            if item.basisUnit.isScalable { return item.basisUnit }
+            if Self.grams(from: item.portion) != nil { return .gram }
+            return .gram
+        }()
+        _basisUnitSelection = State(initialValue: seededUnit)
+
+        // Seed the amount as the CURRENT amount in that unit: for a scalable
+        // basis that is basisAmount × the current multiplier; otherwise fall
+        // back to any embedded grams (× multiplier); otherwise blank.
+        let seededAmount: Double? = {
+            if item.basisUnit.isScalable, item.basisAmount > 0 {
+                return item.basisAmount * item.portionMultiplier
+            }
+            if let grams = Self.grams(from: item.portion) {
+                return grams * item.portionMultiplier
+            }
+            return nil
+        }()
+        _amount = State(initialValue: seededAmount.map { Self.format($0) } ?? "")
+
         _carbs = State(initialValue: Self.format(item.adjustedCarbs))
         _fat = State(initialValue: Self.format(item.adjustedFat))
         _protein = State(initialValue: Self.format(item.adjustedProtein))
@@ -1861,15 +1889,22 @@ private struct FoodItemEditSheet: View {
             Form {
                 Section {
                     TextField(String(localized: "Name", comment: "Food item name field"), text: $name)
-                    TextField(String(localized: "Portion", comment: "Food item portion field"), text: $portion)
+                    Picker(
+                        String(localized: "Unit", comment: "Food item measurement unit picker"),
+                        selection: $basisUnitSelection
+                    ) {
+                        ForEach(AIInsights.MeasurementUnit.selectable) { unit in
+                            Text(unit.localizedTitle).tag(unit)
+                        }
+                    }
                     HStack {
-                        Text(String(localized: "Weight", comment: "Food item weight field"))
+                        Text(String(localized: "Amount", comment: "Food item amount field"))
                         Spacer()
-                        TextField("", text: $weight)
+                        TextField("", text: $amount)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 80)
-                        Text("g")
+                        Text(basisUnitSelection.abbreviation)
                             .foregroundColor(.secondary)
                     }
                 } header: {
@@ -1885,7 +1920,7 @@ private struct FoodItemEditSheet: View {
                 } header: {
                     Text(String(localized: "Nutrition", comment: "FoodFinder nutrition section"))
                 } footer: {
-                    Text(String(localized: "Enter the macros for the weight above. Saving makes this the 1× portion, so the + / − stepper and gram field scale from here.", comment: "FoodFinder edit ingredient footer"))
+                    Text(String(localized: "The macros you enter are for the amount + unit above; the + / − stepper and amount field scale from there.", comment: "FoodFinder edit ingredient footer"))
                 }
             }
             .navigationTitle(String(localized: "Edit Ingredient", comment: "FoodFinder edit ingredient alert"))
@@ -1908,14 +1943,22 @@ private struct FoodItemEditSheet: View {
     }
 
     private var updatedItem: AIInsights.FoodItem {
-        // The macro fields are absolute values for the weight shown. Bake them in
-        // as the new 1× portion so the portion string, weight and macros can never
-        // drift out of sync — the stepper and gram field then scale from here.
-        let enteredGrams = decimalValue(weight)
+        // Feature B: the macro fields are the macros for exactly `amount` of the
+        // chosen `basisUnitSelection`. Bake that in as the nutrition basis with a
+        // 1× multiplier, so the amount field and the +/- stepper scale linearly
+        // and unambiguously from here (multiplier = newAmount / basisAmount).
+        let enteredAmount = max(0, decimalValue(amount))
+        // Only a positive amount yields a usable scalable basis; a blank/zero
+        // amount stays `.unknown` so the amount field can't later divide by zero
+        // or silently inflate carbs.
+        let basisUnit: AIInsights.MeasurementUnit = enteredAmount > 0 ? basisUnitSelection : .unknown
+        let portionText: String = enteredAmount > 0
+            ? "\(Self.format(enteredAmount)) \(basisUnitSelection.abbreviation)"
+            : composedPortion(label: portion, grams: decimalValue(weight))
         return AIInsights.FoodItem(
             id: item.id,
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-            portion: composedPortion(label: portion, grams: enteredGrams),
+            portion: portionText,
             carbs: max(0, decimalValue(carbs)),
             fat: max(0, decimalValue(fat)),
             protein: max(0, decimalValue(protein)),
@@ -1929,7 +1972,9 @@ private struct FoodItemEditSheet: View {
             sourceBrand: item.sourceBrand,
             sourceImageURL: item.sourceImageURL,
             sourceScore: item.sourceScore,
-            alternateMatches: item.alternateMatches
+            alternateMatches: item.alternateMatches,
+            basisUnit: basisUnit,
+            basisAmount: enteredAmount
         )
     }
 
