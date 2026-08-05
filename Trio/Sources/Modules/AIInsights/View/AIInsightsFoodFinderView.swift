@@ -851,6 +851,8 @@ extension AIInsights {
                 return item.sourceVerified ? .green : .secondary
             case .usda:
                 return .blue
+            case .ah:
+                return .cyan
             }
         }
 

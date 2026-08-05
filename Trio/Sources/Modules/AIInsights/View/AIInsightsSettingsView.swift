@@ -251,7 +251,7 @@ extension AIInsights {
                     }
 
                     Picker(String(localized: "Preferred source", comment: "FoodFinder preferred source picker"), selection: $state.foodFinderPreferredSource) {
-                        ForEach([FoodSourceID.openFoodFacts, FoodSourceID.usda, FoodSourceID.aiEstimate]) { source in
+                        ForEach([FoodSourceID.openFoodFacts, FoodSourceID.usda, FoodSourceID.ah, FoodSourceID.aiEstimate]) { source in
                             Text(source.localizedTitle).tag(source)
                         }
                     }

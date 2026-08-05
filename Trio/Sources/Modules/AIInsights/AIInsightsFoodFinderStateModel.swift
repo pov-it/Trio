@@ -297,7 +297,11 @@ extension AIInsights {
         var foodFinderOpenFoodFactsEnabled: Bool = true
         var foodFinderUSDAEnabled: Bool = false
         var foodFinderPreferredSource: FoodSourceID = .openFoodFacts
-        var foodFinderUSDAAPIKey: String = ""
+        var foodFinderUSDAAPIKey: *** = ""
+        /// Bearer token for Marijn's self-hosted Albert Heijn nutrition endpoint
+        /// (foodfinder.pov-it.tech). Loaded from / saved to the keychain under
+        /// `ai_foodfinder_ah_token`, mirroring the USDA key; never in TrioSettings.
+        var foodFinderAHToken: *** = ""
         var foodFinderDoseGuardEnabled: Bool = true
         var foodFinderDoseGuardSamples: Int = 2
         var maxFoodFinderImages: Int { max(1, providerType.foodFinderImageLimit) }
@@ -344,6 +348,9 @@ extension AIInsights {
             }
             if let savedUSDAKey = provider.keychain.getValue(String.self, forKey: "ai_foodfinder_usda_api_key") {
                 foodFinderUSDAAPIKey = savedUSDAKey
+            }
+            if let savedAHToken = provider.keychain.getValue(String.self, forKey: "ai_foodfinder_ah_token") {
+                foodFinderAHToken = savedAHToken
             }
 
             providerType = provider.settings.aiProvider
@@ -832,6 +839,15 @@ extension AIInsights {
             if foodFinderPreferredSource == .usda, foodFinderUSDAEnabled, !foodFinderUSDAAPIKey.isEmpty {
                 sources.append(.usda)
             }
+            if foodFinderPreferredSource == .ah, !foodFinderAHTokenTrimmed.isEmpty {
+                sources.append(.ah)
+            }
+            // Albert Heijn is Marijn's own purchase-aware endpoint; whenever a
+            // token is present, always query it (even when it isn't the
+            // preferred source) so a `purchased` match can win on score.
+            if !foodFinderAHTokenTrimmed.isEmpty, !sources.contains(.ah) {
+                sources.append(.ah)
+            }
             if foodFinderOpenFoodFactsEnabled, !sources.contains(.openFoodFacts) {
                 sources.append(.openFoodFacts)
             }
@@ -839,6 +855,10 @@ extension AIInsights {
                 sources.append(.usda)
             }
             return sources
+        }
+
+        private var foodFinderAHTokenTrimmed: String {
+            foodFinderAHToken.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         private func enrichFoodItemsWithLookup(_ items: [FoodItem]) async -> [FoodItem] {
@@ -887,6 +907,8 @@ extension AIInsights {
                                 return try await lookupOpenFoodFactsResults(trimmed)
                             case .usda:
                                 return try await lookupUSDAResults(trimmed)
+                            case .ah:
+                                return try await lookupAHResults(trimmed)
                             case .aiEstimate:
                                 return []
                             }
@@ -2479,6 +2501,94 @@ extension AIInsights {
                 fiber: usdaNutrient(["Fiber, total dietary", "Fiber"], in: nutrients),
                 calories: usdaNutrient(["Energy"], in: nutrients),
                 sourceURL: fdcId > 0 ? URL(string: "https://fdc.nal.usda.gov/fdc-app.html#/food-details/\(fdcId)/nutrients") : nil,
+                verifiedScore: score,
+                imageURL: nil
+            )
+        }
+
+        /// Base URL of Marijn's self-hosted Albert Heijn nutrition endpoint.
+        private static let foodFinderAHBaseURL = "https://foodfinder.pov-it.tech"
+
+        /// Query the AH endpoint for a single ingredient. The parent parse step
+        /// already splits a composite meal ("volkoren boterham met huttekäse")
+        /// into individual `FoodItem`s, so each ingredient reaches this call on
+        /// its own — matching the endpoint's documented per-ingredient workflow.
+        private func lookupAHResults(_ query: String) async throws -> [FoodLookupResult] {
+            let token = foodFinderAHTokenTrimmed
+            guard !token.isEmpty else { return [] }
+
+            var components = URLComponents(string: "\(Self.foodFinderAHBaseURL)/nutrition")
+            components?.queryItems = [
+                URLQueryItem(name: "q", value: query),
+                URLQueryItem(name: "limit", value: "5"),
+                URLQueryItem(name: "token", value: token)
+            ]
+            guard let url = components?.url else { return [] }
+
+            var request = URLRequest(url: url)
+            let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+            request.setValue("TrioAIInsights/\(appVersion) (https://github.com/pov-it/Trio)", forHTTPHeaderField: "User-Agent")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.timeoutInterval = 12
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let candidates = json["candidates"] as? [[String: Any]]
+            else {
+                return []
+            }
+
+            return candidates.compactMap { ahLookupResult(from: $0, fallbackName: query) }
+        }
+
+        private func ahLookupResult(from candidate: [String: Any], fallbackName: String) -> FoodLookupResult? {
+            // Skip candidates without a nutrition table (loose produce, multipacks
+            // with no per-100 figures) — they can't inform carb counting.
+            guard let nutrition = candidate["nutrition"] as? [String: Any] else { return nil }
+
+            let name = stringValue(candidate["title"], fallback: fallbackName)
+            let basis = stringValue(nutrition["basis"], fallback: "100g").lowercased()
+            let isMilliliter = basis.contains("ml")
+            // All macros are per-basis (100 g or 100 ml). Store them against a
+            // 100-unit reference so `itemByApplyingLookup` re-scales linearly to
+            // whatever gram/ml amount the user actually ate. We treat ml ~ g for
+            // carb-counting scale purposes.
+            // Macros are per 100 g / 100 ml, so the portion string MUST describe
+            // that same 100-unit basis — never the endpoint's tiny `portion`
+            // serving hint (e.g. "15 gram"), which would desync the displayed
+            // amount from the per-100 numbers. The user re-scales from here.
+            let portionGrams: Double = 100
+            let portion: String = isMilliliter
+                ? String(localized: "100 ml", comment: "AH default portion (ml)")
+                : String(localized: "100 g", comment: "AH default portion (g)")
+
+            // A `purchased` match means Marijn actually has (or recently had)
+            // this exact product in his kitchen — the strongest possible signal.
+            // Boost the score so it outranks generic OpenFoodFacts/USDA hits,
+            // but stay conservative on short single-word receipt-name matches
+            // (`match == "name"`), which the endpoint flags as false-positive-prone.
+            var score = 0.82
+            if let purchased = candidate["purchased"] as? [String: Any] {
+                let matchKind = stringValue(purchased["match"], fallback: "").lowercased()
+                let receipt = stringValue(purchased["receipt_name"], fallback: "")
+                let shakyNameMatch = matchKind == "name"
+                    && receipt.split(separator: " ").count <= 1
+                score = shakyNameMatch ? 0.85 : 0.95
+            }
+
+            return FoodLookupResult(
+                sourceID: .ah,
+                name: name,
+                brand: stringValue(candidate["brand"], fallback: "").aiInsightsNilIfEmpty,
+                portion: portion,
+                portionGrams: portionGrams,
+                carbs: doubleValue(nutrition["carbs_g"]),
+                fat: doubleValue(nutrition["fat_g"]),
+                protein: doubleValue(nutrition["protein_g"]),
+                fiber: doubleValue(nutrition["fiber_g"]),
+                calories: doubleValue(nutrition["energy_kcal"]),
+                sourceURL: nil,
                 verifiedScore: score,
                 imageURL: nil
             )

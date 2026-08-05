@@ -23,6 +23,7 @@ enum AIInsights {
         case aiEstimate
         case openFoodFacts
         case usda
+        case ah
 
         var id: String { rawValue }
 
@@ -31,6 +32,7 @@ enum AIInsights {
             case .aiEstimate: return String(localized: "AI", comment: "FoodFinder AI estimate source")
             case .openFoodFacts: return String(localized: "OFF", comment: "OpenFoodFacts short source")
             case .usda: return String(localized: "USDA", comment: "USDA short source")
+            case .ah: return String(localized: "AH", comment: "Albert Heijn short source")
             }
         }
 
@@ -42,6 +44,8 @@ enum AIInsights {
                 return String(localized: "OpenFoodFacts", comment: "OpenFoodFacts source")
             case .usda:
                 return String(localized: "USDA FoodData Central", comment: "USDA FoodData Central source")
+            case .ah:
+                return String(localized: "Albert Heijn", comment: "Albert Heijn source")
             }
         }
 
@@ -50,6 +54,7 @@ enum AIInsights {
             case .aiEstimate: return "sparkles"
             case .openFoodFacts: return "checkmark.seal.fill"
             case .usda: return "building.columns.fill"
+            case .ah: return "cart.fill"
             }
         }
     }
