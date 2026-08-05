@@ -327,6 +327,18 @@ extension AIInsights {
                                 state.saveFoodFinderUSDAAPIKey()
                             }
                     }
+
+                    // Feature C: Albert Heijn recent-purchase cross-reference.
+                    // Providing a token enables the `lookup_recent_purchases`
+                    // agent tool (only when the user is in NL/BE). Stored in the
+                    // keychain like the USDA key.
+                    SecureField(
+                        String(localized: "Albert Heijn token", comment: "Albert Heijn FoodFinder token field placeholder"),
+                        text: $state.foodFinderAHToken
+                    )
+                    .onChange(of: state.foodFinderAHToken) {
+                        state.saveFoodFinderAHToken()
+                    }
                 }
                 .listRowBackground(Color.chart)
 

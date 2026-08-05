@@ -28,6 +28,9 @@ extension AIInsights {
         var foodFinderDoseGuardEnabled: Bool = true
         var foodFinderDoseGuardSamples: Int = 2
         var foodFinderUSDAAPIKey: String = ""
+        // Feature C: Albert Heijn recent-purchase token (secret → keychain key
+        // `ai_foodfinder_ah_token`, mirrors the USDA key; never in TrioSettings).
+        var foodFinderAHToken: String = ""
         var locationContextEnabled: Bool = false
         var healthKitCaffeineEnabled: Bool = false
         var healthKitAlcoholEnabled: Bool = false
@@ -41,6 +44,9 @@ extension AIInsights {
             }
             if let savedUSDAKey = provider.keychain.getValue(String.self, forKey: "ai_foodfinder_usda_api_key") {
                 foodFinderUSDAAPIKey = savedUSDAKey
+            }
+            if let savedAHToken = provider.keychain.getValue(String.self, forKey: "ai_foodfinder_ah_token") {
+                foodFinderAHToken = savedAHToken
             }
 
             providerType = provider.settings.aiProvider
@@ -86,6 +92,11 @@ extension AIInsights {
         func saveFoodFinderUSDAAPIKey() {
             guard provider != nil else { return }
             provider.keychain.setValue(foodFinderUSDAAPIKey, forKey: "ai_foodfinder_usda_api_key")
+        }
+
+        func saveFoodFinderAHToken() {
+            guard provider != nil else { return }
+            provider.keychain.setValue(foodFinderAHToken, forKey: "ai_foodfinder_ah_token")
         }
 
         func saveSettings() {
