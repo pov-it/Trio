@@ -84,6 +84,15 @@ extension AIInsights {
         // MARK: - Scheduling
 
         /// Returns the cadence that should run *now*, or nil if no recap is due.
+        ///
+        /// Weekly branch is UNCHANGED: if an AI therapy change was applied in the
+        /// last 7 days and at least 7 days have passed since the last recap, a
+        /// weekly recap wins.
+        ///
+        /// Monthly branch is now CALENDAR-MONTH aware (see
+        /// `isMonthlyRecapDueThisMonth`) instead of a raw 30-day interval, so a
+        /// monthly recap fires as a catch-up once a new calendar month has begun
+        /// and no recap yet exists for that month. Weekly still takes precedence.
         func dueCadence(at now: Date = Date()) -> RecapEntry.Cadence? {
             let last = lastRecapDate ?? .distantPast
             let history = AIInsights.SuggestionHistoryStore.load()
@@ -93,10 +102,45 @@ extension AIInsights {
             if recentApplied, now.timeIntervalSince(last) >= Self.weeklyInterval {
                 return .weekly
             }
-            if now.timeIntervalSince(last) >= Self.monthlyInterval {
+            if isMonthlyRecapDueThisMonth(at: now) {
                 return .monthly
             }
             return nil
+        }
+
+        /// Calendar-month gate for the MONTHLY recap: fires at most once per
+        /// calendar month, as a catch-up on/after the 1st.
+        ///
+        /// Returns true when BOTH hold (using `Calendar.current`):
+        ///   1. No entry in `loadHistory()` has a `date` that falls in the
+        ///      current calendar month (nothing generated this month yet), AND
+        ///   2. `lastRecapDate` is either nil (never generated) or lies in a
+        ///      strictly earlier calendar month than `now` (i.e. a new month has
+        ///      begun since the last recap).
+        ///
+        /// This is intentionally independent of the 7-day weekly cadence — the
+        /// caller (`dueCadence`) still lets weekly win first.
+        func isMonthlyRecapDueThisMonth(at now: Date = Date()) -> Bool {
+            let calendar = Calendar.current
+
+            // 1. Is there already a recap dated within the current calendar month?
+            let hasRecapThisMonth = loadHistory().contains { entry in
+                calendar.isDate(entry.date, equalTo: now, toGranularity: .month)
+            }
+            if hasRecapThisMonth { return false }
+
+            // 2. If we have a lastRecapDate, it must be in a strictly earlier
+            //    month than `now`. If it is in the same month (or the future),
+            //    do not fire again this month.
+            if let last = lastRecapDate {
+                if calendar.isDate(last, equalTo: now, toGranularity: .month) {
+                    return false
+                }
+            }
+
+            // No recap this month yet and the last recap (if any) predates this
+            // calendar month → a monthly catch-up is due.
+            return true
         }
 
         // MARK: - Generation

@@ -374,6 +374,18 @@ extension Notification.Name {
                     performCleanupIfNecessary()
                 }
                 presentTelemetryMigrationSheetIfNeeded()
+
+                // Feature R — AI Insights MONTHLY recap foreground catch-up.
+                // Runs on cold launch AND every return-to-foreground (scene
+                // becomes active). Fires in a detached low-priority Task so it
+                // never blocks launch; a cheap calendar-month gate inside means
+                // it is a no-op on the vast majority of activations. Read/analyze
+                // + local-notification only — it never influences dosing. This is
+                // the FOREGROUND-ONLY catch-up (no BGTaskScheduler / background
+                // modes / entitlement changes).
+                Task.detached(priority: .utility) {
+                    await AIInsights.RecapForegroundCoordinator.runMonthlyCatchUpIfDue(resolver: TrioApp.resolver)
+                }
             }
         }
     }

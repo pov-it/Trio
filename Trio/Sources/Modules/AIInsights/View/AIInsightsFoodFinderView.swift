@@ -14,6 +14,8 @@ extension AIInsights {
         @FocusState private var isTextFieldFocused: Bool
         @State private var isComposerExpanded: Bool = false
         @State private var isEditingTotals = false
+        // Feature M — presents the meal-photo gallery from the empty FoodFinder screen.
+        @State private var showMealGallery = false
         @State private var editingFoodItem: FoodItem?
         @State private var selectedSourceItem: FoodItem?
         @State private var compactInputMeasuredHeight: CGFloat = 0
@@ -67,6 +69,22 @@ extension AIInsights {
                         }
                     }
                 }
+                // Feature M — on the default/empty FoodFinder screen, offer the
+                // meal-photo gallery in the top-right. Separate ToolbarItem from
+                // the "New" button above, which only shows when a result exists.
+                if state.currentResult == nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showMealGallery = true
+                        } label: {
+                            Image(systemName: "photo.stack")
+                        }
+                        .accessibilityLabel(String(localized: "Meal gallery", comment: "Meal gallery button accessibility label"))
+                    }
+                }
+            }
+            .sheet(isPresented: $showMealGallery) {
+                AIInsights.MealGalleryView(fallbackResults: state.recentResults)
             }
             .simultaneousGesture(swipeBackGesture)
             .onAppear(perform: configureView)

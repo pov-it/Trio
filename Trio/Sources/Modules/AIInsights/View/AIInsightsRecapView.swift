@@ -438,6 +438,42 @@ extension AIInsights {
             }
         }
 
+        /// Foreground catch-up path (Feature R): generate the MONTHLY recap when
+        /// a new calendar month has begun and none exists yet for it, then post
+        /// a local notification. Called from `RecapForegroundCoordinator` on
+        /// launch / return-to-foreground — NOT tied to opening the recap screen.
+        /// Silent on failure, same as `generateIfDue()`.
+        @MainActor
+        func generateMonthlyRecapIfDueThisMonth(at now: Date = Date()) async {
+            guard !apiKey.isEmpty,
+                  PeriodicRecapService.shared.isMonthlyRecapDueThisMonth(at: now)
+            else { return }
+            isGenerating = true
+            defer { isGenerating = false }
+
+            let conversations = loadConversations()
+            let config = PeriodicRecapService.GenerationConfig(
+                provider: providerType,
+                apiKey: apiKey,
+                baseURL: baseURL,
+                model: model,
+                clinicalContext: await buildMonthlyClinicalContext()
+            )
+            do {
+                let entry = try await PeriodicRecapService.shared.forceGenerate(
+                    config: config,
+                    cadence: .monthly,
+                    conversations: conversations,
+                    at: now
+                )
+                entries = PeriodicRecapService.shared.loadHistory()
+                // Notify only after a successful auto-generation.
+                await RecapNotifier.postMonthlyRecapNotification(title: entry.title, body: entry.body)
+            } catch {
+                // Silent: the user can still generate manually from the screen.
+            }
+        }
+
         private func loadConversations() -> [ChatConversation] {
             guard let data = UserDefaults.standard.data(forKey: "ai_insights_conversations"),
                   let saved = try? JSONDecoder().decode([ChatConversation].self, from: data)

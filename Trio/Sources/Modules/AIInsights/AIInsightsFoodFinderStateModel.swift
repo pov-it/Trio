@@ -393,6 +393,11 @@ extension AIInsights {
             if let data = try? JSONEncoder().encode(toSave) {
                 UserDefaults.standard.set(data, forKey: "ai_foodfinder_recent")
             }
+            // Feature M — archive any photographed meals into the durable, on-disk
+            // compressed gallery (survives beyond the 20-item recent cap). The
+            // store is idempotent (already-archived ids are skipped) and does its
+            // downscale + write off the main thread, so this is cheap here.
+            AIInsights.MealGalleryStore.shared.archive(recentResults)
         }
 
         private func loadDraftDescription() {

@@ -26,6 +26,9 @@
 		AABBCC00000000000000C0D0 /* AIInsightsKeyboardAdaptive.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0D0 /* AIInsightsKeyboardAdaptive.swift */; };
 		AABBCC00000000000000C0C7 /* AIInsights_LocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B7 /* AIInsights_LocationService.swift */; };
 		AABBCC00000000000000C0CD /* AIInsights_PeriodicRecap.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0BD /* AIInsights_PeriodicRecap.swift */; };
+		AABBCC00000000000000C0F1 /* AIInsights_RecapNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0F1 /* AIInsights_RecapNotifier.swift */; };
+		AABBCC00000000000000C0F2 /* AIInsights_MealGalleryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0F2 /* AIInsights_MealGalleryStore.swift */; };
+		AABBCC00000000000000C0F3 /* AIInsightsMealGalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0F3 /* AIInsightsMealGalleryView.swift */; };
 		C7C8D8354E63450CA571EC7F /* AIInsightsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */; };
 		AABBCC00000000000000C0CE /* AIInsightsRecapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0BE /* AIInsightsRecapView.swift */; };
 		BA986A0471AE45108775314B /* AIInsightsRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E69494986447F4BF5EC179 /* AIInsightsRootView.swift */; };
@@ -1082,6 +1085,9 @@
 		AABBCC00000000000000B0D0 /* AIInsightsKeyboardAdaptive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/View/AIInsightsKeyboardAdaptive.swift; sourceTree = SOURCE_ROOT; };
 		AABBCC00000000000000B0B7 /* AIInsights_LocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_LocationService.swift; sourceTree = SOURCE_ROOT; };
 		AABBCC00000000000000B0BD /* AIInsights_PeriodicRecap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_PeriodicRecap.swift; sourceTree = SOURCE_ROOT; };
+		AABBCC00000000000000B0F1 /* AIInsights_RecapNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_RecapNotifier.swift; sourceTree = SOURCE_ROOT; };
+		AABBCC00000000000000B0F2 /* AIInsights_MealGalleryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_MealGalleryStore.swift; sourceTree = SOURCE_ROOT; };
+		AABBCC00000000000000B0F3 /* AIInsightsMealGalleryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/View/AIInsightsMealGalleryView.swift; sourceTree = SOURCE_ROOT; };
 		9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/AIInsightsProvider.swift; sourceTree = SOURCE_ROOT; };
 		AABBCC00000000000000B0BE /* AIInsightsRecapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/View/AIInsightsRecapView.swift; sourceTree = SOURCE_ROOT; };
 		C2E69494986447F4BF5EC179 /* AIInsightsRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/View/AIInsightsRootView.swift; sourceTree = SOURCE_ROOT; };
@@ -2472,6 +2478,9 @@
 				AABBCC00000000000000B0D0 /* AIInsightsKeyboardAdaptive.swift */,
 				AABBCC00000000000000B0B7 /* AIInsights_LocationService.swift */,
 				AABBCC00000000000000B0BD /* AIInsights_PeriodicRecap.swift */,
+				AABBCC00000000000000B0F1 /* AIInsights_RecapNotifier.swift */,
+				AABBCC00000000000000B0F2 /* AIInsights_MealGalleryStore.swift */,
+				AABBCC00000000000000B0F3 /* AIInsightsMealGalleryView.swift */,
 				9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */,
 				AABBCC00000000000000B0BE /* AIInsightsRecapView.swift */,
 				C2E69494986447F4BF5EC179 /* AIInsightsRootView.swift */,
@@ -5284,6 +5293,9 @@
 				AABBCC00000000000000C0D0 /* AIInsightsKeyboardAdaptive.swift in Sources */,
 				AABBCC00000000000000C0C7 /* AIInsights_LocationService.swift in Sources */,
 				AABBCC00000000000000C0CD /* AIInsights_PeriodicRecap.swift in Sources */,
+				AABBCC00000000000000C0F1 /* AIInsights_RecapNotifier.swift in Sources */,
+				AABBCC00000000000000C0F2 /* AIInsights_MealGalleryStore.swift in Sources */,
+				AABBCC00000000000000C0F3 /* AIInsightsMealGalleryView.swift in Sources */,
 				C7C8D8354E63450CA571EC7F /* AIInsightsProvider.swift in Sources */,
 				AABBCC00000000000000C0CE /* AIInsightsRecapView.swift in Sources */,
 				BA986A0471AE45108775314B /* AIInsightsRootView.swift in Sources */,
