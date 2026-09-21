@@ -89,15 +89,16 @@ enum GlucoseAlertType: String, Codable, CaseIterable, Identifiable {
     }
 
     /// Default for `GlucoseAlert.overridesSilenceAndDND` when adding a new
-    /// alarm. Urgent-low defaults to override-on to match Loop's stance;
-    /// others default off (time-sensitive, doesn't pierce DND / Focus).
+    /// alarm. Both Low and Urgent-low default to override-on so a real low
+    /// blood sugar breaks through Silent Mode / DND / Focus (matches Loop's
+    /// stance). The rest default off (time-sensitive, doesn't pierce DND).
     var defaultOverridesSilenceAndDND: Bool {
         switch self {
-        case .urgentLow: return true
+        case .low,
+             .urgentLow: return true
         case .carbsRequired,
              .forecastedLow,
-             .high,
-             .low: return false
+             .high: return false
         }
     }
 }
