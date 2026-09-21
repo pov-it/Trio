@@ -27,7 +27,6 @@ extension AIInsights {
         var onUseInBolusCalculator: ((FoodAnalysisResult) -> Void)? = nil
 
         @Environment(\.dismiss) private var dismiss
-        @Environment(\.colorScheme) private var colorScheme
 
         @State private var meals: [DisplayMeal] = []
         @State private var selectedMeal: DisplayMeal?
