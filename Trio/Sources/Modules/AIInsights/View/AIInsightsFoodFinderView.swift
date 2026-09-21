@@ -35,15 +35,20 @@ extension AIInsights {
                 contentArea
                 barcodeStatusBanner
             }
-            // safeAreaInset places the bar at the top of the current bottom safe
-            // area — which includes the keyboard when it is visible — so it works
-            // correctly in every presentation context: NavigationStack, sheet,
-            // AnyView wrapper, and URL-scheme modal, without screen-coordinate
-            // arithmetic. The bar's background extends into the home-indicator
-            // region via .ignoresSafeArea(edges: .bottom) on the fill shapes.
+            // Bottom inset hosts the composer. Keyboard avoidance is NOT
+            // left to SwiftUI's keyboard-inclusive safe area (that fails
+            // silently in the Treatments sheet / widget URL-scheme
+            // presentations). `aiInsightsKeyboardAdaptive` observes the
+            // keyboard frame and pads; it also ignores SwiftUI's own
+            // keyboard safe area so the two do not double-apply.
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 foodInputBar
             }
+            // Pair with ignoresSafeArea(.keyboard) inside the modifier so
+            // SwiftUI does not also auto-lift (which fails in the Treatments
+            // sheet / widget URL-scheme presentations). This is the same
+            // helper the AI chat input uses.
+            .aiInsightsKeyboardAdaptive()
             .background(appState.trioBackgroundColor(for: colorScheme))
             .navigationTitle(currentNavTitle)
             .navigationBarTitleDisplayMode(.inline)
@@ -106,14 +111,9 @@ extension AIInsights {
                 .ignoresSafeArea()
             }
             .fullScreenCover(isPresented: $state.showBarcodeScanner) {
-                AIInsights.BarcodeScannerView { barcode in
-                    collapseComposer(keepKeyboard: false)
+                AIInsights.BarcodeScannerView(dismissOnScan: false) { barcode in
                     Task {
-                        if state.currentResult != nil {
-                            await state.addIngredientFromBarcode(barcode)
-                        } else {
-                            await state.lookupBarcode(barcode)
-                        }
+                        await state.attachScannedBarcode(barcode)
                     }
                 }
                 .ignoresSafeArea()
@@ -1151,8 +1151,8 @@ extension AIInsights {
                             compactContextBanner(result)
                                 .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
-                        if !state.capturedImages.isEmpty {
-                            attachedImagesStrip
+                        if !state.capturedImages.isEmpty || !state.capturedBarcodeItems.isEmpty {
+                            attachedDraftStrip
                                 .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
                         compactFoodInputRow
@@ -1323,8 +1323,8 @@ extension AIInsights {
 
                 composerActionGrid
 
-                if !state.capturedImages.isEmpty {
-                    attachedImagesStrip
+                if !state.capturedImages.isEmpty || !state.capturedBarcodeItems.isEmpty {
+                    attachedDraftStrip
                         .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
                 }
 
@@ -1663,15 +1663,17 @@ extension AIInsights {
         }
 
         private var hasFoodFinderInput: Bool {
-            !state.capturedImages.isEmpty || !state.foodDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            !state.capturedImages.isEmpty
+                || !state.capturedBarcodeItems.isEmpty
+                || !state.foodDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
 
-        /// Horizontal strip of attached photos + a hint of how many more can
-        /// be added (cap set by the active provider). Each thumb has its
-        /// own delete affordance so the user can swap one without clearing
-        /// the rest.
+        /// Horizontal strip of attached photos and scanned barcode products.
+        /// Each thumb has its own delete affordance so the user can swap one
+        /// without clearing the rest. Barcode chips stay as draft attachments
+        /// until the user confirms the meal.
         @ViewBuilder
-        private var attachedImagesStrip: some View {
+        private var attachedDraftStrip: some View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(Array(state.capturedImages.enumerated()), id: \.offset) { idx, data in
@@ -1697,7 +1699,38 @@ extension AIInsights {
                         }
                     }
 
-                    if state.capturedImages.count < state.maxFoodFinderImages {
+                    ForEach(state.capturedBarcodeItems) { item in
+                        ZStack(alignment: .topTrailing) {
+                            VStack(spacing: 2) {
+                                Image(systemName: "barcode")
+                                    .font(.system(size: 16, weight: .semibold))
+                                Text(item.name)
+                                    .font(.caption2.weight(.semibold))
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.center)
+                            }
+                            .foregroundStyle(colorScheme == .dark ? Color.white : Color.primary)
+                            .padding(6)
+                            .frame(width: 72, height: 56)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray6))
+                            )
+
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    state.removeCapturedBarcodeItem(id: item.id)
+                                }
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(.white, Color.black.opacity(0.7))
+                                    .padding(2)
+                            }
+                        }
+                    }
+
+                    if state.capturedImages.count < state.maxFoodFinderImages, !state.capturedImages.isEmpty {
                         Text(
                             state.capturedImages.count == 1
                                 ? String(localized: "Add more photos", comment: "FoodFinder add-more-photos hint")

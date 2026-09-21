@@ -265,6 +265,10 @@ extension AIInsights {
         /// behavior when the array contains one item but allow multi-photo
         /// composition for richer meal context.
         var capturedImages: [Data] = []
+        /// Barcode products waiting to be confirmed as part of the in-progress
+        /// meal. Scanning appends here; the meal is only created/updated when
+        /// the user confirms (search / plus button).
+        var capturedBarcodeItems: [FoodItem] = []
         /// Convenience accessor mirroring the old single-image API. Returns
         /// the first image; setting nil clears the array.
         var capturedImageData: Data? {
@@ -580,8 +584,10 @@ extension AIInsights {
             let description = foodDescription.trimmingCharacters(in: .whitespacesAndNewlines)
             if !capturedImages.isEmpty {
                 await analyzeImages(capturedImages, description: description)
-            } else {
+            } else if !description.isEmpty {
                 await analyzeFood(description: description)
+            } else if !capturedBarcodeItems.isEmpty {
+                finalizeMealFromBarcodeAttachments()
             }
         }
 
@@ -603,6 +609,50 @@ extension AIInsights {
         func removeAttachedImage(at index: Int) {
             guard capturedImages.indices.contains(index) else { return }
             capturedImages.remove(at: index)
+        }
+
+        func removeCapturedBarcodeItem(id: UUID) {
+            capturedBarcodeItems.removeAll { $0.id == id }
+        }
+
+        /// Merge any barcode attachments into a newly analyzed meal and
+        /// persist it as the current result. Always the single commit point
+        /// so a scan never finalizes a meal on its own.
+        @MainActor
+        private func commitNewMeal(_ result: FoodAnalysisResult) {
+            var result = result
+            if !capturedBarcodeItems.isEmpty {
+                result.items.append(contentsOf: capturedBarcodeItems)
+                capturedBarcodeItems.removeAll()
+                rescaleCarbEstimateBounds(&result)
+            }
+            currentResult = result
+            lastAddedFoodItemID = result.items.last?.id
+            recentResults.insert(result, at: 0)
+            saveRecentResults()
+            promoteIfFrequent(result)
+            foodDescription = ""
+            capturedImages.removeAll()
+        }
+
+        @MainActor
+        private func finalizeMealFromBarcodeAttachments() {
+            guard !capturedBarcodeItems.isEmpty else { return }
+            let items = capturedBarcodeItems
+            let names = items.map(\.name).joined(separator: ", ")
+            let result = FoodAnalysisResult(
+                items: items,
+                rawResponse: nil,
+                timestamp: Date(),
+                source: .barcode,
+                imageData: nil,
+                mealDescription: names,
+                mealName: items.count == 1 ? items.first?.name : names,
+                mealPortion: items.count == 1 ? items.first?.portion : nil,
+                confidence: 0.95
+            )
+            capturedBarcodeItems.removeAll()
+            commitNewMeal(result)
         }
 
         @MainActor
@@ -663,13 +713,7 @@ extension AIInsights {
                 applyDoseGuardDiagnostics(diagnostics, to: &result)
                 applyLearnedPortions(to: &result)
                 rescaleCarbEstimateBounds(&result)
-
-                currentResult = result
-                recentResults.insert(result, at: 0)
-                saveRecentResults()
-                promoteIfFrequent(result)
-                foodDescription = ""
-                capturedImageData = nil
+                commitNewMeal(result)
 
             } catch let error as AIServiceAdapter.AIError {
                 errorMessage = error.errorDescription ?? error.localizedDescription
@@ -1236,10 +1280,19 @@ extension AIInsights {
         @MainActor
         func addIngredientFromCurrentInput() async {
             let description = foodDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            let hadBarcodeAttachments = !capturedBarcodeItems.isEmpty
+            if hadBarcodeAttachments, var result = currentResult {
+                result.items.append(contentsOf: capturedBarcodeItems)
+                lastAddedFoodItemID = capturedBarcodeItems.last?.id
+                capturedBarcodeItems.removeAll()
+                storeUpdatedResult(result)
+            }
             if !capturedImages.isEmpty {
                 await addIngredientsFromImages(capturedImages, description: description)
-            } else {
+            } else if !description.isEmpty {
                 await addIngredient(named: description)
+            } else if !hadBarcodeAttachments {
+                return
             }
         }
 
@@ -1295,76 +1348,6 @@ extension AIInsights {
                 errorMessage = error.errorDescription ?? error.localizedDescription
             } catch {
                 errorMessage = String(localized: "Error: \(error.localizedDescription)", comment: "AI error")
-            }
-        }
-
-        @MainActor
-        func addIngredientFromBarcode(_ barcode: String) async {
-            guard var result = currentResult else { return }
-
-            isAnalyzing = true
-            errorMessage = nil
-            barcodeStatusMessage = nil
-            defer { isAnalyzing = false }
-
-            do {
-                guard var components = URLComponents(url: openFoodFactsProductURL(for: barcode), resolvingAgainstBaseURL: false) else {
-                    setBarcodeError(String(localized: "Invalid barcode.", comment: "Barcode error"))
-                    return
-                }
-                components.queryItems = [
-                    URLQueryItem(name: "fields", value: "code,product_name,brands,nutriments,serving_size,serving_quantity,nutrition_data_completeness,image_url,url")
-                ]
-                guard let url = components.url else {
-                    setBarcodeError(String(localized: "Invalid OpenFoodFacts URL.", comment: "Barcode error"))
-                    return
-                }
-
-                var urlRequest = URLRequest(url: url)
-                let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
-                urlRequest.setValue("TrioAIInsights/\(appVersion) (https://github.com/pov-it/Trio)", forHTTPHeaderField: "User-Agent")
-                urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
-
-                let (data, response) = try await URLSession.shared.data(for: urlRequest)
-                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200,
-                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      Int(doubleValue(json["status"])) == 1,
-                      let product = json["product"] as? [String: Any]
-                else {
-                    setBarcodeError(String(localized: "Product not found. Try the AI Camera instead.", comment: "Barcode error"))
-                    return
-                }
-
-                let name = stringValue(product["product_name"], fallback: String(localized: "Unknown Product", comment: "Unknown barcode product"))
-                let serving = stringValue(product["serving_size"], fallback: String(localized: "1 serving", comment: "Default food serving"))
-                let nutriments = product["nutriments"] as? [String: Any] ?? [:]
-
-                let item = openFoodFactsLookupResult(from: product, fallbackName: name)
-                    .map { foodItem(from: $0, fallbackName: $0.name, existingPortion: serving) }
-                    ?? FoodItem(
-                        name: name,
-                        portion: serving,
-                        carbs: nutrientValue(["carbohydrates_serving", "carbohydrates_100g"], in: nutriments),
-                        fat: nutrientValue(["fat_serving", "fat_100g"], in: nutriments),
-                        protein: nutrientValue(["proteins_serving", "proteins_100g"], in: nutriments),
-                        fiber: nutrientValue(["fiber_serving", "fiber_100g"], in: nutriments),
-                        calories: nutrientValue(["energy-kcal_serving", "energy-kcal_100g"], in: nutriments),
-                        source: .openFoodFacts,
-                        sourceVerified: true
-                    )
-
-                result.items.append(item)
-                storeUpdatedResult(result)
-                lastAddedFoodItemID = item.id
-                setBarcodeSuccess(
-                    String(
-                        format: String(localized: "Added %@", comment: "Barcode product added success"),
-                        item.name
-                    )
-                )
-
-            } catch {
-                setBarcodeError(String(localized: "Network error looking up barcode: \(error.localizedDescription)", comment: "Barcode error"))
             }
         }
 
@@ -1469,6 +1452,7 @@ extension AIInsights {
             lastAddedFoodItemID = nil
             if resetDraft {
                 capturedImageData = nil
+                capturedBarcodeItems.removeAll()
                 foodDescription = ""
             }
         }
@@ -1571,12 +1555,7 @@ extension AIInsights {
                 applyDoseGuardDiagnostics(diagnostics, to: &result)
                 applyLearnedPortions(to: &result)
                 rescaleCarbEstimateBounds(&result)
-                currentResult = result
-                recentResults.insert(result, at: 0)
-                saveRecentResults()
-                promoteIfFrequent(result)
-                foodDescription = ""
-                capturedImages.removeAll()
+                commitNewMeal(result)
 
             } catch let error as AIServiceAdapter.AIError {
                 errorMessage = error.errorDescription ?? error.localizedDescription
@@ -1587,24 +1566,49 @@ extension AIInsights {
 
         // MARK: - Barcode Lookup (OpenFoodFacts)
 
+        /// Scan entry point: look the product up and append it as a draft
+        /// attachment. Does **not** create or replace `currentResult` — the
+        /// user confirms to finalize the meal (or add ingredients to one).
         @MainActor
-        func lookupBarcode(_ barcode: String) async {
+        func attachScannedBarcode(_ barcode: String) async {
             isAnalyzing = true
             errorMessage = nil
             barcodeStatusMessage = nil
             defer { isAnalyzing = false }
 
+            guard let item = await fetchOpenFoodFactsItem(barcode: barcode) else { return }
+            capturedBarcodeItems.append(item)
+            setBarcodeSuccess(
+                String(
+                    format: String(localized: "Added %@", comment: "Barcode product added success"),
+                    item.name
+                )
+            )
+        }
+
+        @MainActor
+        func addIngredientFromBarcode(_ barcode: String) async {
+            await attachScannedBarcode(barcode)
+        }
+
+        @MainActor
+        func lookupBarcode(_ barcode: String) async {
+            await attachScannedBarcode(barcode)
+        }
+
+        @MainActor
+        private func fetchOpenFoodFactsItem(barcode: String) async -> FoodItem? {
             do {
                 guard var components = URLComponents(url: openFoodFactsProductURL(for: barcode), resolvingAgainstBaseURL: false) else {
                     setBarcodeError(String(localized: "Invalid barcode.", comment: "Barcode error"))
-                    return
+                    return nil
                 }
                 components.queryItems = [
                     URLQueryItem(name: "fields", value: "code,product_name,brands,nutriments,serving_size,serving_quantity,nutrition_data_completeness,image_url,url")
                 ]
                 guard let url = components.url else {
                     setBarcodeError(String(localized: "Invalid OpenFoodFacts URL.", comment: "Barcode error"))
-                    return
+                    return nil
                 }
 
                 var request = URLRequest(url: url)
@@ -1613,68 +1617,35 @@ extension AIInsights {
                 request.setValue("application/json", forHTTPHeaderField: "Accept")
 
                 let (data, response) = try await URLSession.shared.data(for: request)
-
-                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                    setBarcodeError(String(localized: "Product not found in OpenFoodFacts.", comment: "Barcode error"))
-                    return
-                }
-
-                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                       Int(doubleValue(json["status"])) == 1,
                       let product = json["product"] as? [String: Any]
                 else {
                     setBarcodeError(String(localized: "Product not found. Try the AI Camera instead.", comment: "Barcode error"))
-                    return
+                    return nil
                 }
 
                 let name = stringValue(product["product_name"], fallback: String(localized: "Unknown Product", comment: "Unknown barcode product"))
                 let serving = stringValue(product["serving_size"], fallback: String(localized: "1 serving", comment: "Default food serving"))
                 let nutriments = product["nutriments"] as? [String: Any] ?? [:]
 
-                let carbs = nutrientValue(["carbohydrates_serving", "carbohydrates_100g"], in: nutriments)
-                let fat = nutrientValue(["fat_serving", "fat_100g"], in: nutriments)
-                let protein = nutrientValue(["proteins_serving", "proteins_100g"], in: nutriments)
-                let fiber = nutrientValue(["fiber_serving", "fiber_100g"], in: nutriments)
-                let calories = nutrientValue(["energy-kcal_serving", "energy-kcal_100g"], in: nutriments)
-
-                let item = openFoodFactsLookupResult(from: product, fallbackName: name)
+                return openFoodFactsLookupResult(from: product, fallbackName: name)
                     .map { foodItem(from: $0, fallbackName: $0.name, existingPortion: serving) }
                     ?? FoodItem(
                         name: name,
                         portion: serving,
-                        carbs: carbs,
-                        fat: fat,
-                        protein: protein,
-                        fiber: fiber,
-                        calories: calories,
+                        carbs: nutrientValue(["carbohydrates_serving", "carbohydrates_100g"], in: nutriments),
+                        fat: nutrientValue(["fat_serving", "fat_100g"], in: nutriments),
+                        protein: nutrientValue(["proteins_serving", "proteins_100g"], in: nutriments),
+                        fiber: nutrientValue(["fiber_serving", "fiber_100g"], in: nutriments),
+                        calories: nutrientValue(["energy-kcal_serving", "energy-kcal_100g"], in: nutriments),
                         source: .openFoodFacts,
                         sourceVerified: true
                     )
-
-                let result = FoodAnalysisResult(
-                    items: [item],
-                    rawResponse: nil,
-                    timestamp: Date(),
-                    source: .barcode,
-                    imageData: nil,
-                    mealDescription: name,
-                    mealName: name,
-                    mealPortion: serving,
-                    confidence: 0.95
-                )
-                currentResult = result
-                lastAddedFoodItemID = item.id
-                setBarcodeSuccess(
-                    String(
-                        format: String(localized: "Scanned %@", comment: "Barcode product scanned success"),
-                        item.name
-                    )
-                )
-                recentResults.insert(result, at: 0)
-                saveRecentResults()
-
             } catch {
                 setBarcodeError(String(localized: "Network error looking up barcode: \(error.localizedDescription)", comment: "Barcode error"))
+                return nil
             }
         }
 
