@@ -1,6 +1,8 @@
 # Meal companion share
 
-Trio can optionally publish a **meal-only** record when FoodFinder archives a meal so [Meals Companion](https://github.com/pov-it/meals-companion) can show the photo, name, and time. That app is a **separate public repo**; Trio only implements the publisher + this contract.
+Trio can optionally publish a **meal-only** record when FoodFinder archives a meal so [Meals Companion](https://github.com/pov-it/meals-companion) can show the photo, name, and time. That **app** is a separate public repo; Trio only implements the publisher + this contract.
+
+AI Hub / FoodFinder themselves stay **in Trio** (`Trio/Sources/Modules/AIInsights/`). They are not split out as a DanaKit/LibreTransmitter-style submodule or Swift package. See [AIHubAndCompanion.md](AIHubAndCompanion.md).
 
 This is **off by default**. Nothing is written until **Share meals with companion** is enabled in AI Settings or the meal gallery.
 

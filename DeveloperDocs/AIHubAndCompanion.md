@@ -4,6 +4,22 @@ This branch is based on **nightscout/Trio tag `v1.0.1`** (released 2026-09-20). 
 
 No glucose series, Nightscout tokens, or secrets belong in these docs or on the companion path. This is not a TestFlight or device-build report.
 
+## In-repo feature set (not a Dana / Libre-style package)
+
+AI Hub stays **inside Trio**. It is a module folder in this repo, compiled into the Trio app target.
+
+| | DanaKit / LibreTransmitter | AI Hub |
+| --- | --- | --- |
+| Where | Git submodules (`DanaKit/`, `LibreTransmitter/`) | `Trio/Sources/Modules/AIInsights/` |
+| Shipping | Separate GitHub repos, linked as dependencies | Same commit as Trio; no SPM product, no extra `.gitmodules` entry |
+| Decision | Driver kits remain extractable | **Keep in Trio for now** (Marijn, 2026-09-21) |
+
+Do not split AI Hub into a Swift package or `pov-it/ai-hub` (or similar) unless that decision is revisited. Folder map and integration points: [`Trio/Sources/Modules/AIInsights/README.md`](../Trio/Sources/Modules/AIInsights/README.md).
+
+Related in-repo sibling (also not a package): `Trio/Sources/Modules/AutoPresets/`.
+
+The **Meals Companion** iPhone app *is* a separate repo ([pov-it/meals-companion](https://github.com/pov-it/meals-companion)). That is a meal-photo viewer for another phone, not an extraction of AI Hub from Trio. Trio only publishes meal-only CloudKit records when the user opts in.
+
 ## AI Hub / FoodFinder
 
 Entry points:
@@ -92,3 +108,4 @@ v1.0.1 already uses Liquid Glass on Home (`GlassChrome`, `glassActionSheet`). Th
 - Deploying the `Meal` / `MealFeed` schema to CloudKit Production.
 - Device / TestFlight verification of alerts, FoodFinder, or companion pairing.
 - Whether forecasted-low should stay deferred when “Use CGM App Alerts” is on (current: PR #5 yes).
+- Splitting AI Hub into its own GitHub/SPM module — **no**, keep in-repo for now.
