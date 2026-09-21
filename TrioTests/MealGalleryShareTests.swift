@@ -355,4 +355,33 @@ struct MealGalleryShareTests {
         )
         defaults.removePersistentDomain(forName: suite)
     }
+
+    @Test("User-visible container never contains TEAM placeholder")
+    func displayContainerNeverShowsPlaceholder() {
+        let suite = "MealGalleryShareTests.display.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let missingTeam = AIInsights.MealCompanionShareSettings.displayContainerIdentifier(
+            defaults,
+            signingTeamID: ""
+        )
+        #expect(missingTeam == "iCloud.org.pov-it.Q6QCL8J6FN.meals")
+        #expect(!missingTeam.contains("<TEAM>"))
+        #expect(!missingTeam.contains("TEAMID"))
+        #expect(!missingTeam.contains("$("))
+
+        let fromSigning = AIInsights.MealCompanionShareSettings.displayContainerIdentifier(
+            defaults,
+            signingTeamID: "Q6QCL8J6FN"
+        )
+        #expect(fromSigning == "iCloud.org.pov-it.Q6QCL8J6FN.meals")
+        defaults.removePersistentDomain(forName: suite)
+    }
+
+    @Test("Resolved team falls back to Q6QCL8J6FN")
+    func resolvedTeamFallback() {
+        #expect(AIInsights.MealCompanionShareSettings.resolvedTeamID(signingTeamID: "") == "Q6QCL8J6FN")
+        #expect(AIInsights.MealCompanionShareSettings.resolvedTeamID(signingTeamID: "TEAMID") == "Q6QCL8J6FN")
+        #expect(AIInsights.MealCompanionShareSettings.resolvedTeamID(signingTeamID: "Q6QCL8J6FN") == "Q6QCL8J6FN")
+    }
 }

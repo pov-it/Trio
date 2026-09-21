@@ -86,14 +86,16 @@ UserDefaults key: ai_meal_companion_cloudkit_container
 Value:            iCloud.org.pov-it.<TEAMID>.meals
 ```
 
-If no team id is available (`TEAMID` / empty / `$(DEVELOPMENT_TEAM)` still unsubstituted) and the override is empty, CloudKit is a no-op and the outbox remains the source of truth.
-
 Trio will:
 
 1. Create/save `MealsZone` in the **private** DB.
 2. Upsert root `MealFeed` (`MealFeedRoot`) with `ownerDisplayName`.
 3. Save each opted-in meal as a `Meal` (title, photographedAt, photo, ownerDisplayName).
 4. Create a `CKShare` on that root when a share URL is not stored yet (`ai_meal_companion_share_url`).
+
+**Mayee invite:** Companion sharing settings show the resolved container (`iCloud.org.pov-it.Q6QCL8J6FN.meals` for this team — never a `<TEAM>` placeholder), the share URL when it exists, **Copy invite link**, and **Create / refresh invite** (calls `ensureInviteShare` without publishing glucose). Send the copied iCloud share URL to Mayee; pairing happens in meals-companion.
+
+If no team id is available (`TEAMID` / empty / `$(DEVELOPMENT_TEAM)` still unsubstituted), the publisher falls back to team `Q6QCL8J6FN` for this fork so the container id is still real.
 
 Apple-side work that git cannot do:
 

@@ -171,6 +171,9 @@ extension AIInsights {
         ]
         static let containerBundleBase = "org.pov-it"
         static let containerSuffix = "meals"
+        /// pov-it Apple Team ID. Used when Info.plist `TeamID` is still a
+        /// placeholder so user-visible copy never shows `<TEAM>`.
+        static let knownPovItTeamID = "Q6QCL8J6FN"
 
         /// `iCloud.org.pov-it.<TEAMID>.meals`. Nil when the team id is missing
         /// or still a build placeholder (`TEAMID`, `$(DEVELOPMENT_TEAM)`).
@@ -178,14 +181,34 @@ extension AIInsights {
             let trimmed = teamID.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return nil }
             let upper = trimmed.uppercased()
-            if upper == "TEAMID" || trimmed.contains("$(") { return nil }
+            if upper == "TEAMID" || trimmed.contains("$(") || trimmed.contains("<") { return nil }
             return "iCloud.\(containerBundleBase).\(trimmed).\(containerSuffix)"
+        }
+    }
+
+    enum MealCompanionShareError: LocalizedError {
+        case cloudKitUnavailable
+        case missingContainer
+        case shareURLMissing
+        case underlying(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .cloudKitUnavailable:
+                return String(localized: "CloudKit is not available on this device.", comment: "Companion share CloudKit unavailable")
+            case .missingContainer:
+                return String(localized: "The meals CloudKit container is not configured.", comment: "Companion share missing container")
+            case .shareURLMissing:
+                return String(localized: "No invite link yet. Sign in to iCloud and tap Create invite, or publish one meal first.", comment: "Companion share URL missing")
+            case let .underlying(message):
+                return message
+            }
         }
     }
 
     enum MealCompanionShareSettings {
         static let enabledKey = "ai_meal_companion_share_enabled"
-        /// Optional override. Empty means derive `iCloud.org.pov-it.<TEAM>.meals`.
+        /// Optional override. Empty means derive `iCloud.org.pov-it.<TEAMID>.meals`.
         static let cloudKitContainerKey = "ai_meal_companion_cloudkit_container"
         /// Optional companion App Group identifier. MUST NOT be `trio-app-group`.
         /// Empty (the default) means we never touch an App Group suite.
@@ -204,11 +227,50 @@ extension AIInsights {
             defaults.set(enabled, forKey: enabledKey)
         }
 
-        static func cloudKitContainerIdentifier(_ defaults: UserDefaults = .standard) -> String {
+        static func shareURLString(_ defaults: UserDefaults = .standard) -> String? {
+            let raw = (defaults.string(forKey: shareURLKey) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return raw.isEmpty ? nil : raw
+        }
+
+        /// Signing team if valid; otherwise pov-it's `Q6QCL8J6FN`.
+        static func resolvedTeamID(signingTeamID: String = MealCompanionShareSettings.signingTeamID) -> String {
+            if MealCloudKitContract.containerIdentifier(teamID: signingTeamID) != nil {
+                return signingTeamID.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            return MealCloudKitContract.knownPovItTeamID
+        }
+
+        static func cloudKitContainerIdentifier(
+            _ defaults: UserDefaults = .standard,
+            signingTeamID: String = MealCompanionShareSettings.signingTeamID
+        ) -> String {
             let override = (defaults.string(forKey: cloudKitContainerKey) ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if !override.isEmpty { return override }
-            return MealCloudKitContract.containerIdentifier(teamID: signingTeamID) ?? ""
+            return MealCloudKitContract.containerIdentifier(teamID: resolvedTeamID(signingTeamID: signingTeamID)) ?? ""
+        }
+
+        /// User-visible container id. Never contains `<TEAM>` / `TEAMID` / `$(...)`.
+        static func displayContainerIdentifier(
+            _ defaults: UserDefaults = .standard,
+            signingTeamID: String = MealCompanionShareSettings.signingTeamID
+        ) -> String {
+            let raw = cloudKitContainerIdentifier(defaults, signingTeamID: signingTeamID)
+            if let valid = MealCloudKitContract.containerIdentifier(teamID: teamID(fromContainer: raw)) {
+                return valid
+            }
+            if raw.contains("<") || raw.contains("$(") || raw.uppercased().contains("TEAMID") || raw.isEmpty {
+                return MealCloudKitContract.containerIdentifier(teamID: MealCloudKitContract.knownPovItTeamID) ?? raw
+            }
+            return raw
+        }
+
+        private static func teamID(fromContainer identifier: String) -> String {
+            // iCloud.org.pov-it.<TEAMID>.meals
+            let parts = identifier.split(separator: ".")
+            guard parts.count >= 5 else { return "" }
+            return String(parts[parts.count - 2])
         }
 
         /// `TeamID` is substituted from `$(DEVELOPMENT_TEAM)` in Info.plist.
@@ -318,6 +380,18 @@ extension AIInsights {
                 }
             }
         }
+
+        func storedShareURLString() -> String? {
+            MealCompanionShareSettings.shareURLString(defaults)
+        }
+
+        /// Creates or refreshes the `CKShare` on `MealFeed` without publishing a meal
+        /// (and never writes glucose / IOB / COB / Nightscout).
+        func ensureInviteShare() async -> Result<String, Error> {
+            let transport = transports.compactMap { $0 as? CloudKitMealShareTransport }.first
+                ?? CloudKitMealShareTransport(defaults: defaults)
+            return await transport.ensureInviteShare()
+        }
     }
 
     // MARK: - Outbox (offline-first, works without CloudKit / App Group)
@@ -408,7 +482,7 @@ extension AIInsights {
         }
     }
 
-    // MARK: - CloudKit (Meal / MealFeed in iCloud.org.pov-it.<TEAM>.meals)
+    // MARK: - CloudKit (Meal / MealFeed in iCloud.org.pov-it.<TEAMID>.meals)
 
     final class CloudKitMealShareTransport: MealCompanionTransport, @unchecked Sendable {
         private let defaults: UserDefaults
@@ -433,25 +507,34 @@ extension AIInsights {
             #endif
         }
 
+        func ensureInviteShare() async -> Result<String, Error> {
+            #if canImport(CloudKit)
+                let containerID = MealCompanionShareSettings.cloudKitContainerIdentifier(defaults)
+                guard !containerID.isEmpty else { return .failure(MealCompanionShareError.missingContainer) }
+                do {
+                    let url = try await createOrRefreshShare(containerID: containerID)
+                    if let url, !url.isEmpty {
+                        return .success(url)
+                    }
+                    return .failure(MealCompanionShareError.shareURLMissing)
+                } catch {
+                    return .failure(MealCompanionShareError.underlying(error.localizedDescription))
+                }
+            #else
+                return .failure(MealCompanionShareError.cloudKitUnavailable)
+            #endif
+        }
+
         #if canImport(CloudKit)
             private func saveToCloudKit(_ record: SharedMealRecord, containerID: String) async throws {
-                let container = CKContainer(identifier: containerID)
-                let database = container.privateCloudDatabase
-                let zoneID = CKRecordZone.ID(zoneName: MealCloudKitContract.zoneName, ownerName: CKCurrentUserDefaultName)
-                try await ensureZone(database: database, zoneID: zoneID)
+                let database = CKContainer(identifier: containerID).privateCloudDatabase
+                let feed = try await ensureFeed(database: database)
+                let zoneID = feed.recordID.zoneID
 
                 let owner = MealCompanionShareSettings.ownerDisplayName(defaults)
-                let feedID = CKRecord.ID(
-                    recordName: MealCloudKitContract.feedRecordName,
-                    zoneID: zoneID
-                )
-                let feed = CKRecord(recordType: MealCloudKitContract.feedRecordType, recordID: feedID)
-                feed[MealCloudKitContract.ownerDisplayNameKey] = owner as NSString
-                _ = try await database.save(feed)
-
                 let mealID = CKRecord.ID(recordName: record.payload.id.uuidString, zoneID: zoneID)
                 let meal = CKRecord(recordType: MealCloudKitContract.mealRecordType, recordID: mealID)
-                meal.parent = CKRecord.Reference(recordID: feedID, action: .none)
+                meal.parent = CKRecord.Reference(recordID: feed.recordID, action: .none)
                 meal[MealCloudKitContract.titleKey] = (record.payload.mealName ?? "Meal") as NSString
                 meal[MealCloudKitContract.photographedAtKey] = record.payload.date as NSDate
                 meal[MealCloudKitContract.ownerDisplayNameKey] = owner as NSString
@@ -463,9 +546,52 @@ extension AIInsights {
                 // Never write carbs / glucose / IOB / COB / Nightscout onto Meal.
                 _ = try await database.save(meal)
 
-                if defaults.string(forKey: MealCompanionShareSettings.shareURLKey) == nil {
+                if MealCompanionShareSettings.shareURLString(defaults) == nil {
                     try await ensureShare(database: database, feed: feed)
                 }
+            }
+
+            private func createOrRefreshShare(containerID: String) async throws -> String? {
+                let database = CKContainer(identifier: containerID).privateCloudDatabase
+                let feed = try await ensureFeed(database: database)
+                if let existing = try await existingShareURL(database: database, feed: feed) {
+                    defaults.set(existing, forKey: MealCompanionShareSettings.shareURLKey)
+                    return existing
+                }
+                do {
+                    try await ensureShare(database: database, feed: feed)
+                } catch {
+                    if let existing = try await existingShareURL(database: database, feed: feed) {
+                        defaults.set(existing, forKey: MealCompanionShareSettings.shareURLKey)
+                        return existing
+                    }
+                    throw error
+                }
+                return MealCompanionShareSettings.shareURLString(defaults)
+            }
+
+            private func ensureFeed(database: CKDatabase) async throws -> CKRecord {
+                let zoneID = CKRecordZone.ID(zoneName: MealCloudKitContract.zoneName, ownerName: CKCurrentUserDefaultName)
+                try await ensureZone(database: database, zoneID: zoneID)
+                let feedID = CKRecord.ID(
+                    recordName: MealCloudKitContract.feedRecordName,
+                    zoneID: zoneID
+                )
+                if let existing = try? await database.record(for: feedID) {
+                    return existing
+                }
+                let feed = CKRecord(recordType: MealCloudKitContract.feedRecordType, recordID: feedID)
+                feed[MealCloudKitContract.ownerDisplayNameKey] = MealCompanionShareSettings.ownerDisplayName(defaults) as NSString
+                return try await database.save(feed)
+            }
+
+            private func existingShareURL(database: CKDatabase, feed: CKRecord) async throws -> String? {
+                guard let shareRef = feed.share else { return nil }
+                guard let share = try? await database.record(for: shareRef.recordID) as? CKShare else {
+                    return nil
+                }
+                guard let urlString = share.url?.absoluteString, !urlString.isEmpty else { return nil }
+                return urlString
             }
 
             private func ensureZone(database: CKDatabase, zoneID: CKRecordZone.ID) async throws {

@@ -16,6 +16,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 extension AIInsights {
     struct MealGalleryView: View {
@@ -199,7 +200,9 @@ extension AIInsights {
                     },
                     onUseInBolusCalculator: { result in
                         selectedMeal = nil
-                        onUseInBolusCalculator?(result)
+                        DispatchQueue.main.async {
+                            onUseInBolusCalculator?(result)
+                        }
                     },
                     onTagsChanged: { id, tags in
                         MealGalleryStore.shared.setTags(for: id, tags: tags)
@@ -573,7 +576,8 @@ extension AIInsights {
 
     // MARK: - Detail
 
-    /// Full-size view of a single gallery meal.
+    /// Full-size view of a single gallery meal. Visual language matches
+    /// FoodFinder's result cards (photo overlay, carbs hero, macro chips).
     struct MealDetailView: View {
         let meal: MealGalleryView.DisplayMeal
         let result: FoodAnalysisResult
@@ -584,6 +588,7 @@ extension AIInsights {
         var onTagsChanged: ((UUID, [String]) -> Void)? = nil
 
         @Environment(\.dismiss) private var dismiss
+        @Environment(\.colorScheme) private var colorScheme
         @State private var tags: [String]
         @State private var newTag: String = ""
 
@@ -613,110 +618,29 @@ extension AIInsights {
             return formatter.string(from: meal.date)
         }
 
+        private var cardFill: Color {
+            colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white
+        }
+
         var body: some View {
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        if let data = meal.fullImageData, let image = UIImage(data: data) {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxWidth: .infinity)
-                                .clipShape(RoundedRectangle(cornerRadius: 16))
-                        }
+                        photoOrIdentityCard
 
-                        VStack(alignment: .leading, spacing: 6) {
-                            if let name = meal.mealName, !name.isEmpty {
-                                Text(name)
-                                    .font(.title3.weight(.semibold))
-                            }
-                            Text(dateText)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Text(meal.mealSlot.localizedTitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(String(
-                                localized: "Total carbs: \(Int(meal.totalCarbs.rounded())) g",
-                                comment: "Meal detail total carbs"
-                            ))
-                            .font(.headline)
-                            if meal.totalFat > 0 || meal.totalProtein > 0 {
-                                Text(String(
-                                    localized: "Fat \(Int(meal.totalFat.rounded())) g · Protein \(Int(meal.totalProtein.rounded())) g",
-                                    comment: "Meal detail fat and protein"
-                                ))
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            }
-                        }
+                        macroCard
 
                         if !meal.items.isEmpty {
-                            Divider()
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(String(localized: "Items", comment: "Meal detail per-item list header"))
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                ForEach(meal.items) { item in
-                                    HStack {
-                                        Text(item.name)
-                                            .lineLimit(1)
-                                        Spacer()
-                                        Text("\(Int(item.carbs.rounded())) g")
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    .font(.subheadline)
-                                }
-                            }
+                            itemsCard
                         }
 
-                        Divider()
-                        tagsSection
+                        tagsCard
 
-                        VStack(spacing: 10) {
-                            if onUseInBolusCalculator != nil {
-                                Button {
-                                    onUseInBolusCalculator?(result)
-                                    dismiss()
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "arrow.forward.circle.fill")
-                                        Text(String(localized: "Use in Bolus Calculator", comment: "FoodFinder bolus handoff button"))
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.large)
-                                .disabled(meal.totalCarbs == 0 && meal.totalFat == 0 && meal.totalProtein == 0 && meal.items.isEmpty)
-                            }
-
-                            if onOpenInFoodFinder != nil {
-                                Button {
-                                    onOpenInFoodFinder?(result)
-                                    dismiss()
-                                } label: {
-                                    Text(String(localized: "Open in FoodFinder", comment: "Reload gallery meal into FoodFinder"))
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.bordered)
-                            }
-
-                            if shareEnabled {
-                                Button {
-                                    MealCompanionPublisher.shared.publish(
-                                        payload: SharedMealPayload(result: result, thumbnailFilename: nil),
-                                        thumbnailJPEG: meal.thumbnailData
-                                    )
-                                } label: {
-                                    Text(String(localized: "Share this meal", comment: "Manually publish one gallery meal to companion outbox"))
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.bordered)
-                            }
-                        }
+                        actions
                     }
                     .padding(16)
                 }
+                .background(colorScheme == .dark ? Color.clear : Color(UIColor.systemGroupedBackground))
                 .navigationTitle(String(localized: "Meal", comment: "Meal detail navigation title"))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -728,6 +652,181 @@ extension AIInsights {
                         }
                     }
                 }
+            }
+        }
+
+        @ViewBuilder private var photoOrIdentityCard: some View {
+            if let data = meal.fullImageData, let image = UIImage(data: data) {
+                ZStack(alignment: .bottomLeading) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity)
+                        .aspectRatio(1.45, contentMode: .fit)
+                        .clipped()
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(meal.mealName?.aiInsightsNilIfEmpty ?? String(localized: "Meal", comment: "Generic meal title"))
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .lineLimit(2)
+                        Text("\(dateText) · \(meal.mealSlot.localizedTitle)")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.85))
+                            .lineLimit(1)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        LinearGradient(
+                            colors: [.black.opacity(0), .black.opacity(0.62)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(6)
+                .background(RoundedRectangle(cornerRadius: 14).fill(cardFill))
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(meal.mealName?.aiInsightsNilIfEmpty ?? String(localized: "Meal", comment: "Generic meal title"))
+                        .font(.headline)
+                        .lineLimit(2)
+                    Text("\(dateText) · \(meal.mealSlot.localizedTitle)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(RoundedRectangle(cornerRadius: 12).fill(cardFill))
+            }
+        }
+
+        private var macroCard: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(String(localized: "Totals", comment: "FoodFinder totals card header"))
+                    .font(.subheadline.bold())
+                    .padding(.top, 11)
+
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(String(format: "%.0f", meal.totalCarbs))
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .foregroundStyle(.blue)
+                    Text(String(localized: "g carbs", comment: "FoodFinder carbs hero unit"))
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+
+                HStack(spacing: 16) {
+                    galleryMacroChip(label: String(localized: "Fat", comment: "Fat macro"), value: meal.totalFat, unit: "g", color: .yellow)
+                    galleryMacroChip(label: String(localized: "Protein", comment: "Protein macro"), value: meal.totalProtein, unit: "g", color: .red)
+                    galleryMacroChip(label: String(localized: "Fiber", comment: "Fiber macro"), value: meal.totalFiber, unit: "g", color: .green)
+                    galleryMacroChip(label: String(localized: "Calories", comment: "Calories label"), value: meal.totalCalories, unit: "kcal", color: .secondary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.bottom, 12)
+            }
+            .padding(.horizontal)
+            .background(RoundedRectangle(cornerRadius: 12).fill(cardFill))
+        }
+
+        private func galleryMacroChip(label: String, value: Double, unit: String, color: Color) -> some View {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(String(format: "%.0f", value)) \(unit)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+
+        private var itemsCard: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(String(localized: "Ingredients", comment: "FoodFinder ingredients section"))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(meal.items) { item in
+                    HStack {
+                        Text(item.name)
+                            .lineLimit(1)
+                        Spacer()
+                        Text("\(Int(item.carbs.rounded())) g")
+                            .foregroundStyle(.blue)
+                            .fontWeight(.semibold)
+                    }
+                    .font(.subheadline)
+                    .padding(.vertical, 4)
+                    if item.id != meal.items.last?.id {
+                        Divider()
+                    }
+                }
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 12).fill(cardFill))
+        }
+
+        private var tagsCard: some View {
+            tagsSection
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 12).fill(cardFill))
+        }
+
+        private var actions: some View {
+            VStack(spacing: 10) {
+                if onUseInBolusCalculator != nil {
+                    Button {
+                        onUseInBolusCalculator?(result)
+                        dismiss()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.forward.circle.fill")
+                            Text(String(localized: "Use in Bolus Calculator", comment: "FoodFinder bolus handoff button"))
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(meal.totalCarbs == 0 && meal.totalFat == 0 && meal.totalProtein == 0 && meal.items.isEmpty)
+                }
+
+                if onOpenInFoodFinder != nil {
+                    Button {
+                        onOpenInFoodFinder?(result)
+                        dismiss()
+                    } label: {
+                        Text(String(localized: "Open in FoodFinder", comment: "Reload gallery meal into FoodFinder"))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                }
+
+                if shareEnabled {
+                    Button {
+                        MealCompanionPublisher.shared.publish(
+                            payload: SharedMealPayload(result: result, thumbnailFilename: nil),
+                            thumbnailJPEG: meal.thumbnailData
+                        )
+                    } label: {
+                        Text(String(localized: "Share this meal", comment: "Manually publish one gallery meal to companion outbox"))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Label(
+                    String(localized: "AI estimates may be inaccurate. Always verify carb counts before dosing.", comment: "FoodFinder disclaimer"),
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
             }
         }
 
@@ -947,19 +1046,7 @@ extension AIInsights {
         var body: some View {
             NavigationStack {
                 Form {
-                    Section {
-                        Toggle(isOn: $isEnabled) {
-                            Text(String(localized: "Share meals with companion", comment: "Opt-in companion meal share toggle"))
-                        }
-                        .onChange(of: isEnabled) { _, newValue in
-                            MealCompanionPublisher.shared.isShareEnabled = newValue
-                        }
-                    } footer: {
-                        Text(String(
-                            localized: "Off by default. When on, newly archived meals write a meal-only payload (name, time, photo) to a local outbox and CloudKit Meal / MealFeed records in iCloud.org.pov-it.<TEAM>.meals for Meals Companion. Glucose, IOB, COB, and Nightscout URL/token are never included. This is not the Trio therapy App Group. See https://github.com/pov-it/meals-companion.",
-                            comment: "Companion meal share privacy footer"
-                        ))
-                    }
+                    CompanionShareSettingsForm(isEnabled: $isEnabled)
                 }
                 .navigationTitle(String(localized: "Companion sharing", comment: "Companion share settings title"))
                 .navigationBarTitleDisplayMode(.inline)
@@ -970,6 +1057,146 @@ extension AIInsights {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// Toggle + Mayee invite link. User-visible copy never includes `<TEAM>`.
+    struct CompanionShareSettingsForm: View {
+        @Binding var isEnabled: Bool
+        var usesChartRowBackground: Bool = false
+
+        @State private var shareURLString: String = MealCompanionPublisher.shared.storedShareURLString() ?? ""
+        @State private var isRefreshingInvite = false
+        @State private var inviteStatus: String?
+        @State private var didCopy = false
+
+        private var containerID: String {
+            MealCompanionShareSettings.displayContainerIdentifier()
+        }
+
+        private var inviteURL: URL? {
+            URL(string: shareURLString)
+        }
+
+        var body: some View {
+            Section {
+                Toggle(isOn: $isEnabled) {
+                    Text(String(localized: "Share meals with companion", comment: "Opt-in companion meal share toggle"))
+                }
+                .onChange(of: isEnabled) { _, newValue in
+                    MealCompanionPublisher.shared.isShareEnabled = newValue
+                    reloadStoredURL()
+                }
+
+                if isEnabled {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(String(localized: "CloudKit container", comment: "Companion CloudKit container label"))
+                            .font(.subheadline)
+                        Text(containerID)
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let inviteURL {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(String(localized: "Invite link", comment: "Companion invite URL label"))
+                                .font(.subheadline)
+                            Text(inviteURL.absoluteString)
+                                .font(.caption)
+                                .textSelection(.enabled)
+                                .foregroundStyle(.secondary)
+                            HStack(spacing: 12) {
+                                Button {
+                                    UIPasteboard.general.string = inviteURL.absoluteString
+                                    didCopy = true
+                                } label: {
+                                    Label(
+                                        didCopy
+                                            ? String(localized: "Copied", comment: "Invite link copied")
+                                            : String(localized: "Copy invite link", comment: "Copy companion invite URL"),
+                                        systemImage: didCopy ? "checkmark" : "doc.on.doc"
+                                    )
+                                }
+                                ShareLink(item: inviteURL) {
+                                    Label(
+                                        String(localized: "Share", comment: "Share companion invite URL"),
+                                        systemImage: "square.and.arrow.up"
+                                    )
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    } else {
+                        Text(String(
+                            localized: "The invite link appears after CloudKit creates a share — tap Create invite, or it shows up after the first published meal.",
+                            comment: "Companion invite missing help"
+                        ))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    }
+
+                    Button {
+                        Task { await refreshInvite() }
+                    } label: {
+                        if isRefreshingInvite {
+                            ProgressView()
+                        } else {
+                            Text(String(localized: "Create / refresh invite", comment: "Create or refresh companion CKShare URL"))
+                        }
+                    }
+                    .disabled(isRefreshingInvite)
+
+                    if let inviteStatus {
+                        Text(inviteStatus)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text(String(localized: "Companion sharing", comment: "Companion meal share settings header"))
+            } footer: {
+                Text(String(
+                    localized: "Off by default. When on, newly archived meals share name, time, and photo only — never glucose, IOB, COB, or Nightscout. Copy the invite link for Mayee. This is not the Trio therapy App Group.",
+                    comment: "Companion meal share privacy footer without TEAM placeholder"
+                ))
+            }
+            .modifier(OptionalChartRowBackground(enabled: usesChartRowBackground))
+            .onAppear { reloadStoredURL() }
+        }
+
+        private func reloadStoredURL() {
+            shareURLString = MealCompanionPublisher.shared.storedShareURLString() ?? ""
+            didCopy = false
+        }
+
+        @MainActor
+        private func refreshInvite() async {
+            isRefreshingInvite = true
+            inviteStatus = nil
+            defer { isRefreshingInvite = false }
+            let result = await MealCompanionPublisher.shared.ensureInviteShare()
+            switch result {
+            case let .success(url):
+                shareURLString = url
+                inviteStatus = String(localized: "Invite ready. Copy the link for Mayee.", comment: "Companion invite created")
+                didCopy = false
+            case let .failure(error):
+                reloadStoredURL()
+                inviteStatus = error.localizedDescription
+            }
+        }
+    }
+
+    private struct OptionalChartRowBackground: ViewModifier {
+        let enabled: Bool
+
+        func body(content: Content) -> some View {
+            if enabled {
+                content.listRowBackground(Color.chart)
+            } else {
+                content
             }
         }
     }

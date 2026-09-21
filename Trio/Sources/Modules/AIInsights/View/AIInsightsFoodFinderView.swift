@@ -23,6 +23,7 @@ extension AIInsights {
         @State private var composerFocusRequest = 0
         @GestureState private var composerDragOffset: CGFloat = 0
         @Namespace private var composerNamespace
+        @State private var pendingGalleryBolus: FoodAnalysisResult?
 
         @FetchRequest(
             entity: MealPresetStored.entity(),
@@ -42,6 +43,7 @@ extension AIInsights {
             // above the keyboard. Backgrounds must not ignore `.keyboard`.
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 foodInputBar
+                    .aiInsightsKeyboardOverlapPadding()
             }
             .background(appState.trioBackgroundColor(for: colorScheme))
             .navigationTitle(currentNavTitle)
@@ -82,7 +84,13 @@ extension AIInsights {
                     }
                 }
             }
-            .sheet(isPresented: $showMealGallery) {
+            .sheet(isPresented: $showMealGallery, onDismiss: {
+                if let result = pendingGalleryBolus {
+                    pendingGalleryBolus = nil
+                    state.sendToBolusCalculator(result: result, openBolusCalculator: onHandoffComplete == nil)
+                    onHandoffComplete?()
+                }
+            }) {
                 AIInsights.MealGalleryView(
                     fallbackResults: state.recentResults,
                     onOpenInFoodFinder: { result in
@@ -90,9 +98,8 @@ extension AIInsights {
                         state.currentResult = result
                     },
                     onUseInBolusCalculator: { result in
+                        pendingGalleryBolus = result
                         showMealGallery = false
-                        state.sendToBolusCalculator(result: result, openBolusCalculator: onHandoffComplete == nil)
-                        onHandoffComplete?()
                     }
                 )
             }

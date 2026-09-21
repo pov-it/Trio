@@ -76,7 +76,7 @@ Local-first (`Application Support/MealGallery`):
 
 ## Meals Companion share (opt-in)
 
-Off by default (`ai_meal_companion_share_enabled`). Not part of exported `TrioSettings`.
+Off by default (`ai_meal_companion_share_enabled`). Not part of exported `TrioSettings`. Companion sharing settings show the resolved CloudKit container (team `Q6QCL8J6FN` on this fork — never a `<TEAM>` placeholder), the invite URL when CloudKit has created a `CKShare`, **Copy invite link**, and **Create / refresh invite**.
 
 When on, newly archived meals publish a **meal-only** payload. Never glucose, IOB, COB, Nightscout URL/token, pump/insulin, or the Trio therapy App Group.
 

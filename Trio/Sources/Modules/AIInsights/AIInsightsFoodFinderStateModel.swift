@@ -1569,8 +1569,15 @@ extension AIInsights {
                 useReducedBolus: AIInsights.foodFinderReducedBolusRecommended(fat: result.totalFat, protein: result.totalProtein)
             )
             FoodBolusHandoff.store(handoff)
-            if openBolusCalculator {
-                showModal(for: .treatmentView)
+            guard openBolusCalculator else { return }
+            // Nested gallery/detail sheets can eat the first `.treatmentView`
+            // presentation. `removeDuplicates` on Main then ignores a second +
+            // tap because the subject is already `.treatmentView`. Clear, wait
+            // for sheets to finish, then present.
+            let alreadyTreatments = router.mainModalScreen.value == .treatmentView
+            router.mainModalScreen.send(nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + (alreadyTreatments ? 0.05 : 0.4)) { [weak self] in
+                self?.showModal(for: .treatmentView)
             }
         }
 

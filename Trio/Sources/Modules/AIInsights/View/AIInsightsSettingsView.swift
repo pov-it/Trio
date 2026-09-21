@@ -285,21 +285,13 @@ extension AIInsights {
                 }
                 .listRowBackground(Color.chart)
 
-                Section(
-                    header: Text("Companion sharing", comment: "Companion meal share settings header"),
-                    footer: Text("Off by default. When enabled, newly saved FoodFinder meals write a meal-only payload (name, time, photo) to a local outbox and to CloudKit records Meal / MealFeed in iCloud.org.pov-it.<TEAM>.meals for the Meals Companion app. Glucose, IOB, COB, Nightscout URL/token, and the Trio therapy App Group are never included. See DeveloperDocs/MealCompanionShare.md and https://github.com/pov-it/meals-companion.", comment: "Companion meal share settings footer")
-                ) {
-                    Toggle(isOn: Binding(
+                CompanionShareSettingsForm(
+                    isEnabled: Binding(
                         get: { MealCompanionPublisher.shared.isShareEnabled },
                         set: { MealCompanionPublisher.shared.isShareEnabled = $0 }
-                    )) {
-                        Label(
-                            String(localized: "Share meals with companion", comment: "Opt-in companion meal share toggle"),
-                            systemImage: "person.2"
-                        )
-                    }
-                }
-                .listRowBackground(Color.chart)
+                    ),
+                    usesChartRowBackground: true
+                )
 
                 Section(
                     header: Text("FoodFinder Providers", comment: "FoodFinder providers settings section header"),

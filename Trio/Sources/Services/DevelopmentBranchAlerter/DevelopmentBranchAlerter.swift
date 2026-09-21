@@ -9,6 +9,10 @@ import SwiftUI
 /// came from a detached checkout, or the literal `detached` - so anything other than `main` is
 /// treated as a build the average user should not be running.
 ///
+/// After the user taps I'm a Tester, acknowledgment is stored in UserDefaults for that branch
+/// so this personal TestFlight fork is not nagged on every cold start. A different branch
+/// still warns once.
+///
 /// Compile with `DEV_BRANCH_WARNING_DISABLED` to suppress the warning.
 @MainActor final class DevelopmentBranchAlerter: ObservableObject {
     static let shared = DevelopmentBranchAlerter()
@@ -30,12 +34,22 @@ import SwiftUI
     /// Branch the running build came from, resolved when the warning is raised.
     private(set) var branch = ""
 
-    /// Reset with the process, so every launch warns again as Loop's does.
+    /// Reset with the process, so a first-launch warning still shows once.
     private var hasBeenAcknowledgedThisLaunch = false
+
+    private static func acknowledgedKey(for branch: String) -> String {
+        "DevelopmentBranchAlerter.acknowledged.\(branch)"
+    }
+
+    private static func isAcknowledged(branch: String) -> Bool {
+        guard !branch.isEmpty else { return false }
+        return UserDefaults.standard.bool(forKey: acknowledgedKey(for: branch))
+    }
 
     // MARK: - Public
 
-    /// Raises the warning if this build did not come from `main`, at most once per launch.
+    /// Raises the warning if this build did not come from `main`, at most once
+    /// per branch until the user taps I'm a Tester (persisted).
     func alertIfNeeded() {
         #if DEV_BRANCH_WARNING_DISABLED
             return
@@ -48,18 +62,22 @@ import SwiftUI
             guard branch != Self.releaseBranchName else {
                 return
             }
+            guard !Self.isAcknowledged(branch: branch) else {
+                hasBeenAcknowledgedThisLaunch = true
+                return
+            }
 
             self.branch = branch
             isPresented = true
         #endif
     }
 
-    /// Marks the warning as dealt with for this launch.
-    ///
-    /// Called when the user dismisses the alert, so that a request which never reached the screen
-    /// is not counted as one the user actually saw.
+    /// Marks the warning as dealt with for this launch **and** this branch.
     func acknowledge() {
         hasBeenAcknowledgedThisLaunch = true
+        if !branch.isEmpty {
+            UserDefaults.standard.set(true, forKey: Self.acknowledgedKey(for: branch))
+        }
     }
 
     /// Warning body for the branch this build came from.
@@ -93,7 +111,12 @@ extension View {
             Text("Hey Trioneer, watch out!", comment: "Title of the warning shown on builds that are not from the main branch"),
             isPresented: Binding(
                 get: { alerter.isPresented },
-                set: { alerter.isPresented = $0 }
+                set: { newValue in
+                    alerter.isPresented = newValue
+                    if !newValue {
+                        alerter.acknowledge()
+                    }
+                }
             )
         ) {
             Button(String(
