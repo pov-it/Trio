@@ -1,0 +1,320 @@
+import Foundation
+import Testing
+
+@testable import Trio
+
+@Suite("Meal gallery filters, groups, and companion-share privacy")
+struct MealGalleryShareTests {
+
+    private func amsterdamCalendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Amsterdam")!
+        return calendar
+    }
+
+    private func date(hour: Int, minute: Int = 0, calendar: Calendar) -> Date {
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 9
+        components.day = 21
+        components.hour = hour
+        components.minute = minute
+        return calendar.date(from: components)!
+    }
+
+    // MARK: - Meal slots (Europe/Amsterdam-friendly local hours)
+
+    @Test("Breakfast is 05:00–10:59 local")
+    func breakfastSlot() {
+        let calendar = amsterdamCalendar()
+        #expect(AIInsights.MealSlot.from(date: date(hour: 5, calendar: calendar), calendar: calendar) == .breakfast)
+        #expect(AIInsights.MealSlot.from(date: date(hour: 8, calendar: calendar), calendar: calendar) == .breakfast)
+        #expect(AIInsights.MealSlot.from(date: date(hour: 10, minute: 59, calendar: calendar), calendar: calendar) == .breakfast)
+        #expect(AIInsights.MealSlot.from(date: date(hour: 4, minute: 59, calendar: calendar), calendar: calendar) != .breakfast)
+        #expect(AIInsights.MealSlot.from(date: date(hour: 11, calendar: calendar), calendar: calendar) != .breakfast)
+    }
+
+    @Test("Lunch is 11:00–15:59 local")
+    func lunchSlot() {
+        let calendar = amsterdamCalendar()
+        #expect(AIInsights.MealSlot.from(date: date(hour: 11, calendar: calendar), calendar: calendar) == .lunch)
+        #expect(AIInsights.MealSlot.from(date: date(hour: 15, minute: 59, calendar: calendar), calendar: calendar) == .lunch)
+    }
+
+    @Test("Dinner is 16:00–21:59 local")
+    func dinnerSlot() {
+        let calendar = amsterdamCalendar()
+        #expect(AIInsights.MealSlot.from(date: date(hour: 16, calendar: calendar), calendar: calendar) == .dinner)
+        #expect(AIInsights.MealSlot.from(date: date(hour: 19, calendar: calendar), calendar: calendar) == .dinner)
+        #expect(AIInsights.MealSlot.from(date: date(hour: 21, minute: 59, calendar: calendar), calendar: calendar) == .dinner)
+    }
+
+    @Test("Other is 22:00–04:59 local")
+    func otherSlot() {
+        let calendar = amsterdamCalendar()
+        #expect(AIInsights.MealSlot.from(date: date(hour: 22, calendar: calendar), calendar: calendar) == .other)
+        #expect(AIInsights.MealSlot.from(date: date(hour: 23, calendar: calendar), calendar: calendar) == .other)
+        #expect(AIInsights.MealSlot.from(date: date(hour: 0, calendar: calendar), calendar: calendar) == .other)
+        #expect(AIInsights.MealSlot.from(date: date(hour: 4, calendar: calendar), calendar: calendar) == .other)
+    }
+
+    // MARK: - Filters
+
+    private func item(
+        name: String,
+        date: Date = Date(),
+        carbs: Double = 40,
+        tags: [String] = [],
+        itemNames: [String] = []
+    ) -> AIInsights.MealGalleryStore.GalleryItem {
+        AIInsights.MealGalleryStore.GalleryItem(
+            id: UUID(),
+            date: date,
+            mealName: name,
+            totalCarbs: carbs,
+            thumbnailFilename: "\(UUID().uuidString).jpg",
+            tags: tags,
+            items: itemNames.map {
+                AIInsights.GalleryFoodSnapshot(
+                    name: $0,
+                    portion: "1",
+                    carbs: carbs,
+                    fat: 0,
+                    protein: 0,
+                    fiber: 0,
+                    calories: 0
+                )
+            }
+        )
+    }
+
+    @Test("Name search matches meal title and ingredient names")
+    func nameSearch() {
+        let stokbrood = item(name: "Halve stokbroodjes", itemNames: ["stokbrood", "kaas"])
+        let pasta = item(name: "Pasta", itemNames: ["penne"])
+        var filter = AIInsights.GalleryFilter()
+        filter.nameQuery = "stokbrood"
+        #expect(filter.matches(stokbrood))
+        #expect(!filter.matches(pasta))
+    }
+
+    @Test("Carb range is inclusive")
+    func carbRange() {
+        let low = item(name: "Snack", carbs: 12)
+        let mid = item(name: "Meal", carbs: 45)
+        let high = item(name: "Feast", carbs: 90)
+        var filter = AIInsights.GalleryFilter()
+        filter.minCarbs = 30
+        filter.maxCarbs = 60
+        #expect(!filter.matches(low))
+        #expect(filter.matches(mid))
+        #expect(!filter.matches(high))
+    }
+
+    @Test("Date range uses local calendar days")
+    func dateRange() {
+        let calendar = amsterdamCalendar()
+        let start = calendar.startOfDay(for: date(hour: 8, calendar: calendar))
+        let inRange = item(name: "In", date: date(hour: 12, calendar: calendar))
+        let before = item(name: "Before", date: calendar.date(byAdding: .day, value: -1, to: start)!)
+        var filter = AIInsights.GalleryFilter()
+        filter.startDate = start
+        filter.endDate = start
+        #expect(filter.matches(inRange, calendar: calendar))
+        #expect(!filter.matches(before, calendar: calendar))
+    }
+
+    @Test("Tag filter is case-insensitive OR")
+    func tagFilter() {
+        let tagged = item(name: "Brood", tags: ["halve stokbroodjes"])
+        let other = item(name: "Soep", tags: ["lunch box"])
+        var filter = AIInsights.GalleryFilter()
+        filter.tags = ["Halve Stokbroodjes"]
+        #expect(filter.matches(tagged))
+        #expect(!filter.matches(other))
+    }
+
+    @Test("Meal-slot filter uses local hour of date")
+    func slotFilter() {
+        let calendar = amsterdamCalendar()
+        let breakfast = item(name: "Eggs", date: date(hour: 8, calendar: calendar))
+        let dinner = item(name: "Stamppot", date: date(hour: 19, calendar: calendar))
+        var filter = AIInsights.GalleryFilter()
+        filter.mealSlot = .breakfast
+        #expect(filter.matches(breakfast, calendar: calendar))
+        #expect(!filter.matches(dinner, calendar: calendar))
+    }
+
+    // MARK: - Index compatibility + bolus reuse
+
+    @Test("Legacy gallery index JSON still decodes")
+    func legacyIndexDecodes() throws {
+        struct Legacy: Codable {
+            let id: UUID
+            let date: Date
+            let mealName: String?
+            let totalCarbs: Double
+            let thumbnailFilename: String
+        }
+        let legacy = Legacy(
+            id: UUID(),
+            date: Date(),
+            mealName: "Toast",
+            totalCarbs: 22,
+            thumbnailFilename: "toast.jpg"
+        )
+        let data = try JSONEncoder().encode(legacy)
+        let item = try JSONDecoder().decode(AIInsights.MealGalleryStore.GalleryItem.self, from: data)
+        #expect(item.mealName == "Toast")
+        #expect(item.totalCarbs == 22)
+        #expect(item.tags.isEmpty)
+        #expect(item.items.isEmpty)
+        #expect(item.totalFat == 0)
+        #expect(item.canReuseForBolus)
+    }
+
+    @Test("Gallery snapshot rebuilds FoodFinder macros for bolus handoff")
+    func galleryItemRebuildsMacros() {
+        let snapshot = AIInsights.GalleryFoodSnapshot(
+            name: "Stokbrood",
+            portion: "1 half",
+            carbs: 30,
+            fat: 4,
+            protein: 8,
+            fiber: 2,
+            calories: 180,
+            portionMultiplier: 2
+        )
+        let item = AIInsights.MealGalleryStore.GalleryItem(
+            id: UUID(),
+            date: Date(),
+            mealName: "Halve stokbroodjes",
+            totalCarbs: 60,
+            thumbnailFilename: "x.jpg",
+            totalFat: 8,
+            totalProtein: 16,
+            items: [snapshot]
+        )
+        let result = item.toFoodAnalysisResult()
+        #expect(result.totalCarbs == 60)
+        #expect(result.totalFat == 8)
+        #expect(result.totalProtein == 16)
+        #expect(result.items.count == 1)
+        #expect(result.items[0].name == "Stokbrood")
+
+        let handoff = AIInsights.FoodBolusHandoff(
+            carbs: result.totalCarbs,
+            fat: result.totalFat,
+            protein: result.totalProtein,
+            note: result.items.map(\.name).joined(separator: ", "),
+            createdAt: Date(),
+            useReducedBolus: AIInsights.foodFinderReducedBolusRecommended(fat: result.totalFat, protein: result.totalProtein)
+        )
+        #expect(handoff.carbs == 60)
+        #expect(handoff.fat == 8)
+        #expect(handoff.protein == 16)
+        #expect(handoff.note == "Stokbrood")
+    }
+
+    @Test("Manual group names de-duplicate case-insensitively")
+    func groupNameCatalog() {
+        let suite = "MealGalleryShareTests.groups.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let store = AIInsights.MealGalleryStore(defaults: defaults)
+        #expect(store.addGroupName("halve stokbroodjes") == "halve stokbroodjes")
+        #expect(store.addGroupName("Halve Stokbroodjes") == "halve stokbroodjes")
+        #expect(store.loadGroupNames() == ["halve stokbroodjes"])
+        defaults.removePersistentDomain(forName: suite)
+    }
+
+    // MARK: - Companion share privacy
+
+    @Test("Share toggle defaults off")
+    func shareDefaultsOff() {
+        let suite = "MealGalleryShareTests.share.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        #expect(AIInsights.MealCompanionShareSettings.isEnabled(defaults) == false)
+        defaults.removePersistentDomain(forName: suite)
+    }
+
+    @Test("Companion payload JSON is meal-only")
+    func payloadAllowList() throws {
+        let payload = AIInsights.SharedMealPayload(
+            id: UUID(),
+            date: Date(),
+            mealName: "Halve stokbroodjes",
+            thumbnailFilename: "meal.jpg",
+            carbs: 42
+        )
+        #expect(AIInsights.MealSharePrivacy.rejectReason(for: payload) == nil)
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(payload)
+        let json = try JSONSerialization.jsonObject(with: data)
+        let keys = Set(AIInsights.MealSharePrivacy.objectKeys(in: json))
+        #expect(keys.isSubset(of: AIInsights.MealSharePrivacy.allowedKeys))
+        #expect(keys.isDisjoint(with: AIInsights.MealSharePrivacy.forbiddenKeys))
+
+        let text = String(decoding: data, as: UTF8.self).lowercased()
+        #expect(!text.contains("glucose"))
+        #expect(!text.contains("\"iob\""))
+        #expect(!text.contains("\"cob\""))
+        #expect(!text.contains("nightscout"))
+        #expect(!text.contains("token"))
+        #expect(!text.contains("insulin"))
+    }
+
+    @Test("Privacy walker flags forbidden nested keys")
+    func forbiddenKeyWalker() {
+        let dirty: [String: Any] = [
+            "id": "x",
+            "nested": ["glucose": 90, "iob": 1.2]
+        ]
+        let keys = Set(AIInsights.MealSharePrivacy.objectKeys(in: dirty))
+        #expect(keys.contains("glucose"))
+        #expect(keys.contains("iob"))
+    }
+
+    @Test("Trio therapy App Group is refused as companion suite")
+    func refusesTrioAppGroup() {
+        let suite = "MealGalleryShareTests.appgroup.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defaults.set("group.org.nightscout.TEAMID.trio.trio-app-group", forKey: AIInsights.MealCompanionShareSettings.companionAppGroupKey)
+        #expect(AIInsights.MealCompanionShareSettings.companionAppGroupIdentifier(defaults) == nil)
+        defaults.set("group.org.nightscout.TEAMID.trio.companion-meals", forKey: AIInsights.MealCompanionShareSettings.companionAppGroupKey)
+        #expect(AIInsights.MealCompanionShareSettings.companionAppGroupIdentifier(defaults) == "group.org.nightscout.TEAMID.trio.companion-meals")
+        defaults.removePersistentDomain(forName: suite)
+    }
+
+    @Test("Outbox writes meal-only JSON and skips glucose fields")
+    func outboxWritesAllowListedJSON() async throws {
+        let suite = "MealGalleryShareTests.outbox.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(suite, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let transport = AIInsights.SharedMealsOutboxTransport(defaults: defaults, directory: dir)
+        let id = UUID()
+        let payload = AIInsights.SharedMealPayload(
+            id: id,
+            date: Date(),
+            mealName: "Lunch",
+            thumbnailFilename: nil,
+            carbs: 33
+        )
+        await transport.publish(AIInsights.SharedMealRecord(payload: payload, thumbnailJPEG: nil))
+        let loaded = transport.loadPayload(id: id)
+        #expect(loaded?.mealName == "Lunch")
+        #expect(loaded?.carbs == 33)
+        let jsonURL = dir.appendingPathComponent("\(id.uuidString).json")
+        let text = (try String(contentsOf: jsonURL, encoding: .utf8)).lowercased()
+        #expect(!text.contains("glucose"))
+        #expect(!text.contains("nightscout"))
+        defaults.removePersistentDomain(forName: suite)
+        try? FileManager.default.removeItem(at: dir)
+    }
+}

@@ -28,7 +28,10 @@
 		AABBCC00000000000000C0CD /* AIInsights_PeriodicRecap.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0BD /* AIInsights_PeriodicRecap.swift */; };
 		AABBCC00000000000000C0F1 /* AIInsights_RecapNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0F1 /* AIInsights_RecapNotifier.swift */; };
 		AABBCC00000000000000C0F2 /* AIInsights_MealGalleryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0F2 /* AIInsights_MealGalleryStore.swift */; };
+		AABBCC00000000000000C0F4 /* AIInsights_MealGalleryModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0F4 /* AIInsights_MealGalleryModels.swift */; };
+		AABBCC00000000000000C0F5 /* AIInsights_MealCompanionShare.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0F5 /* AIInsights_MealCompanionShare.swift */; };
 		AABBCC00000000000000C0F3 /* AIInsightsMealGalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0F3 /* AIInsightsMealGalleryView.swift */; };
+		CA07000000000000000010C2 /* MealGalleryShareTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA07000000000000000010C1 /* MealGalleryShareTests.swift */; };
 		C7C8D8354E63450CA571EC7F /* AIInsightsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */; };
 		AABBCC00000000000000C0CE /* AIInsightsRecapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0BE /* AIInsightsRecapView.swift */; };
 		BA986A0471AE45108775314B /* AIInsightsRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E69494986447F4BF5EC179 /* AIInsightsRootView.swift */; };
@@ -1087,6 +1090,8 @@
 		AABBCC00000000000000B0BD /* AIInsights_PeriodicRecap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_PeriodicRecap.swift; sourceTree = SOURCE_ROOT; };
 		AABBCC00000000000000B0F1 /* AIInsights_RecapNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_RecapNotifier.swift; sourceTree = SOURCE_ROOT; };
 		AABBCC00000000000000B0F2 /* AIInsights_MealGalleryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_MealGalleryStore.swift; sourceTree = SOURCE_ROOT; };
+		AABBCC00000000000000B0F4 /* AIInsights_MealGalleryModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_MealGalleryModels.swift; sourceTree = SOURCE_ROOT; };
+		AABBCC00000000000000B0F5 /* AIInsights_MealCompanionShare.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_MealCompanionShare.swift; sourceTree = SOURCE_ROOT; };
 		AABBCC00000000000000B0F3 /* AIInsightsMealGalleryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/View/AIInsightsMealGalleryView.swift; sourceTree = SOURCE_ROOT; };
 		9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/AIInsightsProvider.swift; sourceTree = SOURCE_ROOT; };
 		AABBCC00000000000000B0BE /* AIInsightsRecapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/View/AIInsightsRecapView.swift; sourceTree = SOURCE_ROOT; };
@@ -1701,6 +1706,7 @@
 		CA03000000000000000010C1 /* AlertCatalogRegistryOmniFaultTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertCatalogRegistryOmniFaultTests.swift; sourceTree = "<group>"; };
 		CA05000000000000000010C1 /* AlarmGramsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmGramsSection.swift; sourceTree = "<group>"; };
 		CA06000000000000000010C1 /* GlucoseAlertsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlucoseAlertsStoreTests.swift; sourceTree = "<group>"; };
+		CA07000000000000000010C1 /* MealGalleryShareTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MealGalleryShareTests.swift; sourceTree = "<group>"; };
 		CC6C406D2ACDD69E009B8058 /* RawFetchedProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RawFetchedProfile.swift; sourceTree = "<group>"; };
 		CC76E9502BD4812E008BEB61 /* Forecast+helper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Forecast+helper.swift"; sourceTree = "<group>"; };
 		CE1856F42ADC4858007E39C7 /* AddCarbPresetIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddCarbPresetIntent.swift; sourceTree = "<group>"; };
@@ -2480,6 +2486,8 @@
 				AABBCC00000000000000B0BD /* AIInsights_PeriodicRecap.swift */,
 				AABBCC00000000000000B0F1 /* AIInsights_RecapNotifier.swift */,
 				AABBCC00000000000000B0F2 /* AIInsights_MealGalleryStore.swift */,
+				AABBCC00000000000000B0F4 /* AIInsights_MealGalleryModels.swift */,
+				AABBCC00000000000000B0F5 /* AIInsights_MealCompanionShare.swift */,
 				AABBCC00000000000000B0F3 /* AIInsightsMealGalleryView.swift */,
 				9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */,
 				AABBCC00000000000000B0BE /* AIInsightsRecapView.swift */,
@@ -3126,6 +3134,7 @@
 				BD11A000000000000000A00B /* TrioModalAlertSchedulerTests.swift */,
 				BD11A000000000000000A00A /* GlucoseAlertCoordinatorTests.swift */,
 				CA06000000000000000010C1 /* GlucoseAlertsStoreTests.swift */,
+				CA07000000000000000010C1 /* MealGalleryShareTests.swift */,
 				BD11A000000000000000A009 /* TrioAlertCategoryTests.swift */,
 				BD11A000000000000000A008 /* GlucoseAlertTests.swift */,
 				BD11A000000000000000A007 /* GlucoseAlertConfigurationTests.swift */,
@@ -5295,6 +5304,8 @@
 				AABBCC00000000000000C0CD /* AIInsights_PeriodicRecap.swift in Sources */,
 				AABBCC00000000000000C0F1 /* AIInsights_RecapNotifier.swift in Sources */,
 				AABBCC00000000000000C0F2 /* AIInsights_MealGalleryStore.swift in Sources */,
+				AABBCC00000000000000C0F4 /* AIInsights_MealGalleryModels.swift in Sources */,
+				AABBCC00000000000000C0F5 /* AIInsights_MealCompanionShare.swift in Sources */,
 				AABBCC00000000000000C0F3 /* AIInsightsMealGalleryView.swift in Sources */,
 				C7C8D8354E63450CA571EC7F /* AIInsightsProvider.swift in Sources */,
 				AABBCC00000000000000C0CE /* AIInsightsRecapView.swift in Sources */,
@@ -5847,6 +5858,7 @@
 				BD11A001000000000000A00B /* TrioModalAlertSchedulerTests.swift in Sources */,
 				BD11A001000000000000A00A /* GlucoseAlertCoordinatorTests.swift in Sources */,
 				CA06000000000000000010C2 /* GlucoseAlertsStoreTests.swift in Sources */,
+				CA07000000000000000010C2 /* MealGalleryShareTests.swift in Sources */,
 				BD11A001000000000000A009 /* TrioAlertCategoryTests.swift in Sources */,
 				BD11A001000000000000A008 /* GlucoseAlertTests.swift in Sources */,
 				BD11A001000000000000A007 /* GlucoseAlertConfigurationTests.swift in Sources */,
