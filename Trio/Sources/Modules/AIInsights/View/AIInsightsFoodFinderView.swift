@@ -33,22 +33,16 @@ extension AIInsights {
         var body: some View {
             ZStack(alignment: .bottom) {
                 contentArea
+                    .background(appState.trioBackgroundColor(for: colorScheme))
                 barcodeStatusBanner
             }
-            // Bottom inset hosts the composer. Keyboard avoidance is NOT
-            // left to SwiftUI's keyboard-inclusive safe area (that fails
-            // silently in the Treatments sheet / widget URL-scheme
-            // presentations). `aiInsightsKeyboardAdaptive` observes the
-            // keyboard frame and pads; it also ignores SwiftUI's own
-            // keyboard safe area so the two do not double-apply.
+            // Native keyboard avoidance only. A previous helper padded by the
+            // keyboard frame *and* ignored the keyboard safe area while this
+            // inset still lifted — that double offset left the large white gap
+            // above the keyboard. Backgrounds must not ignore `.keyboard`.
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 foodInputBar
             }
-            // Pair with ignoresSafeArea(.keyboard) inside the modifier so
-            // SwiftUI does not also auto-lift (which fails in the Treatments
-            // sheet / widget URL-scheme presentations). This is the same
-            // helper the AI chat input uses.
-            .aiInsightsKeyboardAdaptive()
             .background(appState.trioBackgroundColor(for: colorScheme))
             .navigationTitle(currentNavTitle)
             .navigationBarTitleDisplayMode(.inline)
@@ -111,7 +105,8 @@ extension AIInsights {
                 .ignoresSafeArea()
             }
             .fullScreenCover(isPresented: $state.showBarcodeScanner) {
-                AIInsights.BarcodeScannerView(dismissOnScan: false) { barcode in
+                AIInsights.BarcodeScannerView(dismissOnScan: true) { barcode in
+                    state.showBarcodeScanner = false
                     Task {
                         await state.attachScannedBarcode(barcode)
                     }
@@ -1140,7 +1135,6 @@ extension AIInsights {
                 VStack(spacing: 8) {
                     if isComposerExpanded {
                         expandedFoodComposer
-                            .offset(y: composerDragOffset)
                             .transition(.asymmetric(
                                 insertion: .scale(scale: 0.94, anchor: .bottom).combined(with: .opacity),
                                 removal: .scale(scale: 0.98, anchor: .bottom).combined(with: .opacity)
@@ -1161,10 +1155,13 @@ extension AIInsights {
                 .padding(.top, isComposerExpanded ? 0 : 8)
                 .padding(.bottom, isComposerExpanded ? 0 : 8)
             }
-            // Collapsed bar: rounded only at the top (flush at the bottom).
-            // Background extends into the home-indicator area so there is no
-            // visible gap between the bar and the screen edge when keyboard
-            // is hidden. Expanded composer manages its own background.
+            // Collapsed bar: rounded only at the top. Ignore the *container*
+            // home-indicator inset so the bar is flush with the screen edge
+            // when the keyboard is hidden — but do NOT ignore the keyboard
+            // region (`.ignoresSafeArea(edges: .bottom)` defaults to `.all`
+            // and was painting a white slab into the keyboard gap).
+            // Expanded composer is a self-contained card; no extra fill, so
+            // dragging it down reveals the AI Hub grey instead of a white panel.
             .background {
                 if !isComposerExpanded {
                     UnevenRoundedRectangle(
@@ -1176,14 +1173,10 @@ extension AIInsights {
                     )
                     .fill(colorScheme == .dark ? Color.bgDarkBlue.opacity(0.96) : Color.white.opacity(0.96))
                     .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.10), radius: 8, y: -2)
-                    .ignoresSafeArea(edges: .bottom)
-                } else {
-                    // Expanded composer: fill home-indicator area with the
-                    // same background colour used by the composer itself.
-                    (colorScheme == .dark ? Color.bgDarkBlue : Color.white)
-                        .ignoresSafeArea(edges: .bottom)
+                    .ignoresSafeArea(.container, edges: .bottom)
                 }
             }
+            .offset(y: isComposerExpanded ? composerDragOffset : 0)
             .animation(.spring(response: 0.45, dampingFraction: 0.72), value: state.currentResult?.id)
             .animation(.interactiveSpring(response: 0.42, dampingFraction: 0.88, blendDuration: 0.08), value: isComposerExpanded)
         }
@@ -1366,7 +1359,6 @@ extension AIInsights {
                     .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.12), radius: 18, y: 8)
             )
             .frame(maxWidth: .infinity)
-            .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.9), value: composerDragOffset)
             .onAppear {
                 refocusComposerInput()
             }
@@ -2026,6 +2018,7 @@ private struct FoodItemEditSheet: View {
             sourceImageURL: item.sourceImageURL,
             sourceScore: item.sourceScore,
             alternateMatches: item.alternateMatches,
+            barcode: item.barcode,
             basisUnit: basisUnit,
             basisAmount: enteredAmount
         )

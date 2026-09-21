@@ -200,6 +200,31 @@ enum AIInsights {
 
         var id: String { rawValue }
 
+        /// Canonical Google Gemini Flash alias. Keep this as the project default;
+        /// do not substitute a dated snapshot id (e.g. gemini-3.6-flash) here.
+        static let geminiFlashLatest = "gemini-flash-latest"
+
+        static func geminiGenerateContentURL(model: String) -> String {
+            "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent"
+        }
+
+        /// Rewrites the model segment of a Gemini `:generateContent` URL.
+        /// Other endpoints are returned unchanged.
+        static func rewritingGeminiModel(in endpoint: String, to model: String) -> String {
+            guard let modelsRange = endpoint.range(of: "/models/") else { return endpoint }
+            let afterModels = endpoint[modelsRange.upperBound...]
+            let terminator: String
+            if afterModels.contains(":generateContent") {
+                terminator = ":generateContent"
+            } else if afterModels.contains(":streamGenerateContent") {
+                terminator = ":streamGenerateContent"
+            } else {
+                return endpoint
+            }
+            guard let termRange = afterModels.range(of: terminator) else { return endpoint }
+            return "\(endpoint[..<modelsRange.upperBound])\(model)\(afterModels[termRange.lowerBound...])"
+        }
+
         var defaultBaseURL: String {
             switch self {
             case .google: return "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -212,7 +237,7 @@ enum AIInsights {
 
         var defaultModel: String {
             switch self {
-            case .google: return "gemini-3.6-flash"
+            case .google: return Self.geminiFlashLatest
             case .openai: return "gpt-4o"
             case .anthropic: return "claude-sonnet-4-20250514"
             case .tilly: return "gpt-5.5"
@@ -222,7 +247,7 @@ enum AIInsights {
 
         var defaultDictationModel: String {
             switch self {
-            case .google: return "gemini-3.6-flash"
+            case .google: return Self.geminiFlashLatest
             case .openai: return "gpt-4o-transcribe"
             case .anthropic, .tilly: return defaultModel
             case .custom: return ""
@@ -248,7 +273,7 @@ enum AIInsights {
         var defaultEndpoint: String {
             switch self {
             case .google:
-                return "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
+                return Self.geminiGenerateContentURL(model: Self.geminiFlashLatest)
             case .openai, .anthropic, .tilly, .custom:
                 return defaultBaseURL
             }
