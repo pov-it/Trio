@@ -2,7 +2,10 @@
 //  AIInsightsKeyboardAdaptive.swift
 //  Trio
 //
-//  Keyboard-avoidance helper used by the AI chat and FoodFinder input bars.
+//  Keyboard-avoidance helper used by the AI chat input bar.
+//  FoodFinder no longer uses this modifier: it relies on native
+//  `.safeAreaInset` and must not ignore `.keyboard` (that double offset
+//  left a white gap above the keyboard).
 //
 //  Why this exists:
 //  SwiftUI's built-in keyboard avoidance lifts the entire view that owns a

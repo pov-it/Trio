@@ -36,6 +36,7 @@ This fork branch keeps **nightscout/Trio v1.0.1** as the medical/looping base an
 
 See:
 
+- [DeveloperDocs/README.md](DeveloperDocs/README.md) — index (in-repo Hub vs Dana/Libre kits)
 - [Trio/Sources/Modules/AIInsights/README.md](Trio/Sources/Modules/AIInsights/README.md) — module folder map
 - [DeveloperDocs/AIHubAndCompanion.md](DeveloperDocs/AIHubAndCompanion.md) — feature list vs stock v1.0.1
 - [DeveloperDocs/MealCompanionShare.md](DeveloperDocs/MealCompanionShare.md) — meal-only CloudKit share (no glucose)

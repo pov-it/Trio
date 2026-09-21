@@ -26,7 +26,9 @@ Trio/Sources/Modules/AIInsights/
 
 Sibling in-repo folder (also not a package): `Trio/Sources/Modules/AutoPresets/` — activity-based override presets, wired from Settings and `AppDelegate`.
 
-Xcode: files are in the Trio app target (`Trio.xcodeproj`), grouped as **AIInsights** / **AutoPresets**. Paths are `SOURCE_ROOT` so they compile from `Trio/Sources/Modules/...`.
+Xcode: files are in the Trio app target (`Trio.xcodeproj`), grouped as **AIInsights** / **AutoPresets** with the same `View/` and `Services/` folders as on disk. Paths are `SOURCE_ROOT` so they compile from `Trio/Sources/Modules/...`. This README is in the group but is not compiled.
+
+`AlgorithmPackage/` symlinks `Trio/Sources` for oref tests. AI Hub is **not** in that package’s `sources` list and is not an SPM product.
 
 ## Integration points (outside this folder)
 

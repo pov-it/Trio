@@ -10,6 +10,11 @@ import PackageDescription
 // compiling the same ones. `Sources` and `OpenAPSSwiftTests` are
 // symlinks back to Trio/Sources and TrioTests/OpenAPSSwiftTests.
 //
+// AI Hub / FoodFinder / AutoPresets live under Trio/Sources/Modules and
+// therefore appear in the symlink tree. They are **not** listed in
+// `sources` below and are not an SPM product. Keep them in the Trio app
+// target (unlike DanaKit / LibreTransmitter git submodules).
+//
 // This lives in a subdirectory, not the repo root, because Xcode
 // prefers a root Package.swift over Trio.xcworkspace when opening
 // a folder — a root manifest makes `xed .` open the package and

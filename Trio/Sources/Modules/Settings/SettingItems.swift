@@ -268,6 +268,17 @@ enum SettingItems {
             path: ["Features", "Remote Control"]
         ),
         SettingItem(
+            title: "AutoPresets",
+            view: .autoPresets,
+            searchContents: [
+                "AutoPresets",
+                "Activity",
+                "Caffeine",
+                "Alcohol"
+            ],
+            path: ["Features", "AutoPresets"]
+        ),
+        SettingItem(
             title: "User Interface",
             view: .userInterfaceSettings,
             searchContents: [
@@ -341,9 +352,10 @@ enum SettingItems {
                 "FoodFinder",
                 "OpenFoodFacts",
                 "Open Food Facts API",
-                "Barcode"
+                "Barcode",
+                "Meals Companion"
             ],
-            path: ["AI", "AI Insights"]
+            path: ["Features", "AI", "AI Insights"]
         ),
         SettingItem(
             title: "AI Settings",
@@ -365,9 +377,11 @@ enum SettingItems {
                 "FoodFinder",
                 "OpenFoodFacts",
                 "Open Food Facts API",
-                "Barcode Lookup"
+                "Barcode Lookup",
+                "Meals Companion",
+                "Share meals with companion"
             ],
-            path: ["AI", "AI Settings"]
+            path: ["Features", "AI", "AI Settings"]
         )
     ]
 

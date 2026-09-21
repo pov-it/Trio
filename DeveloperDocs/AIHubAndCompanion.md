@@ -14,7 +14,7 @@ AI Hub stays **inside Trio**. It is a module folder in this repo, compiled into 
 | Shipping | Separate GitHub repos, linked as dependencies | Same commit as Trio; no SPM product, no extra `.gitmodules` entry |
 | Decision | Driver kits remain extractable | **Keep in Trio for now** (Marijn, 2026-09-21) |
 
-Do not split AI Hub into a Swift package or `pov-it/ai-hub` (or similar) unless that decision is revisited. Folder map and integration points: [`Trio/Sources/Modules/AIInsights/README.md`](../Trio/Sources/Modules/AIInsights/README.md).
+Do not split AI Hub into a Swift package or `pov-it/ai-hub` (or similar) unless that decision is revisited. Folder map and integration points: [`Trio/Sources/Modules/AIInsights/README.md`](../Trio/Sources/Modules/AIInsights/README.md). Docs index: [README.md](README.md). The Xcode navigator groups match the on-disk `View/` and `Services/` folders.
 
 Related in-repo sibling (also not a package): `Trio/Sources/Modules/AutoPresets/`.
 
