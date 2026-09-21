@@ -37,12 +37,43 @@ final class GlucoseAlertsStore: ObservableObject {
             }
             alerts = migrated
         }
+        migrateLowFamilySilenceOverrideIfNeeded()
         configuration = Self.decode(
             GlucoseAlertConfiguration.self,
             from: defaults,
             key: configKey
         ) ?? GlucoseAlertConfiguration()
         bind()
+    }
+
+    /// One-time repair after the upstream/dev alert rewrite. Stock Low
+    /// alarms were persisted with `overridesSilenceAndDND = false` (only
+    /// Urgent Low defaulted on). Those stored flags survive later default
+    /// changes, so overnight lows stayed `.timeSensitive` and did not break
+    /// through Silent Mode / DND. Urgent Low is included in case an older
+    /// payload omitted the field-as-true. High / forecast / carbs-required
+    /// are left alone. After this migration the user can still turn the
+    /// toggle off in the editor; we will not flip it back.
+    private static let lowFamilySilenceOverrideMigrationKey = "trio.glucoseAlerts.lowSilenceOverride.v1"
+
+    private func migrateLowFamilySilenceOverrideIfNeeded() {
+        guard !defaults.bool(forKey: Self.lowFamilySilenceOverrideMigrationKey) else { return }
+        var changed = false
+        for index in alerts.indices {
+            let type = alerts[index].type
+            guard type == .low || type == .urgentLow else { continue }
+            guard type.defaultOverridesSilenceAndDND else { continue }
+            if !alerts[index].overridesSilenceAndDND {
+                alerts[index].overridesSilenceAndDND = true
+                changed = true
+            }
+        }
+        defaults.set(true, forKey: Self.lowFamilySilenceOverrideMigrationKey)
+        // bind() uses dropFirst(), so persist now or the repaired flags
+        // never hit disk and the next launch would skip migration.
+        if changed {
+            encode(alerts, to: alertsKey)
+        }
     }
 
     /// Seed every glucose alarm enabled. Users running a stock CGM app for

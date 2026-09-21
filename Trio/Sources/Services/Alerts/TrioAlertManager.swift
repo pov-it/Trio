@@ -148,9 +148,12 @@ final class BaseTrioAlertManager: TrioAlertManager, Injectable {
     /// `.playback` audio session bypasses those.
     ///
     /// Only fires for immediate-trigger alerts; delayed/repeating go
-    /// through UNNotification at fire time. No-op when muted or non-critical.
-    private func playCriticalAudioFallbackIfNeeded(_ alert: Alert, muted: Bool) {
-        guard alert.interruptionLevel == .critical, !muted else { return }
+    /// through UNNotification at fire time. Critical alerts pierce the
+    /// snooze/mute window by design — otherwise a pre-bed snooze of highs
+    /// would leave an overnight urgent-low silent on builds without the
+    /// Critical Alerts entitlement.
+    private func playCriticalAudioFallbackIfNeeded(_ alert: Alert) {
+        guard alert.interruptionLevel == .critical else { return }
         guard case .immediate = alert.trigger else { return }
         // Honor `playsSound: false` (alert was issued with sound: nil) —
         // user explicitly opted out of audio on this alarm.
@@ -210,7 +213,7 @@ final class BaseTrioAlertManager: TrioAlertManager, Injectable {
             muted: muted,
             soundURL: soundLoader.url(for: effective)
         )
-        playCriticalAudioFallbackIfNeeded(effective, muted: muted)
+        playCriticalAudioFallbackIfNeeded(effective)
     }
 
     private func applyCatalogEntry(_ entry: Alert.CatalogEntry, to alert: Alert) -> Alert {

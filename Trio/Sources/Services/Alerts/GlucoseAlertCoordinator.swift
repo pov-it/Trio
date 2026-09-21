@@ -125,14 +125,30 @@ final class GlucoseAlertCoordinator: Injectable {
 
     // MARK: - Reading-based evaluation
 
+    /// Hypo alarms must still fire when the user has "Use CGM App Alerts"
+    /// on. That toggle is meant to drop duplicate highs / CGM-app-owned
+    /// banners, not to leave the phone silent for a real low at night.
+    static func cgmOwnershipSuppresses(_ type: GlucoseAlertType, trioAlertsEnabled: Bool) -> Bool {
+        guard !trioAlertsEnabled else { return false }
+        switch type {
+        case .low,
+             .urgentLow:
+            return false
+        case .carbsRequired,
+             .forecastedLow,
+             .high:
+            return true
+        }
+    }
+
+    private func cgmOwnershipSuppresses(_ type: GlucoseAlertType) -> Bool {
+        Self.cgmOwnershipSuppresses(type, trioAlertsEnabled: effectiveTrioAlertsEnabled)
+    }
+
     /// Two-stage: async-fetch the latest value (Core Data perform), then hop
     /// onto `evaluationQueue` to mutate `firingAlertIDs` safely.
     private func evaluateGlucoseAlarms() async {
         guard !isInLaunchQuietWindow else { return }
-        guard effectiveTrioAlertsEnabled else {
-            retractAllFiringIfNeeded()
-            return
-        }
         guard let latestValue = await fetchLatestReadingMgDL() else { return }
         let snapshot = alertsSnapshot
         let configuration = configurationSnapshot
@@ -161,6 +177,10 @@ final class GlucoseAlertCoordinator: Injectable {
         let sorted = snapshot.sorted { $0.type.priority < $1.type.priority }
         var urgentLowFiring = false
         for alarm in sorted where alarm.type.isReadingDriven {
+            if cgmOwnershipSuppresses(alarm.type) {
+                retractIfFiring(alarm)
+                continue
+            }
             if alarm.type == .low, urgentLowFiring {
                 retractIfFiring(alarm)
                 continue
@@ -205,11 +225,16 @@ final class GlucoseAlertCoordinator: Injectable {
 
     private func evaluateForecast(_ determination: Determination) {
         guard !isInLaunchQuietWindow else { return }
-        guard effectiveTrioAlertsEnabled else {
-            retractAllFiringIfNeeded()
+        let snapshot = alertsSnapshot
+        // Forecasted-low is deferred to the CGM companion when that toggle
+        // is on. Do not retract in-flight hypo alarms here — a determination
+        // arriving overnight used to wipe urgent-low / low after the merge.
+        if cgmOwnershipSuppresses(.forecastedLow) {
+            for alarm in snapshot where alarm.type == .forecastedLow {
+                retractIfFiring(alarm)
+            }
             return
         }
-        let snapshot = alertsSnapshot
         let configuration = configurationSnapshot
         let now = Date()
 
@@ -313,17 +338,6 @@ final class GlucoseAlertCoordinator: Injectable {
         guard firingAlertIDs.contains(alarm.id) else { return }
         firingAlertIDs.remove(alarm.id)
         trioAlertManager.retractAlert(identifier: alertID(for: alarm))
-    }
-
-    private func retractAllFiringIfNeeded() {
-        evaluationQueue.async { [weak self] in
-            guard let self, !self.firingAlertIDs.isEmpty else { return }
-            let snapshot = self.alertsSnapshot
-            for alarm in snapshot where self.firingAlertIDs.contains(alarm.id) {
-                self.trioAlertManager.retractAlert(identifier: self.alertID(for: alarm))
-            }
-            self.firingAlertIDs.removeAll()
-        }
     }
 
     private func shouldRetract(_ alarm: GlucoseAlert, latestMgDL: Decimal) -> Bool {

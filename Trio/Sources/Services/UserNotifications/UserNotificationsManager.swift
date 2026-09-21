@@ -187,7 +187,12 @@ final class BaseUserNotificationsManager: NSObject, UserNotificationsManager, In
 
     func requestNotificationPermissions(completion: @escaping (Bool) -> Void) {
         debug(.service, "requestNotificationPermissions")
-        notificationCenter.requestAuthorization(options: [.badge, .sound, .alert]) { granted, error in
+        // `.criticalAlert` is a no-op without Apple's Critical Alerts
+        // entitlement (this build does not ship that entitlement). Including
+        // it is still required so a future entitled build, or a user who
+        // already granted Critical Alerts, actually delivers `.critical`
+        // interruption — without this option iOS downgrades them.
+        notificationCenter.requestAuthorization(options: [.badge, .sound, .alert, .criticalAlert]) { granted, error in
             if granted {
                 debug(.service, "requestNotificationPermissions was granted")
                 DispatchQueue.main.async {
@@ -216,7 +221,16 @@ extension BaseUserNotificationsManager: UNUserNotificationCenterDelegate {
     ) {
         let userInfo = notification.request.content.userInfo
         if userInfo[AlertUserInfoKey.managerIdentifier.rawValue] is String {
-            completionHandler([.badge, .list])
+            // In-app modal covers non-critical Trio alerts while foregrounded.
+            // Critical (Override Silence & Focus) must still play sound even
+            // if Trio is sitting open on a nightstand — otherwise the UN is
+            // delivered silently and the only wake path is the AVAudioPlayer
+            // fallback, which can miss if the session fails to activate.
+            if notification.request.content.interruptionLevel == .critical {
+                completionHandler([.banner, .badge, .sound, .list])
+            } else {
+                completionHandler([.badge, .list])
+            }
             return
         }
         completionHandler([.banner, .badge, .sound, .list])

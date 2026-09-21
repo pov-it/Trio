@@ -141,4 +141,18 @@ import Testing
             )
         }
     }
+
+    @Test("One-time migration turns persisted low/urgentLow Silence override back on")
+    func migratesPersistedLowFamilyOverrideOn() {
+        var low = GlucoseAlert(type: .low)
+        low.overridesSilenceAndDND = false
+        var urgent = GlucoseAlert(type: .urgentLow)
+        urgent.overridesSilenceAndDND = false
+        var high = GlucoseAlert(type: .high)
+        high.overridesSilenceAndDND = false
+        let store = Self.makeStore(seed: [low, urgent, high])
+        #expect(store.alerts.first { $0.type == .low }?.overridesSilenceAndDND == true)
+        #expect(store.alerts.first { $0.type == .urgentLow }?.overridesSilenceAndDND == true)
+        #expect(store.alerts.first { $0.type == .high }?.overridesSilenceAndDND == false)
+    }
 }

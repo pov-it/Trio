@@ -70,4 +70,19 @@ import Testing
             type: .carbsRequired, latestMgDL: 0, thresholdMgDL: 50, recoveryMarginMgDL: 5
         ))
     }
+
+    @Test("CGM ownership never suppresses low or urgentLow") func cgmOwnershipKeepsHypoAlarms() {
+        for type in [GlucoseAlertType.low, .urgentLow] {
+            #expect(!GlucoseAlertCoordinator.cgmOwnershipSuppresses(type, trioAlertsEnabled: false))
+            #expect(!GlucoseAlertCoordinator.cgmOwnershipSuppresses(type, trioAlertsEnabled: true))
+        }
+    }
+
+    @Test("CGM ownership suppresses high and forecastedLow when Trio is deferred")
+    func cgmOwnershipSuppressesHighAndForecast() {
+        #expect(GlucoseAlertCoordinator.cgmOwnershipSuppresses(.high, trioAlertsEnabled: false))
+        #expect(GlucoseAlertCoordinator.cgmOwnershipSuppresses(.forecastedLow, trioAlertsEnabled: false))
+        #expect(!GlucoseAlertCoordinator.cgmOwnershipSuppresses(.high, trioAlertsEnabled: true))
+        #expect(!GlucoseAlertCoordinator.cgmOwnershipSuppresses(.forecastedLow, trioAlertsEnabled: true))
+    }
 }
