@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AABBCC00000000000000C0F4 /* AIInsights_MealGalleryModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0F4 /* AIInsights_MealGalleryModels.swift */; };
+		AABBCC00000000000000C0F5 /* AIInsights_MealCompanionShare.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0F5 /* AIInsights_MealCompanionShare.swift */; };
+		CA08000000000000000010C2 /* MealGalleryShareTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA08000000000000000010C1 /* MealGalleryShareTests.swift */; };
 		B8C9D0E1F2A3B4C5D6E7F8A9 /* AIInsights_AIServiceAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B8C9D0E1F2A3B4C5D6E7F8 /* AIInsights_AIServiceAdapter.swift */; };
 		AABBCC00000000000000C0CA /* AIInsightsAlcoholLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0BA /* AIInsightsAlcoholLogView.swift */; };
 		AABBCC00000000000000C0C9 /* AIInsights_AlcoholTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0B9 /* AIInsights_AlcoholTracker.swift */; };
@@ -1142,6 +1145,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AABBCC00000000000000B0F4 /* AIInsights_MealGalleryModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_MealGalleryModels.swift; sourceTree = SOURCE_ROOT; };
+		AABBCC00000000000000B0F5 /* AIInsights_MealCompanionShare.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_MealCompanionShare.swift; sourceTree = SOURCE_ROOT; };
+		CA08000000000000000010C1 /* MealGalleryShareTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MealGalleryShareTests.swift; sourceTree = "<group>"; };
 		A7B8C9D0E1F2A3B4C5D6E7F8 /* AIInsights_AIServiceAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_AIServiceAdapter.swift; sourceTree = SOURCE_ROOT; };
 		AABBCC00000000000000B0BA /* AIInsightsAlcoholLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/View/AIInsightsAlcoholLogView.swift; sourceTree = SOURCE_ROOT; };
 		AABBCC00000000000000B0B9 /* AIInsights_AlcoholTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_AlcoholTracker.swift; sourceTree = SOURCE_ROOT; };
@@ -3278,6 +3284,7 @@
 				38FCF3F125E9028E0078B0D1 /* Info.plist */,
 				CEE9A65D2BBC9F6500EB5194 /* CalibrationsTests.swift */,
 				CA02000000000000000010C1 /* DeliveryLimitsSyncTests.swift */,
+				CA08000000000000000010C1 /* MealGalleryShareTests.swift */,
 				CA07000000000000000010C1 /* TelemetrySendGateTests.swift */,
 				3BAAE60B2DE776630049589B /* DynamicISFEnableTests.swift */,
 				38FCF3F825E902C20078B0D1 /* FileStorageTests.swift */,
@@ -4901,6 +4908,8 @@
 				AABBCC00000000000000B0BD /* AIInsights_PeriodicRecap.swift */,
 				AABBCC00000000000000B0F1 /* AIInsights_RecapNotifier.swift */,
 				AABBCC00000000000000B0F2 /* AIInsights_MealGalleryStore.swift */,
+				AABBCC00000000000000B0F4 /* AIInsights_MealGalleryModels.swift */,
+				AABBCC00000000000000B0F5 /* AIInsights_MealCompanionShare.swift */,
 				AABBCC00000000000000B0F3 /* AIInsightsMealGalleryView.swift */,
 				9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */,
 				AABBCC00000000000000B0BE /* AIInsightsRecapView.swift */,
@@ -5353,6 +5362,8 @@
 				AABBCC00000000000000C0CD /* AIInsights_PeriodicRecap.swift in Sources */,
 				AABBCC00000000000000C0F1 /* AIInsights_RecapNotifier.swift in Sources */,
 				AABBCC00000000000000C0F2 /* AIInsights_MealGalleryStore.swift in Sources */,
+				AABBCC00000000000000C0F4 /* AIInsights_MealGalleryModels.swift in Sources */,
+				AABBCC00000000000000C0F5 /* AIInsights_MealCompanionShare.swift in Sources */,
 				AABBCC00000000000000C0F3 /* AIInsightsMealGalleryView.swift in Sources */,
 				C7C8D8354E63450CA571EC7F /* AIInsightsProvider.swift in Sources */,
 				AABBCC00000000000000C0CE /* AIInsightsRecapView.swift in Sources */,
@@ -6149,6 +6160,7 @@
 				DDDD10B12F4E22C000F9C645 /* PumpHistoryNativeConversionTests.swift in Sources */,
 				CEE9A65E2BBC9F6500EB5194 /* CalibrationsTests.swift in Sources */,
 				CA02000000000000000010C2 /* DeliveryLimitsSyncTests.swift in Sources */,
+				CA08000000000000000010C2 /* MealGalleryShareTests.swift in Sources */,
 				CA07000000000000000010C2 /* TelemetrySendGateTests.swift in Sources */,
 				BD8FC0622D6619E600B95AED /* OverrideStorageTests.swift in Sources */,
 				BD8FC0592D66189700B95AED /* TestAssembly.swift in Sources */,

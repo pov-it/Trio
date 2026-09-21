@@ -429,6 +429,13 @@ extension AIInsights {
             // store is idempotent (already-archived ids are skipped) and does its
             // downscale + write off the main thread, so this is cheap here.
             AIInsights.MealGalleryStore.shared.archive(recentResults)
+            // Companion share (opt-in, default off) for meals that have no photo
+            // and therefore never enter the gallery archive. Photographed meals
+            // are published from `archive` after the thumbnail hits disk.
+            // Local-first: the publisher returns immediately if sharing is off.
+            for result in recentResults where result.imageData == nil || result.imageData?.isEmpty == true {
+                AIInsights.MealCompanionPublisher.shared.publish(result: result, thumbnailJPEG: nil)
+            }
         }
 
         private func loadDraftDescription() {
@@ -1545,7 +1552,13 @@ extension AIInsights {
         }
 
         func sendToBolusCalculator(openBolusCalculator: Bool = true) {
-            guard let result = currentResult else { return }
+            sendToBolusCalculator(result: currentResult, openBolusCalculator: openBolusCalculator)
+        }
+
+        /// Reload macros into `FoodBolusHandoff` the same way the current-meal
+        /// button does. Used by the meal gallery "Use in Bolus Calculator" path.
+        func sendToBolusCalculator(result: FoodAnalysisResult?, openBolusCalculator: Bool = true) {
+            guard let result else { return }
             let itemNames = result.items.map(\.name).joined(separator: ", ")
             let handoff = FoodBolusHandoff(
                 carbs: result.totalCarbs,

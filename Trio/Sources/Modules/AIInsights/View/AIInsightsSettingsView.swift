@@ -286,6 +286,22 @@ extension AIInsights {
                 .listRowBackground(Color.chart)
 
                 Section(
+                    header: Text("Companion sharing", comment: "Companion meal share settings header"),
+                    footer: Text("Off by default. When enabled, newly saved FoodFinder meals write a meal-only payload (id, date, name, thumbnail, optional carbs) to a local SharedMeals outbox for a companion app. Glucose, IOB, COB, Nightscout URL/token, and the Trio therapy App Group are never included. CloudKit / a dedicated companion App Group still need your Apple Team — see DeveloperDocs/MealCompanionShare.md.", comment: "Companion meal share settings footer")
+                ) {
+                    Toggle(isOn: Binding(
+                        get: { MealCompanionPublisher.shared.isShareEnabled },
+                        set: { MealCompanionPublisher.shared.isShareEnabled = $0 }
+                    )) {
+                        Label(
+                            String(localized: "Share meals with companion", comment: "Opt-in companion meal share toggle"),
+                            systemImage: "person.2"
+                        )
+                    }
+                }
+                .listRowBackground(Color.chart)
+
+                Section(
                     header: Text("FoodFinder Providers", comment: "FoodFinder providers settings section header"),
                     footer: Text("OpenFoodFacts needs no key. USDA FoodData Central can improve fresh ingredient matches when you add your own API key.", comment: "FoodFinder providers settings footer")
                 ) {
