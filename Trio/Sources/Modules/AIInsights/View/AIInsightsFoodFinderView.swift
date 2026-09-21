@@ -89,7 +89,18 @@ extension AIInsights {
                 }
             }
             .sheet(isPresented: $showMealGallery) {
-                AIInsights.MealGalleryView(fallbackResults: state.recentResults)
+                AIInsights.MealGalleryView(
+                    fallbackResults: state.recentResults,
+                    onOpenInFoodFinder: { result in
+                        showMealGallery = false
+                        state.currentResult = result
+                    },
+                    onUseInBolusCalculator: { result in
+                        showMealGallery = false
+                        state.sendToBolusCalculator(result: result, openBolusCalculator: onHandoffComplete == nil)
+                        onHandoffComplete?()
+                    }
+                )
             }
             .simultaneousGesture(swipeBackGesture)
             .onAppear(perform: configureView)
