@@ -64,9 +64,9 @@ extension AIInsights {
         static func from(date: Date, calendar: Calendar = .current) -> MealSlot {
             let hour = calendar.component(.hour, from: date)
             switch hour {
-            case 5 ..< 11: return .breakfast
-            case 11 ..< 16: return .lunch
-            case 16 ..< 22: return .dinner
+            case Self.breakfast.startHour ..< Self.lunch.startHour: return .breakfast
+            case Self.lunch.startHour ..< Self.dinner.startHour: return .lunch
+            case Self.dinner.startHour ..< Self.other.startHour: return .dinner
             default: return .other
             }
         }
