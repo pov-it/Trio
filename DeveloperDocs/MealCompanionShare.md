@@ -1,14 +1,14 @@
-# Meal companion share (Mayee)
+# Meal companion share
 
-Trio can optionally publish a **meal-only** record when FoodFinder archives a meal, so a companion app (Mayee) can show the same photo / name / time without receiving therapy data.
+Trio can optionally publish a **meal-only** record when FoodFinder archives a meal so [Meals Companion](https://github.com/pov-it/meals-companion) can show the photo, name, and time. That app is a **separate public repo**; Trio only implements the publisher + this contract.
 
-This is **off by default**. Nothing is written until the user enables **Share meals with companion** in AI Settings or the meal gallery.
+This is **off by default**. Nothing is written until **Share meals with companion** is enabled in AI Settings or the meal gallery.
 
-Linux / this cloud agent cannot run Xcode, CloudKit, or a device. The Trio-side publisher, outbox, privacy checks, and settings exist in source; live CloudKit sharing still needs Marijn’s Apple Team.
+Linux / this cloud agent cannot run Xcode, CloudKit, or a device. No TestFlight or pairing success is claimed here.
 
 ## What is shared
 
-`SharedMealPayload` is an explicit allow-list:
+Local outbox JSON (`SharedMealPayload`) is an explicit allow-list:
 
 | Field | Notes |
 | --- | --- |
@@ -17,7 +17,22 @@ Linux / this cloud agent cannot run Xcode, CloudKit, or a device. The Trio-side 
 | `date` | Meal timestamp |
 | `mealName` | Optional |
 | `thumbnailFilename` | Optional; JPEG bytes stored beside the JSON in the outbox |
-| `carbs` | Optional grams |
+| `carbs` | Optional grams **in the local outbox only** |
+
+CloudKit `Meal` records (what the companion actually reads) use a **stricter** field set and **do not** include carbs:
+
+| Field | Type |
+| --- | --- |
+| `title` | String |
+| `photographedAt` | Date |
+| `photo` | CKAsset (JPEG) |
+| `ownerDisplayName` | String |
+
+`MealFeed` (one root record, shared):
+
+| Field | Type |
+| --- | --- |
+| `ownerDisplayName` | String |
 
 ## What is never shared
 
@@ -44,52 +59,55 @@ Application Support/SharedMealsOutbox/<uuid>.jpg   # if a thumbnail exists
 
 This is offline-first. Gallery archive does not wait on network. Thumbnails in `Application Support/MealGallery/` stay on the phone regardless of sharing.
 
-## CloudKit (not configured in this PR)
+## CloudKit contract (meals-companion)
 
-Preferred production path: **private CloudKit database + `CKShare` to Mayee**.
+Preferred production path: **private CloudKit database + `CKShare`**.
 
-That requires, on the Apple Developer team that signs Trio:
+Container (derived from Trio’s signing team, same pattern as the companion app):
 
-1. iCloud capability with CloudKit on the Trio App ID.
-2. A container, for example `iCloud.org.nightscout.<TEAMID>.trio.meals` — replace `TEAMID`; do not reuse a Nightscout secrets container.
-3. Record type `SharedMeal` in the CloudKit Dashboard with fields:
-   - `schemaVersion` (Int64)
-   - `date` (Date/Time)
-   - `mealName` (String)
-   - `carbs` (Double, optional)
-   - `thumbnailFilename` (String, optional)
-   - optional `thumbnail` (Asset) once you attach the JPEG as a `CKAsset`
-4. Mayee’s App ID must use the **same** container, plus CloudKit.
-5. Sharing UI (`UICloudSharingController` / `CKShare`) so Marijn can invite Mayee to a private-DB share. This PR does **not** present that UI; `CloudKitMealShareTransport` only saves to the **private** DB when a container identifier is set.
+```
+iCloud.org.pov-it.<TEAMID>.meals
+```
 
-To point Trio at a container without baking a Team ID into git:
+Example for team `Q6QCL8J6FN`: `iCloud.org.pov-it.Q6QCL8J6FN.meals`.
+
+Do **not** reuse Trio’s glucose/therapy iCloud container. Do not put glucose, IOB, COB, insulin, or Nightscout fields on these records. The companion ignores those keys even if a publisher writes them; still do not write them.
+
+Zone: `MealsZone`
+
+Record types: **`Meal`** and **`MealFeed`**. The older `SharedMeal` name is not used.
+
+Override the container without baking a Team ID into git (only if the derived identifier is wrong):
 
 ```
 UserDefaults key: ai_meal_companion_cloudkit_container
-Value:            iCloud.org.nightscout.<TEAMID>.trio.meals
+Value:            iCloud.org.pov-it.<TEAMID>.meals
 ```
 
-If the key is empty (the default), CloudKit is a no-op and the outbox is still the source of truth.
+If no team id is available (`TEAMID` / empty / `$(DEVELOPMENT_TEAM)` still unsubstituted) and the override is empty, CloudKit is a no-op and the outbox remains the source of truth.
 
-## Dedicated companion App Group (optional, separate from Trio)
+Trio will:
 
-If Mayee is another process on the same phone (extension / sibling app), register a **new** App Group, for example:
+1. Create/save `MealsZone` in the **private** DB.
+2. Upsert root `MealFeed` (`MealFeedRoot`) with `ownerDisplayName`.
+3. Save each opted-in meal as a `Meal` (title, photographedAt, photo, ownerDisplayName).
+4. Create a `CKShare` on that root when a share URL is not stored yet (`ai_meal_companion_share_url`).
 
-```
-group.org.nightscout.<TEAMID>.trio.companion-meals
-```
+Apple-side work that git cannot do:
 
-Do **not** add meal JSON to `group.org.nightscout.<TEAMID>.trio.trio-app-group`. The publisher refuses any suite name containing `trio-app-group`.
+1. Add this meals container as a **second** CloudKit container on the Trio App ID (keep glucose elsewhere).
+2. CloudKit Dashboard: record types `Meal` and `MealFeed` with the fields above; mark `Meal` queryable; **Deploy Schema to Production** before TestFlight.
+3. Invite the companion Apple ID (Messages / iCloud share URL). Pairing happens in meals-companion, not in Trio.
 
-Set the companion suite with:
+## Dedicated companion App Group (optional, same phone only)
+
+If a sibling process on the **same** phone needs the JSON, register a **new** App Group, for example `group.org.pov-it.<TEAMID>.meals`. Do **not** add meal JSON to the Trio therapy App Group. The publisher refuses any suite name containing `trio-app-group`.
 
 ```
 UserDefaults key: ai_meal_companion_app_group
 ```
 
-Then add that App Group to Trio **and** Mayee entitlements. This PR does not change `Trio.entitlements` (still only `$(APP_GROUP_ID)`).
-
-A push notification to Mayee (“new shared meal”) would be a later step: APNs on Mayee’s app, triggered after a successful CloudKit save. Not implemented here; the outbox / private-DB record is the data plane.
+This PR does not add that App Group to `Trio.entitlements`.
 
 ## Settings
 
@@ -98,9 +116,11 @@ A push notification to Mayee (“new shared meal”) would be a later step: APNs
 
 Same `UserDefaults` key: `ai_meal_companion_share_enabled` (bool, default `false`). This is **not** part of exported `TrioSettings`, so a settings backup cannot silently turn sharing on.
 
+Optional display name for `MealFeed` / `Meal.ownerDisplayName`: `ai_meal_companion_owner_display_name`.
+
 ## Gallery meal slots
 
-Auto folders use the **local hour** of `date` (`Calendar.current`, so Europe/Amsterdam when the phone is on that zone):
+Auto folders use the **local hour** of `date` (`Calendar.current`):
 
 | Slot | Local hours |
 | --- | --- |
@@ -109,4 +129,4 @@ Auto folders use the **local hour** of `date` (`Calendar.current`, so Europe/Ams
 | Dinner | 16:00–21:59 |
 | Other | 22:00–04:59 |
 
-Manual groups/tags (e.g. “halve stokbroodjes”) are stored on the gallery index and never leave the phone unless companion sharing is on (and even then only the meal-only payload is published, not the tag list).
+Manual groups/tags stay on the gallery index. They are not CloudKit fields.

@@ -287,7 +287,7 @@ extension AIInsights {
 
                 Section(
                     header: Text("Companion sharing", comment: "Companion meal share settings header"),
-                    footer: Text("Off by default. When enabled, newly saved FoodFinder meals write a meal-only payload (id, date, name, thumbnail, optional carbs) to a local SharedMeals outbox for a companion app. Glucose, IOB, COB, Nightscout URL/token, and the Trio therapy App Group are never included. CloudKit / a dedicated companion App Group still need your Apple Team — see DeveloperDocs/MealCompanionShare.md.", comment: "Companion meal share settings footer")
+                    footer: Text("Off by default. When enabled, newly saved FoodFinder meals write a meal-only payload (name, time, photo) to a local outbox and to CloudKit records Meal / MealFeed in iCloud.org.pov-it.<TEAM>.meals for the Meals Companion app. Glucose, IOB, COB, Nightscout URL/token, and the Trio therapy App Group are never included. See DeveloperDocs/MealCompanionShare.md and https://github.com/pov-it/meals-companion.", comment: "Companion meal share settings footer")
                 ) {
                     Toggle(isOn: Binding(
                         get: { MealCompanionPublisher.shared.isShareEnabled },

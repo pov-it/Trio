@@ -15,10 +15,10 @@
 //  Apple Team; until that identifier is configured this publisher stays in
 //  Application Support and never copies Nightscout secrets anywhere.
 //
-//  CloudKit (private DB + CKShare to Mayee) needs Marijn's Apple Team, an
-//  iCloud container, and the CloudKit capability on the App ID. This file
-//  implements the Trio-side protocol + an offline outbox. The CloudKit
-//  transport compiles and no-ops until a container identifier is set.
+//  CloudKit publisher matches pov-it/meals-companion:
+//    container iCloud.org.pov-it.<TEAMID>.meals
+//    zone MealsZone, records Meal + MealFeed
+//    fields title / photographedAt / photo / ownerDisplayName (never glucose).
 //  See DeveloperDocs/MealCompanionShare.md.
 //
 
@@ -155,14 +155,43 @@ extension AIInsights {
 
     // MARK: - Settings (opt-in, default OFF)
 
+    /// CloudKit record contract for `pov-it/meals-companion`. Keep field names
+    /// in lockstep with `MealsKit/MealModels.swift` in that repo.
+    enum MealCloudKitContract {
+        static let zoneName = "MealsZone"
+        static let mealRecordType = "Meal"
+        static let feedRecordType = "MealFeed"
+        static let feedRecordName = "MealFeedRoot"
+        static let titleKey = "title"
+        static let photographedAtKey = "photographedAt"
+        static let photoKey = "photo"
+        static let ownerDisplayNameKey = "ownerDisplayName"
+        static let mealFieldKeys: [String] = [
+            titleKey, photographedAtKey, photoKey, ownerDisplayNameKey
+        ]
+        static let containerBundleBase = "org.pov-it"
+        static let containerSuffix = "meals"
+
+        /// `iCloud.org.pov-it.<TEAMID>.meals`. Nil when the team id is missing
+        /// or still a build placeholder (`TEAMID`, `$(DEVELOPMENT_TEAM)`).
+        static func containerIdentifier(teamID: String) -> String? {
+            let trimmed = teamID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            let upper = trimmed.uppercased()
+            if upper == "TEAMID" || trimmed.contains("$(") { return nil }
+            return "iCloud.\(containerBundleBase).\(trimmed).\(containerSuffix)"
+        }
+    }
+
     enum MealCompanionShareSettings {
         static let enabledKey = "ai_meal_companion_share_enabled"
-        /// Optional CloudKit container, e.g. `iCloud.org.nightscout.<TEAMID>.trio.meals`.
-        /// Empty (the default) means the CloudKit transport is a no-op.
+        /// Optional override. Empty means derive `iCloud.org.pov-it.<TEAM>.meals`.
         static let cloudKitContainerKey = "ai_meal_companion_cloudkit_container"
         /// Optional companion App Group identifier. MUST NOT be `trio-app-group`.
         /// Empty (the default) means we never touch an App Group suite.
         static let companionAppGroupKey = "ai_meal_companion_app_group"
+        static let ownerDisplayNameKey = "ai_meal_companion_owner_display_name"
+        static let shareURLKey = "ai_meal_companion_share_url"
 
         /// Hard-coded Trio therapy App Group suffix — never used for meals.
         static let forbiddenTrioAppGroupSuffix = "trio-app-group"
@@ -176,8 +205,24 @@ extension AIInsights {
         }
 
         static func cloudKitContainerIdentifier(_ defaults: UserDefaults = .standard) -> String {
-            (defaults.string(forKey: cloudKitContainerKey) ?? "")
+            let override = (defaults.string(forKey: cloudKitContainerKey) ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !override.isEmpty { return override }
+            return MealCloudKitContract.containerIdentifier(teamID: signingTeamID) ?? ""
+        }
+
+        /// `TeamID` is substituted from `$(DEVELOPMENT_TEAM)` in Info.plist.
+        static var signingTeamID: String {
+            let fromInfo = Bundle.main.object(forInfoDictionaryKey: "TeamID") as? String
+            let fromBundle = Bundle.main.object(forInfoDictionaryKey: "DEVELOPMENT_TEAM") as? String
+            return (fromInfo ?? fromBundle ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        static func ownerDisplayName(_ defaults: UserDefaults = .standard) -> String {
+            let stored = (defaults.string(forKey: ownerDisplayNameKey) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return stored.isEmpty ? "Meal" : stored
         }
 
         static func companionAppGroupIdentifier(_ defaults: UserDefaults = .standard) -> String? {
@@ -363,15 +408,15 @@ extension AIInsights {
         }
     }
 
-    // MARK: - CloudKit (compiles; no-ops until a container ID is configured)
+    // MARK: - CloudKit (Meal / MealFeed in iCloud.org.pov-it.<TEAM>.meals)
 
     final class CloudKitMealShareTransport: MealCompanionTransport, @unchecked Sendable {
-        static let recordType = "SharedMeal"
-
         private let defaults: UserDefaults
+        private let fileManager: FileManager
 
-        init(defaults: UserDefaults = .standard) {
+        init(defaults: UserDefaults = .standard, fileManager: FileManager = .default) {
             self.defaults = defaults
+            self.fileManager = fileManager
         }
 
         func publish(_ record: SharedMealRecord) async {
@@ -380,28 +425,80 @@ extension AIInsights {
             guard !containerID.isEmpty else { return }
 
             #if canImport(CloudKit)
-                let container = CKContainer(identifier: containerID)
-                let privateDB = container.privateCloudDatabase
-                let recordID = CKRecord.ID(recordName: record.payload.id.uuidString)
-                let ckRecord = CKRecord(recordType: Self.recordType, recordID: recordID)
-                ckRecord["schemaVersion"] = record.payload.schemaVersion as NSNumber
-                ckRecord["date"] = record.payload.date as NSDate
-                if let mealName = record.payload.mealName {
-                    ckRecord["mealName"] = mealName as NSString
-                }
-                if let carbs = record.payload.carbs {
-                    ckRecord["carbs"] = carbs as NSNumber
-                }
-                if let filename = record.payload.thumbnailFilename {
-                    ckRecord["thumbnailFilename"] = filename as NSString
-                }
-                // Intentionally no glucose / IOB / COB / Nightscout fields.
                 do {
-                    _ = try await privateDB.save(ckRecord)
+                    try await saveToCloudKit(record, containerID: containerID)
                 } catch {
                     // Local outbox already holds the meal; CloudKit can catch up later.
                 }
             #endif
         }
+
+        #if canImport(CloudKit)
+            private func saveToCloudKit(_ record: SharedMealRecord, containerID: String) async throws {
+                let container = CKContainer(identifier: containerID)
+                let database = container.privateCloudDatabase
+                let zoneID = CKRecordZone.ID(zoneName: MealCloudKitContract.zoneName, ownerName: CKCurrentUserDefaultName)
+                try await ensureZone(database: database, zoneID: zoneID)
+
+                let owner = MealCompanionShareSettings.ownerDisplayName(defaults)
+                let feedID = CKRecord.ID(
+                    recordName: MealCloudKitContract.feedRecordName,
+                    zoneID: zoneID
+                )
+                let feed = CKRecord(recordType: MealCloudKitContract.feedRecordType, recordID: feedID)
+                feed[MealCloudKitContract.ownerDisplayNameKey] = owner as NSString
+                _ = try await database.save(feed)
+
+                let mealID = CKRecord.ID(recordName: record.payload.id.uuidString, zoneID: zoneID)
+                let meal = CKRecord(recordType: MealCloudKitContract.mealRecordType, recordID: mealID)
+                meal.parent = CKRecord.Reference(recordID: feedID, action: .none)
+                meal[MealCloudKitContract.titleKey] = (record.payload.mealName ?? "Meal") as NSString
+                meal[MealCloudKitContract.photographedAtKey] = record.payload.date as NSDate
+                meal[MealCloudKitContract.ownerDisplayNameKey] = owner as NSString
+                if let jpeg = record.thumbnailJPEG, !jpeg.isEmpty,
+                   let asset = try? ckAsset(from: jpeg, id: record.payload.id)
+                {
+                    meal[MealCloudKitContract.photoKey] = asset
+                }
+                // Never write carbs / glucose / IOB / COB / Nightscout onto Meal.
+                _ = try await database.save(meal)
+
+                if defaults.string(forKey: MealCompanionShareSettings.shareURLKey) == nil {
+                    try await ensureShare(database: database, feed: feed)
+                }
+            }
+
+            private func ensureZone(database: CKDatabase, zoneID: CKRecordZone.ID) async throws {
+                let zone = CKRecordZone(zoneID: zoneID)
+                do {
+                    _ = try await database.save(zone)
+                } catch let error as CKError where error.code == .serverRecordChanged || error.code == .zoneNotFound {
+                    // zoneNotFound on save is unexpected; serverRecordChanged means it exists.
+                } catch let error as CKError where error.code == .networkFailure || error.code == .networkUnavailable {
+                    throw error
+                } catch {
+                    // Zone may already exist.
+                }
+            }
+
+            private func ensureShare(database: CKDatabase, feed: CKRecord) async throws {
+                let share = CKShare(rootRecord: feed)
+                share.publicPermission = .none
+                _ = try await database.save(share)
+                if let url = share.url?.absoluteString {
+                    defaults.set(url, forKey: MealCompanionShareSettings.shareURLKey)
+                }
+            }
+
+            private func ckAsset(from jpeg: Data, id: UUID) throws -> CKAsset {
+                let dir = fileManager.temporaryDirectory.appendingPathComponent("MealCompanionCK", isDirectory: true)
+                if !fileManager.fileExists(atPath: dir.path) {
+                    try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+                }
+                let url = dir.appendingPathComponent("\(id.uuidString).jpg")
+                try jpeg.write(to: url, options: .atomic)
+                return CKAsset(fileURL: url)
+            }
+        #endif
     }
 }

@@ -317,4 +317,42 @@ struct MealGalleryShareTests {
         defaults.removePersistentDomain(forName: suite)
         try? FileManager.default.removeItem(at: dir)
     }
+
+    @Test("CloudKit container is iCloud.org.pov-it.<TEAM>.meals")
+    func cloudKitContainerMatchesCompanion() {
+        #expect(
+            AIInsights.MealCloudKitContract.containerIdentifier(teamID: "Q6QCL8J6FN")
+                == "iCloud.org.pov-it.Q6QCL8J6FN.meals"
+        )
+        #expect(AIInsights.MealCloudKitContract.containerIdentifier(teamID: "TEAMID") == nil)
+        #expect(AIInsights.MealCloudKitContract.containerIdentifier(teamID: "$(DEVELOPMENT_TEAM)") == nil)
+        #expect(AIInsights.MealCloudKitContract.containerIdentifier(teamID: "  ") == nil)
+    }
+
+    @Test("CloudKit Meal / MealFeed contract matches meals-companion")
+    func cloudKitRecordContract() {
+        #expect(AIInsights.MealCloudKitContract.zoneName == "MealsZone")
+        #expect(AIInsights.MealCloudKitContract.mealRecordType == "Meal")
+        #expect(AIInsights.MealCloudKitContract.feedRecordType == "MealFeed")
+        #expect(AIInsights.MealCloudKitContract.titleKey == "title")
+        #expect(AIInsights.MealCloudKitContract.photographedAtKey == "photographedAt")
+        #expect(AIInsights.MealCloudKitContract.photoKey == "photo")
+        #expect(AIInsights.MealCloudKitContract.ownerDisplayNameKey == "ownerDisplayName")
+        #expect(!AIInsights.MealCloudKitContract.mealFieldKeys.contains("carbs"))
+        #expect(!AIInsights.MealCloudKitContract.mealFieldKeys.contains("glucose"))
+        #expect(!AIInsights.MealCloudKitContract.mealFieldKeys.contains("SharedMeal"))
+    }
+
+    @Test("UserDefaults override wins over derived CloudKit container")
+    func cloudKitContainerOverride() {
+        let suite = "MealGalleryShareTests.ck.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defaults.set("iCloud.org.pov-it.EXAMPLE.meals", forKey: AIInsights.MealCompanionShareSettings.cloudKitContainerKey)
+        #expect(
+            AIInsights.MealCompanionShareSettings.cloudKitContainerIdentifier(defaults)
+                == "iCloud.org.pov-it.EXAMPLE.meals"
+        )
+        defaults.removePersistentDomain(forName: suite)
+    }
 }

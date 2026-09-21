@@ -174,16 +174,7 @@ private struct HubMenuCard: View {
                     .font(.caption.bold())
             }
             .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    // Glassmorphism effect background
-                    .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white.opacity(0.8))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(colorScheme == .dark ? Color.white.opacity(0.1) : Color.gray.opacity(0.2), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
+            .glassPanel(tint: gradientColors.first, tintOpacity: 0.12, strokeOpacity: 0.22)
         }
     }
 }

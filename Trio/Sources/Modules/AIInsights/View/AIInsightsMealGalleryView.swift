@@ -956,7 +956,7 @@ extension AIInsights {
                         }
                     } footer: {
                         Text(String(
-                            localized: "Off by default. When on, newly archived meals write a meal-only payload (name, time, thumbnail, optional carbs) to a local SharedMeals outbox. Glucose, IOB, COB, and Nightscout URL/token are never included. CloudKit / a dedicated companion App Group need your Apple Team — see DeveloperDocs/MealCompanionShare.md. This is not the Trio therapy App Group.",
+                            localized: "Off by default. When on, newly archived meals write a meal-only payload (name, time, photo) to a local outbox and CloudKit Meal / MealFeed records in iCloud.org.pov-it.<TEAM>.meals for Meals Companion. Glucose, IOB, COB, and Nightscout URL/token are never included. This is not the Trio therapy App Group. See https://github.com/pov-it/meals-companion.",
                             comment: "Companion meal share privacy footer"
                         ))
                     }

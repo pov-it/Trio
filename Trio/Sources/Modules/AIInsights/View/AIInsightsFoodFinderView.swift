@@ -1605,9 +1605,9 @@ extension AIInsights {
                         }
                     }
                     .frame(width: 48, height: 48)
-                    .background(
-                        Circle()
-                            .fill((tint ?? Color.accentColor).opacity(colorScheme == .dark ? 0.25 : 0.14))
+                    .glassMaterialFill(Circle())
+                    .overlay(
+                        Circle().fill((tint ?? Color.accentColor).opacity(colorScheme == .dark ? 0.22 : 0.12))
                     )
 
                     Text(title)
