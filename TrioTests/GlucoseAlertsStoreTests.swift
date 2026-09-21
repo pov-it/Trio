@@ -4,7 +4,10 @@ import Testing
 @testable import Trio
 
 @Suite("Trio Alerts: GlucoseAlertsStore seed + backfill", .serialized) struct GlucoseAlertsStoreTests {
-    private static func makeStore(seed: [GlucoseAlert]? = nil) -> GlucoseAlertsStore {
+    private static func makeStore(
+        seed: [GlucoseAlert]? = nil,
+        config: GlucoseAlertConfiguration? = nil
+    ) -> GlucoseAlertsStore {
         let suiteName = "GlucoseAlertsStoreTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
@@ -13,6 +16,10 @@ import Testing
         if let seed {
             let data = try? JSONEncoder().encode(seed)
             defaults.set(data, forKey: alertsKey)
+        }
+        if let config {
+            let data = try? JSONEncoder().encode(config)
+            defaults.set(data, forKey: configKey)
         }
         return GlucoseAlertsStore(defaults: defaults, alertsKey: alertsKey, configKey: configKey)
     }
@@ -140,5 +147,33 @@ import Testing
                 "Expected \(type) to be fully covered by the default .always seed"
             )
         }
+    }
+
+    @Test("One-time migration turns persisted low/urgentLow Silence override back on")
+    func migratesPersistedLowFamilyOverrideOn() {
+        var low = GlucoseAlert(type: .low)
+        low.overridesSilenceAndDND = false
+        var urgent = GlucoseAlert(type: .urgentLow)
+        urgent.overridesSilenceAndDND = false
+        var high = GlucoseAlert(type: .high)
+        high.overridesSilenceAndDND = false
+        let store = Self.makeStore(seed: [low, urgent, high])
+        #expect(store.alerts.first { $0.type == .low }?.overridesSilenceAndDND == true)
+        #expect(store.alerts.first { $0.type == .urgentLow }?.overridesSilenceAndDND == true)
+        #expect(store.alerts.first { $0.type == .high }?.overridesSilenceAndDND == false)
+    }
+
+    @Test("One-time migration turns Trio-owned glucose alerts back on")
+    func migratesTrioOwnsGlucoseAlertsOn() {
+        var config = GlucoseAlertConfiguration()
+        config.forceTrioAlertsWhenCGMProvidesOwn = false
+        let store = Self.makeStore(config: config)
+        #expect(store.configuration.forceTrioAlertsWhenCGMProvidesOwn == true)
+    }
+
+    @Test("Fresh configuration defaults to Trio-owned glucose alerts")
+    func freshConfigTrioOwnsAlerts() {
+        let store = Self.makeStore()
+        #expect(store.configuration.forceTrioAlertsWhenCGMProvidesOwn == true)
     }
 }

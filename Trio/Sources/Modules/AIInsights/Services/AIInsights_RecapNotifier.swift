@@ -52,7 +52,10 @@ extension AIInsights {
             case .denied:
                 return false
             case .notDetermined:
-                let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+                // Never request a narrower option set than the glucose-alert
+                // pipeline: a first-grant race here would lock the user into
+                // alerts-without-critical and dilute overnight hypo delivery.
+                let granted = (try? await center.requestAuthorization(options: [.badge, .sound, .alert, .criticalAlert])) ?? false
                 return granted
             @unknown default:
                 return false

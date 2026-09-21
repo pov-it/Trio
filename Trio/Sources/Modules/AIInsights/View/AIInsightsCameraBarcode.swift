@@ -301,16 +301,23 @@ extension AIInsights {
     // MARK: - Barcode Scanner View (AVFoundation)
 
     /// A SwiftUI wrapper around AVCaptureSession for scanning barcodes.
+    /// When `dismissOnScan` is false the session stays open so multiple
+    /// products can be attached to one in-progress meal; the user dismisses
+    /// with Done when finished.
     struct BarcodeScannerView: UIViewControllerRepresentable {
         @Environment(\.dismiss) var dismiss
+        var dismissOnScan: Bool = true
         var onBarcodeScanned: (String) -> Void
 
         func makeUIViewController(context: Context) -> BarcodeScannerViewController {
             let vc = BarcodeScannerViewController()
+            vc.dismissOnScan = dismissOnScan
             vc.onBarcodeScanned = { barcode in
                 onBarcodeScanned(barcode)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                    dismiss()
+                if dismissOnScan {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        dismiss()
+                    }
                 }
             }
             vc.onCancel = {
@@ -325,6 +332,7 @@ extension AIInsights {
     class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
         var onBarcodeScanned: ((String) -> Void)?
         var onCancel: (() -> Void)?
+        var dismissOnScan: Bool = true
 
         private var captureSession: AVCaptureSession?
         private var previewLayer: AVCaptureVideoPreviewLayer?
@@ -367,9 +375,12 @@ extension AIInsights {
 
             captureSession = session
 
-            // Cancel button
+            // Cancel / Done button
             let cancelButton = UIButton(type: .system)
-            cancelButton.setTitle(NSLocalizedString("Cancel", comment: "Cancel barcode scan"), for: .normal)
+            let cancelTitle = dismissOnScan
+                ? NSLocalizedString("Cancel", comment: "Cancel barcode scan")
+                : NSLocalizedString("Done", comment: "Finish barcode scanning")
+            cancelButton.setTitle(cancelTitle, for: .normal)
             cancelButton.setTitleColor(.white, for: .normal)
             cancelButton.titleLabel?.font = .boldSystemFont(ofSize: 17)
             cancelButton.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
@@ -414,7 +425,9 @@ extension AIInsights {
 
             // Instruction label
             let label = UILabel()
-            label.text = NSLocalizedString("Point at a barcode", comment: "Barcode scanner instruction")
+            label.text = dismissOnScan
+                ? NSLocalizedString("Point at a barcode", comment: "Barcode scanner instruction")
+                : NSLocalizedString("Scan products, then tap Done", comment: "Barcode scanner multi-scan instruction")
             label.textColor = .white
             label.font = .systemFont(ofSize: 15, weight: .medium)
             label.textAlignment = .center
@@ -482,7 +495,6 @@ extension AIInsights {
             else { return }
 
             hasScanned = true
-            captureSession?.stopRunning()
 
             // Haptic feedback
             let generator = UINotificationFeedbackGenerator()
@@ -490,6 +502,14 @@ extension AIInsights {
 
             showScanSuccess()
             onBarcodeScanned?(barcode)
+
+            if dismissOnScan {
+                captureSession?.stopRunning()
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                    self?.resetForNextScan()
+                }
+            }
         }
 
         private func showScanSuccess() {
@@ -514,6 +534,21 @@ extension AIInsights {
             UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut]) {
                 check.alpha = 1
                 check.transform = .identity
+            }
+            check.tag = 9_401
+        }
+
+        private func resetForNextScan() {
+            hasScanned = false
+            scanFrameView?.layer.borderColor = UIColor.systemBlue.cgColor
+            scanFrameView?.layer.borderWidth = 2
+            instructionLabel?.text = NSLocalizedString("Scan products, then tap Done", comment: "Barcode scanner multi-scan instruction")
+            instructionLabel?.textColor = .white
+            view.viewWithTag(9_401)?.removeFromSuperview()
+            if captureSession?.isRunning == false {
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    self?.captureSession?.startRunning()
+                }
             }
         }
 

@@ -168,11 +168,10 @@ extension GlucoseAlerts {
 
         // MARK: - Sorted lists
 
-        /// Mirror of `GlucoseAlertCoordinator.shouldRespect(alarm:)`'s
-        /// CGM-ownership branch: when "Use CGM App Alerts" is ON and the
-        /// active CGM provides its own glucose alerts, the coordinator
-        /// silences reading-driven types. The view surfaces this by moving
-        /// those alarms into a dedicated section.
+        /// Mirror of `GlucoseAlertCoordinator`'s CGM-ownership branch: when
+        /// "Use CGM App Alerts" is ON, Trio still fires hypo alarms (low /
+        /// urgent-low) so overnight wakes are not left to the companion app
+        /// alone. High and forecasted-low are the types actually deferred.
         private var isCGMSuppressionActive: Bool {
             !store.configuration.forceTrioAlertsWhenCGMProvidesOwn && state.cgmProvidesOwnAlerts
         }
@@ -180,7 +179,7 @@ extension GlucoseAlerts {
         private var cgmHandledAlerts: [GlucoseAlert] {
             guard isCGMSuppressionActive else { return [] }
             return store.alerts
-                .filter { $0.isEnabled && $0.type.isReadingDriven }
+                .filter { $0.isEnabled && ($0.type == .high || $0.type == .forecastedLow) }
                 .sorted { lhs, rhs in
                     lhs.type.priority < rhs.type.priority
                 }
@@ -194,7 +193,7 @@ extension GlucoseAlerts {
             if state.cgmProvidesOwnAlerts {
                 return String(
                     localized:
-                    "Your CGM app handles alerts (Dexcom G6 / One, G7 / One+, or xDrip4iOS). Turn off to let Trio alert you."
+                    "Trio owns Low / Urgent Low even when this is on. Turn it on only if you want Dexcom or xDrip to handle High / forecasted-low instead of Trio."
                 )
             }
             return String(
