@@ -71,12 +71,17 @@ final class TrioUserNotificationAlertScheduler {
             // Honor playsSound: false — still a critical UN, but silent.
             return isCritical ? .defaultCriticalSound(withAudioVolume: 0) : nil
         case let .sound(name):
-            if let filename = soundURL?.lastPathComponent {
-                let unName = UNNotificationSoundName(rawValue: filename)
-                return isCritical ? .criticalSoundNamed(unName) : UNNotificationSound(named: unName)
+            if isCritical {
+                // Pre-merge main used the system critical sound for LOWALERT
+                // so DND breakthrough did not depend on copying a bundled
+                // .caf into Library/Sounds. Keep that UN sound; the
+                // in-process player still loops the user-selected file.
+                return .defaultCritical
             }
-            let unName = UNNotificationSoundName(name)
-            return isCritical ? .criticalSoundNamed(unName) : UNNotificationSound(named: unName)
+            if let filename = soundURL?.lastPathComponent {
+                return UNNotificationSound(named: UNNotificationSoundName(rawValue: filename))
+            }
+            return UNNotificationSound(named: UNNotificationSoundName(name))
         }
     }
 }

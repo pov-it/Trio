@@ -43,6 +43,7 @@ final class GlucoseAlertsStore: ObservableObject {
             from: defaults,
             key: configKey
         ) ?? GlucoseAlertConfiguration()
+        migrateTrioOwnsGlucoseAlertsIfNeeded()
         bind()
     }
 
@@ -74,6 +75,22 @@ final class GlucoseAlertsStore: ObservableObject {
         if changed {
             encode(alerts, to: alertsKey)
         }
+    }
+
+    /// Pre-merge `main` always posted glucose alarms from Trio. The
+    /// upstream/dev rewrite defaulted `forceTrioAlertsWhenCGMProvidesOwn`
+    /// off, which deferred to a companion app. Restore Trio-owned alarms
+    /// once; the Glucose Alarms toggle can still opt back into CGM-app
+    /// alerts afterward.
+    private static let trioOwnsGlucoseAlertsMigrationKey = "trio.glucoseAlerts.trioOwnsAlerts.v1"
+
+    private func migrateTrioOwnsGlucoseAlertsIfNeeded() {
+        guard !defaults.bool(forKey: Self.trioOwnsGlucoseAlertsMigrationKey) else { return }
+        if !configuration.forceTrioAlertsWhenCGMProvidesOwn {
+            configuration.forceTrioAlertsWhenCGMProvidesOwn = true
+            encode(configuration, to: configKey)
+        }
+        defaults.set(true, forKey: Self.trioOwnsGlucoseAlertsMigrationKey)
     }
 
     /// Seed every glucose alarm enabled. Users running a stock CGM app for

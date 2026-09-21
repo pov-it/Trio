@@ -187,11 +187,11 @@ final class BaseUserNotificationsManager: NSObject, UserNotificationsManager, In
 
     func requestNotificationPermissions(completion: @escaping (Bool) -> Void) {
         debug(.service, "requestNotificationPermissions")
-        // `.criticalAlert` is a no-op without Apple's Critical Alerts
-        // entitlement (this build does not ship that entitlement). Including
-        // it is still required so a future entitled build, or a user who
-        // already granted Critical Alerts, actually delivers `.critical`
-        // interruption — without this option iOS downgrades them.
+        // `.criticalAlert` matches pre-merge main. The entitlements file
+        // includes `com.apple.developer.usernotifications.critical-alerts`
+        // (restored from main; dropped by the upstream/dev merge). iOS only
+        // honors true critical interruption if that capability is also
+        // enabled on the App ID / provisioning profile.
         notificationCenter.requestAuthorization(options: [.badge, .sound, .alert, .criticalAlert]) { granted, error in
             if granted {
                 debug(.service, "requestNotificationPermissions was granted")
@@ -216,23 +216,11 @@ final class BaseUserNotificationsManager: NSObject, UserNotificationsManager, In
 extension BaseUserNotificationsManager: UNUserNotificationCenterDelegate {
     func userNotificationCenter(
         _: UNUserNotificationCenter,
-        willPresent notification: UNNotification,
+        willPresent _: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        let userInfo = notification.request.content.userInfo
-        if userInfo[AlertUserInfoKey.managerIdentifier.rawValue] is String {
-            // In-app modal covers non-critical Trio alerts while foregrounded.
-            // Critical (Override Silence & Focus) must still play sound even
-            // if Trio is sitting open on a nightstand — otherwise the UN is
-            // delivered silently and the only wake path is the AVAudioPlayer
-            // fallback, which can miss if the session fails to activate.
-            if notification.request.content.interruptionLevel == .critical {
-                completionHandler([.banner, .badge, .sound, .list])
-            } else {
-                completionHandler([.badge, .list])
-            }
-            return
-        }
+        // Pre-merge main always presented banner + sound while Trio was
+        // foregrounded (nightstand). Do not swallow Trio-alert sound here.
         completionHandler([.banner, .badge, .sound, .list])
     }
 

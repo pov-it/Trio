@@ -193,7 +193,7 @@ extension GlucoseAlerts {
             if state.cgmProvidesOwnAlerts {
                 return String(
                     localized:
-                    "Your CGM app handles alerts (Dexcom G6 / One, G7 / One+, or xDrip4iOS). Turn off to let Trio alert you."
+                    "Trio owns Low / Urgent Low even when this is on. Turn it on only if you want Dexcom or xDrip to handle High / forecasted-low instead of Trio."
                 )
             }
             return String(
