@@ -37,12 +37,12 @@ final class GlucoseAlertsStore: ObservableObject {
             }
             alerts = migrated
         }
-        migrateLowFamilySilenceOverrideIfNeeded()
         configuration = Self.decode(
             GlucoseAlertConfiguration.self,
             from: defaults,
             key: configKey
         ) ?? GlucoseAlertConfiguration()
+        migrateLowFamilySilenceOverrideIfNeeded()
         migrateTrioOwnsGlucoseAlertsIfNeeded()
         bind()
     }
