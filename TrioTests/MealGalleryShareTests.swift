@@ -384,4 +384,56 @@ struct MealGalleryShareTests {
         #expect(AIInsights.MealCompanionShareSettings.resolvedTeamID(signingTeamID: "TEAMID") == "Q6QCL8J6FN")
         #expect(AIInsights.MealCompanionShareSettings.resolvedTeamID(signingTeamID: "Q6QCL8J6FN") == "Q6QCL8J6FN")
     }
+
+    @Test("Invite URLs must be https iCloud share links")
+    func inviteURLValidation() {
+        let accept = [
+            "https://www.icloud.com/share/ABC123",
+            "https://share.icloud.com/share/xyz",
+            "https://icloud.com/share/0a1b2c"
+        ]
+        for raw in accept {
+            #expect(AIInsights.MealCompanionShareSettings.validatedICloudShareURL(from: raw) != nil)
+        }
+
+        let reject = [
+            "",
+            "   ",
+            "not a url",
+            "http://www.icloud.com/share/ABC",
+            "https://example.com/share/ABC",
+            "https://www.icloud.com/",
+            "https://www.icloud.com",
+            "file:///tmp/share",
+            "cloudkit-share://abc",
+            "https://evil-icloud.com.example/share/x"
+        ]
+        for raw in reject {
+            #expect(AIInsights.MealCompanionShareSettings.validatedICloudShareURL(from: raw) == nil)
+        }
+    }
+
+    @Test("Stored invite URL ignores invalid values and never invents a link")
+    func storedShareURLIgnoresInvalidAndDoesNotInvent() {
+        let suite = "MealGalleryShareTests.shareurl.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+
+        #expect(AIInsights.MealCompanionShareSettings.shareURLString(defaults) == nil)
+
+        defaults.set("garbage", forKey: AIInsights.MealCompanionShareSettings.shareURLKey)
+        #expect(AIInsights.MealCompanionShareSettings.shareURLString(defaults) == nil)
+
+        AIInsights.MealCompanionShareSettings.persistShareURLString("https://example.com/nope", defaults: defaults)
+        #expect(AIInsights.MealCompanionShareSettings.shareURLString(defaults) == nil)
+
+        AIInsights.MealCompanionShareSettings.persistShareURL(nil, defaults: defaults)
+        #expect(AIInsights.MealCompanionShareSettings.shareURLString(defaults) == nil)
+
+        let real = "https://www.icloud.com/share/MarijnToken"
+        AIInsights.MealCompanionShareSettings.persistShareURLString(real, defaults: defaults)
+        #expect(AIInsights.MealCompanionShareSettings.shareURLString(defaults) == real)
+
+        defaults.removePersistentDomain(forName: suite)
+    }
 }

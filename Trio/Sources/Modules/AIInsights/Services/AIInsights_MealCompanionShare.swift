@@ -228,9 +228,37 @@ extension AIInsights {
         }
 
         static func shareURLString(_ defaults: UserDefaults = .standard) -> String? {
-            let raw = (defaults.string(forKey: shareURLKey) ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return raw.isEmpty ? nil : raw
+            validatedICloudShareURL(from: defaults.string(forKey: shareURLKey))?.absoluteString
+        }
+
+        /// Persist only a real https iCloud share URL. Never invents or writes
+        /// a placeholder — `CKShare.url` exists only after CloudKit creates the share.
+        static func persistShareURL(_ url: URL?, defaults: UserDefaults = .standard) {
+            guard let url = validatedICloudShareURL(url) else { return }
+            defaults.set(url.absoluteString, forKey: shareURLKey)
+        }
+
+        static func persistShareURLString(_ raw: String?, defaults: UserDefaults = .standard) {
+            persistShareURL(validatedICloudShareURL(from: raw), defaults: defaults)
+        }
+
+        /// CloudKit invite links are `https` URLs on an `icloud.com` host with a path
+        /// (typically `/share/<token>`). Anything else is unsafe to copy or present.
+        static func validatedICloudShareURL(from raw: String?) -> URL? {
+            let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return validatedICloudShareURL(URL(string: trimmed))
+        }
+
+        static func validatedICloudShareURL(_ url: URL?) -> URL? {
+            guard let url else { return nil }
+            guard let scheme = url.scheme?.lowercased(), scheme == "https" else { return nil }
+            guard let host = url.host?.lowercased() else { return nil }
+            let isICloudHost = host == "icloud.com" || host.hasSuffix(".icloud.com")
+            guard isICloudHost else { return nil }
+            let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard !path.isEmpty else { return nil }
+            return url
         }
 
         /// Signing team if valid; otherwise pov-it's `Q6QCL8J6FN`.
@@ -513,10 +541,12 @@ extension AIInsights {
                 guard !containerID.isEmpty else { return .failure(MealCompanionShareError.missingContainer) }
                 do {
                     let url = try await createOrRefreshShare(containerID: containerID)
-                    if let url, !url.isEmpty {
-                        return .success(url)
+                    if let validated = MealCompanionShareSettings.validatedICloudShareURL(from: url) {
+                        return .success(validated.absoluteString)
                     }
                     return .failure(MealCompanionShareError.shareURLMissing)
+                } catch let error as MealCompanionShareError {
+                    return .failure(error)
                 } catch {
                     return .failure(MealCompanionShareError.underlying(error.localizedDescription))
                 }
@@ -547,27 +577,26 @@ extension AIInsights {
                 _ = try await database.save(meal)
 
                 if MealCompanionShareSettings.shareURLString(defaults) == nil {
-                    try await ensureShare(database: database, feed: feed)
+                    _ = try? await ensureShare(database: database, feed: feed)
                 }
             }
 
-            private func createOrRefreshShare(containerID: String) async throws -> String? {
+            private func createOrRefreshShare(containerID: String) async throws -> String {
                 let database = CKContainer(identifier: containerID).privateCloudDatabase
                 let feed = try await ensureFeed(database: database)
                 if let existing = try await existingShareURL(database: database, feed: feed) {
-                    defaults.set(existing, forKey: MealCompanionShareSettings.shareURLKey)
+                    MealCompanionShareSettings.persistShareURLString(existing, defaults: defaults)
                     return existing
                 }
                 do {
-                    try await ensureShare(database: database, feed: feed)
+                    return try await ensureShare(database: database, feed: feed)
                 } catch {
                     if let existing = try await existingShareURL(database: database, feed: feed) {
-                        defaults.set(existing, forKey: MealCompanionShareSettings.shareURLKey)
+                        MealCompanionShareSettings.persistShareURLString(existing, defaults: defaults)
                         return existing
                     }
                     throw error
                 }
-                return MealCompanionShareSettings.shareURLString(defaults)
             }
 
             private func ensureFeed(database: CKDatabase) async throws -> CKRecord {
@@ -586,12 +615,12 @@ extension AIInsights {
             }
 
             private func existingShareURL(database: CKDatabase, feed: CKRecord) async throws -> String? {
-                guard let shareRef = feed.share else { return nil }
+                let latest = (try? await database.record(for: feed.recordID)) ?? feed
+                guard let shareRef = latest.share else { return nil }
                 guard let share = try? await database.record(for: shareRef.recordID) as? CKShare else {
                     return nil
                 }
-                guard let urlString = share.url?.absoluteString, !urlString.isEmpty else { return nil }
-                return urlString
+                return MealCompanionShareSettings.validatedICloudShareURL(share.url)?.absoluteString
             }
 
             private func ensureZone(database: CKDatabase, zoneID: CKRecordZone.ID) async throws {
@@ -607,13 +636,108 @@ extension AIInsights {
                 }
             }
 
-            private func ensureShare(database: CKDatabase, feed: CKRecord) async throws {
-                let share = CKShare(rootRecord: feed)
-                share.publicPermission = .none
-                _ = try await database.save(share)
-                if let url = share.url?.absoluteString {
-                    defaults.set(url, forKey: MealCompanionShareSettings.shareURLKey)
+            /// Apple requires saving the root record and the new `CKShare` in the
+            /// same modify operation. Saving the share alone often leaves `share.url`
+            /// nil and a half-created share that later blows up the invite UI.
+            @discardableResult
+            private func ensureShare(database: CKDatabase, feed: CKRecord) async throws -> String {
+                if let existing = try await existingShareURL(database: database, feed: feed) {
+                    MealCompanionShareSettings.persistShareURLString(existing, defaults: defaults)
+                    return existing
                 }
+
+                let latestFeed = (try? await database.record(for: feed.recordID)) ?? feed
+                if latestFeed.share != nil {
+                    if let existing = try await existingShareURL(database: database, feed: latestFeed) {
+                        MealCompanionShareSettings.persistShareURLString(existing, defaults: defaults)
+                        return existing
+                    }
+                    throw MealCompanionShareError.shareURLMissing
+                }
+
+                let share = CKShare(rootRecord: latestFeed)
+                share.publicPermission = .none
+
+                do {
+                    let outcome = try await database.modifyRecords(
+                        saving: [latestFeed, share],
+                        deleting: [],
+                        savePolicy: .ifServerRecordUnchanged,
+                        atomically: true
+                    )
+                    if let url = firstValidatedShareURL(in: outcome.saveResults, fallback: share) {
+                        MealCompanionShareSettings.persistShareURLString(url, defaults: defaults)
+                        return url
+                    }
+                    if let url = try await existingShareURL(database: database, feed: latestFeed) {
+                        MealCompanionShareSettings.persistShareURLString(url, defaults: defaults)
+                        return url
+                    }
+                    throw MealCompanionShareError.shareURLMissing
+                } catch let error as CKError where isShareConflict(error) {
+                    if let url = try await existingShareURLAfterConflict(database: database, feed: latestFeed, error: error) {
+                        MealCompanionShareSettings.persistShareURLString(url, defaults: defaults)
+                        return url
+                    }
+                    throw error
+                }
+            }
+
+            private func firstValidatedShareURL(
+                in saveResults: [CKRecord.ID: Result<CKRecord, any Error>],
+                fallback: CKShare
+            ) -> String? {
+                for (_, result) in saveResults {
+                    if case let .success(record) = result,
+                       let savedShare = record as? CKShare,
+                       let url = MealCompanionShareSettings.validatedICloudShareURL(savedShare.url)
+                    {
+                        return url.absoluteString
+                    }
+                }
+                return MealCompanionShareSettings.validatedICloudShareURL(fallback.url)?.absoluteString
+            }
+
+            private func isShareConflict(_ error: CKError) -> Bool {
+                switch error.code {
+                case .alreadyShared, .serverRecordChanged, .partialFailure:
+                    return true
+                default:
+                    return false
+                }
+            }
+
+            private func existingShareURLAfterConflict(
+                database: CKDatabase,
+                feed: CKRecord,
+                error: CKError
+            ) async throws -> String? {
+                if let existing = try await existingShareURL(database: database, feed: feed) {
+                    return existing
+                }
+                if let serverRecord = error.userInfo[CKRecordChangedErrorServerRecordKey] as? CKRecord {
+                    if let share = serverRecord as? CKShare,
+                       let url = MealCompanionShareSettings.validatedICloudShareURL(share.url)
+                    {
+                        return url.absoluteString
+                    }
+                    if let existing = try await existingShareURL(database: database, feed: serverRecord) {
+                        return existing
+                    }
+                }
+                if let partials = error.partialErrorsByItemID {
+                    for (_, inner) in partials {
+                        guard let innerCK = inner as? CKError else { continue }
+                        if let url = try await existingShareURLAfterConflict(
+                            database: database,
+                            feed: feed,
+                            error: innerCK
+                        ) {
+                            return url
+                        }
+                    }
+                }
+                return nil
             }
 
             private func ckAsset(from jpeg: Data, id: UUID) throws -> CKAsset {

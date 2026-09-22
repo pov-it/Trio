@@ -91,9 +91,11 @@ Trio will:
 1. Create/save `MealsZone` in the **private** DB.
 2. Upsert root `MealFeed` (`MealFeedRoot`) with `ownerDisplayName`.
 3. Save each opted-in meal as a `Meal` (title, photographedAt, photo, ownerDisplayName).
-4. Create a `CKShare` on that root when a share URL is not stored yet (`ai_meal_companion_share_url`).
+4. Create a `CKShare` on that root when a share URL is not stored yet (`ai_meal_companion_share_url`), saving the root record and share together. Persists `share.url` only when it is an `https` iCloud share link.
 
-**Mayee invite:** Companion sharing settings show the resolved container (`iCloud.org.pov-it.Q6QCL8J6FN.meals` for this team — never a `<TEAM>` placeholder), the share URL when it exists, **Copy invite link**, and **Create / refresh invite** (calls `ensureInviteShare` without publishing glucose). Send the copied iCloud share URL to Mayee; pairing happens in meals-companion.
+**Mayee invite:** Companion sharing settings show the resolved container (`iCloud.org.pov-it.Q6QCL8J6FN.meals` for this team — never a `<TEAM>` placeholder), the share URL when it exists, **Copy invite link**, and **Create / refresh invite** (calls `ensureInviteShare` without publishing glucose). Copy writes the CloudKit `https://…icloud.com/share/…` URL to the pasteboard (no `ShareLink` in that Form — that combination crashed on TestFlight). Send the copied iCloud share URL to Mayee; pairing happens in meals-companion.
+
+Trio never invents or hardcodes an invite URL. `CKShare` is saved **with** the `MealFeed` root in one `CKModifyRecordsOperation`; only a validated `share.url` is stored in `ai_meal_companion_share_url`.
 
 If no team id is available (`TEAMID` / empty / `$(DEVELOPMENT_TEAM)` still unsubstituted), the publisher falls back to team `Q6QCL8J6FN` for this fork so the container id is still real.
 

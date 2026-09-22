@@ -1076,7 +1076,7 @@ extension AIInsights {
         }
 
         private var inviteURL: URL? {
-            URL(string: shareURLString)
+            MealCompanionShareSettings.validatedICloudShareURL(from: shareURLString)
         }
 
         var body: some View {
@@ -1107,24 +1107,13 @@ extension AIInsights {
                                 .font(.caption)
                                 .textSelection(.enabled)
                                 .foregroundStyle(.secondary)
-                            HStack(spacing: 12) {
-                                Button {
-                                    UIPasteboard.general.string = inviteURL.absoluteString
-                                    didCopy = true
-                                } label: {
-                                    Label(
-                                        didCopy
-                                            ? String(localized: "Copied", comment: "Invite link copied")
-                                            : String(localized: "Copy invite link", comment: "Copy companion invite URL"),
-                                        systemImage: didCopy ? "checkmark" : "doc.on.doc"
-                                    )
-                                }
-                                ShareLink(item: inviteURL) {
-                                    Label(
-                                        String(localized: "Share", comment: "Share companion invite URL"),
-                                        systemImage: "square.and.arrow.up"
-                                    )
-                                }
+                            Button(action: copyInviteLink) {
+                                Label(
+                                    didCopy
+                                        ? String(localized: "Copied", comment: "Invite link copied")
+                                        : String(localized: "Copy invite link", comment: "Copy companion invite URL"),
+                                    systemImage: didCopy ? "checkmark" : "doc.on.doc"
+                                )
                             }
                             .buttonStyle(.bordered)
                         }
@@ -1171,6 +1160,23 @@ extension AIInsights {
             didCopy = false
         }
 
+        /// Pasteboard-only copy. `ShareLink` inside a `Form` `HStack` with
+        /// `.buttonStyle(.bordered)` can crash SwiftUI on this OS; do not use it here.
+        @MainActor
+        private func copyInviteLink() {
+            guard let url = MealCompanionShareSettings.validatedICloudShareURL(from: shareURLString) else {
+                didCopy = false
+                inviteStatus = String(
+                    localized: "No valid invite link to copy. Tap Create / refresh invite.",
+                    comment: "Companion invite copy missing or invalid URL"
+                )
+                return
+            }
+            UIPasteboard.general.string = url.absoluteString
+            didCopy = true
+            inviteStatus = nil
+        }
+
         @MainActor
         private func refreshInvite() async {
             isRefreshingInvite = true
@@ -1179,9 +1185,14 @@ extension AIInsights {
             let result = await MealCompanionPublisher.shared.ensureInviteShare()
             switch result {
             case let .success(url):
-                shareURLString = url
-                inviteStatus = String(localized: "Invite ready. Copy the link for Mayee.", comment: "Companion invite created")
-                didCopy = false
+                if let validated = MealCompanionShareSettings.validatedICloudShareURL(from: url) {
+                    shareURLString = validated.absoluteString
+                    inviteStatus = String(localized: "Invite ready. Copy the link for Mayee.", comment: "Companion invite created")
+                    didCopy = false
+                } else {
+                    reloadStoredURL()
+                    inviteStatus = MealCompanionShareError.shareURLMissing.localizedDescription
+                }
             case let .failure(error):
                 reloadStoredURL()
                 inviteStatus = error.localizedDescription
