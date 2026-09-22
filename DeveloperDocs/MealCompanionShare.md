@@ -93,7 +93,7 @@ Trio will:
 1. Create/save `MealsZone` in the **private** DB.
 2. Upsert root `MealFeed` (`MealFeedRoot`) with `ownerDisplayName`.
 3. Save each opted-in meal as a `Meal` (title, photographedAt, photo, ownerDisplayName).
-4. Create a `CKShare` on that root when a share URL is not stored yet (`ai_meal_companion_share_url`), saving the root record and share together. Persists `share.url` only when it is an `https` iCloud share link.
+4. Create a `CKShare` on that root when no share URL is stored (`ai_meal_companion_share_url`). If `MealFeedRoot.share` is empty — the Production case where the record exists and Sharing is Off — Trio does **not** delete the root. It saves the root and a new `CKShare` together (`changedKeys`, one retry with `ifServerRecordUnchanged`). `publicPermission` is `readOnly` so the copied link is the invite. Per-record save failures are shown as `CKError <code> (<name>): <message>`, not the idle “No invite link yet…” line. A root that already points at a share with no usable URL is detached once (and the root is replaced only if that reference survives); child `Meal` records keep the same parent id.
 
 **Companion invite:** Companion sharing settings show the resolved container (`iCloud.org.pov-it.Q6QCL8J6FN.meals` for this team — never a `<TEAM>` placeholder), the share URL when it exists, **Copy invite link**, and **Create / refresh invite** (calls `ensureInviteShare` without publishing glucose). Copy writes the CloudKit `https://…icloud.com/share/…` URL to the pasteboard (no `ShareLink` in that Form — that combination crashed on TestFlight). Send the copied iCloud share URL to the invitee; pairing happens in meals-companion.
 
@@ -125,7 +125,9 @@ This PR does not add that App Group to `Trio.entitlements`.
 
 Same `UserDefaults` key: `ai_meal_companion_share_enabled` (bool, default `false`). This is **not** part of exported `TrioSettings`, so a settings backup cannot silently turn sharing on.
 
-Optional display name for `MealFeed` / `Meal.ownerDisplayName`: `ai_meal_companion_owner_display_name`.
+Display name for `MealFeed` / `Meal.ownerDisplayName`: `ai_meal_companion_owner_display_name`. Empty uses **Trio**. The old default **Meal** was a placeholder and is rewritten on the next Create / refresh invite. Companion sharing settings include **Name on shared meals**.
+
+`Info.plist` sets `CKSharingSupported` so CloudKit will issue an invite URL. The share is saved with the root in one modify (`changedKeys`, then one retry with `ifServerRecordUnchanged` if the first save returns no URL). `publicPermission` is **readOnly** so the copied `https://www.icloud.com/share/…` link is enough for the companion; the owner does not have to add an Apple ID first. A failure on that save is shown as `CKError <code> (<name>): <message>` (red, selectable). The idle “No invite link yet…” line is not used for that failure.
 
 ## Gallery meal slots
 

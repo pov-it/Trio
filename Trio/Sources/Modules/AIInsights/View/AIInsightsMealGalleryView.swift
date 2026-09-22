@@ -1067,8 +1067,10 @@ extension AIInsights {
         var usesChartRowBackground: Bool = false
 
         @State private var shareURLString: String = MealCompanionPublisher.shared.storedShareURLString() ?? ""
+        @State private var ownerName: String = MealCompanionShareSettings.storedOwnerDisplayName()
         @State private var isRefreshingInvite = false
         @State private var inviteStatus: String?
+        @State private var inviteStatusIsError = false
 
         private var containerID: String {
             MealCompanionShareSettings.displayContainerIdentifier()
@@ -1090,6 +1092,17 @@ extension AIInsights {
                 }
 
                 if isEnabled {
+                    TextField(
+                        String(localized: "Name on shared meals", comment: "Companion owner display name field"),
+                        text: $ownerName,
+                        prompt: Text(MealCompanionShareSettings.defaultOwnerDisplayName)
+                    )
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
+                    .onChange(of: ownerName) { _, newValue in
+                        MealCompanionShareSettings.setOwnerDisplayName(newValue)
+                    }
+
                     VStack(alignment: .leading, spacing: 6) {
                         Text(String(localized: "CloudKit container", comment: "Companion CloudKit container label"))
                             .font(.subheadline)
@@ -1135,7 +1148,8 @@ extension AIInsights {
                     if let inviteStatus {
                         Text(inviteStatus)
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(inviteStatusIsError ? Color.red : Color.secondary)
+                            .textSelection(.enabled)
                     }
                 }
             } header: {
@@ -1149,6 +1163,7 @@ extension AIInsights {
             .modifier(OptionalChartRowBackground(enabled: usesChartRowBackground))
             .onAppear {
                 reloadStoredURL()
+                ownerName = MealCompanionShareSettings.storedOwnerDisplayName()
                 if isEnabled { refreshEntitlementStatus() }
             }
         }
@@ -1163,10 +1178,15 @@ extension AIInsights {
             case .entitled:
                 return
             case .missing:
-                inviteStatus = MealCompanionShareError.missingCloudKitEntitlement.localizedDescription
+                setInviteStatus(MealCompanionShareError.missingCloudKitEntitlement.localizedDescription, isError: true)
             case .unreadable:
-                inviteStatus = MealCompanionShareError.unreadableSigningEntitlements.localizedDescription
+                setInviteStatus(MealCompanionShareError.unreadableSigningEntitlements.localizedDescription, isError: true)
             }
+        }
+
+        private func setInviteStatus(_ text: String?, isError: Bool) {
+            inviteStatus = text
+            inviteStatusIsError = isError
         }
 
         /// Pasteboard-only copy on the next main-queue turn. Do not flip button
@@ -1175,17 +1195,23 @@ extension AIInsights {
         @MainActor
         private func copyInviteLink() {
             guard let url = MealCompanionShareSettings.validatedICloudShareURL(from: shareURLString) else {
-                inviteStatus = String(
-                    localized: "No valid invite link to copy. Tap Create / refresh invite.",
-                    comment: "Companion invite copy missing or invalid URL"
+                setInviteStatus(
+                    String(
+                        localized: "No valid invite link to copy. Tap Create / refresh invite.",
+                        comment: "Companion invite copy missing or invalid URL"
+                    ),
+                    isError: true
                 )
                 return
             }
             let text = url.absoluteString
             guard !text.isEmpty else {
-                inviteStatus = String(
-                    localized: "No valid invite link to copy. Tap Create / refresh invite.",
-                    comment: "Companion invite copy missing or invalid URL"
+                setInviteStatus(
+                    String(
+                        localized: "No valid invite link to copy. Tap Create / refresh invite.",
+                        comment: "Companion invite copy missing or invalid URL"
+                    ),
+                    isError: true
                 )
                 return
             }
@@ -1197,40 +1223,55 @@ extension AIInsights {
         @MainActor
         private func writeInviteToPasteboard(_ text: String) {
             guard MealCompanionShareSettings.validatedICloudShareURL(from: text) != nil else {
-                inviteStatus = String(
-                    localized: "No valid invite link to copy. Tap Create / refresh invite.",
-                    comment: "Companion invite copy missing or invalid URL"
+                setInviteStatus(
+                    String(
+                        localized: "No valid invite link to copy. Tap Create / refresh invite.",
+                        comment: "Companion invite copy missing or invalid URL"
+                    ),
+                    isError: true
                 )
                 return
             }
             UIPasteboard.general.string = text
-            inviteStatus = String(
-                localized: "Copied. Send this invite link to your companion.",
-                comment: "Companion invite copied confirmation"
+            setInviteStatus(
+                String(
+                    localized: "Copied. Send this invite link to your companion.",
+                    comment: "Companion invite copied confirmation"
+                ),
+                isError: false
             )
         }
 
         @MainActor
         private func refreshInvite() async {
             isRefreshingInvite = true
-            inviteStatus = nil
+            setInviteStatus(nil, isError: false)
             defer { isRefreshingInvite = false }
             let result = await MealCompanionPublisher.shared.ensureInviteShare()
             switch result {
             case let .success(url):
                 if let validated = MealCompanionShareSettings.validatedICloudShareURL(from: url) {
                     shareURLString = validated.absoluteString
-                    inviteStatus = String(
-                        localized: "Invite ready. Copy the link for your companion.",
-                        comment: "Companion invite created"
+                    setInviteStatus(
+                        String(
+                            localized: "Invite ready. Copy the link for your companion.",
+                            comment: "Companion invite created"
+                        ),
+                        isError: false
                     )
                 } else {
                     reloadStoredURL()
-                    inviteStatus = MealCompanionShareError.shareURLMissing.localizedDescription
+                    let shown = url.count > 120 ? String(url.prefix(117)) + "..." : url
+                    setInviteStatus(
+                        MealCompanionShareError.inviteCreateFailed(
+                            "CloudKit returned \"\(shown)\" which is not an https iCloud share link."
+                        ).localizedDescription,
+                        isError: true
+                    )
                 }
             case let .failure(error):
                 reloadStoredURL()
-                inviteStatus = error.localizedDescription
+                setInviteStatus(MealCompanionShareError.userFacingMessage(for: error), isError: true)
             }
         }
     }

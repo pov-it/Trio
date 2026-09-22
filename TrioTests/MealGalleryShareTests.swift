@@ -574,6 +574,161 @@ struct MealGalleryShareTests {
         #expect(
             AIInsights.MealCompanionShareError.isProductionSchemaMissing(description: "network timeout") == false
         )
+        let schemaError = NSError(domain: "CKErrorDomain", code: 15, userInfo: [
+            NSLocalizedDescriptionKey: raw
+        ])
+        let fromError = AIInsights.MealCompanionShareError.fromCloudKit(schemaError).localizedDescription
+        #expect(fromError.contains("CloudKit Dashboard"))
+        #expect(!fromError.contains("No invite link yet"))
+        #expect(!fromError.contains("0x7d9534e680"))
+    }
+
+    @Test("Create failure shows CKError code and short message, not the idle invite line")
+    func inviteFailureSurfacesCloudKitCode() {
+        let idle = AIInsights.MealCompanionShareError.shareURLMissing.localizedDescription
+        #expect(idle.contains("No invite link yet"))
+
+        let failed = AIInsights.MealCompanionShareError.inviteCreateFailed(
+            "CloudKit saved MealFeedRoot but CKShare.url was empty."
+        ).localizedDescription
+        #expect(failed.hasPrefix("Invite create failed:"))
+        #expect(failed.contains("CKShare.url was empty"))
+        #expect(!failed.contains("No invite link yet"))
+
+        let raw = "Error saving record <CKRecordID: 0x7d9534e680; recordName=MealFeedRoot, zoneID=MealsZone:__defaultOwner__> to server: Zone was busy"
+        let busy = NSError(domain: "CKErrorDomain", code: 23, userInfo: [
+            NSLocalizedDescriptionKey: raw
+        ])
+        let summary = AIInsights.MealCompanionShareError.diagnosticSummary(busy)
+        #expect(summary.contains("CKError 23"))
+        #expect(summary.contains("zoneBusy"))
+        #expect(summary.contains("Zone was busy"))
+        #expect(!summary.contains("0x7d9534e680"))
+        #expect(!summary.contains("No invite link yet"))
+        #expect(AIInsights.MealCompanionShareError.userFacingMessage(for: busy) == summary)
+
+        let signedOut = NSError(domain: "CKErrorDomain", code: 9, userInfo: [
+            NSLocalizedDescriptionKey: "The operation couldn’t be completed. (CKErrorDomain error 9.)",
+            NSLocalizedFailureReasonErrorKey: "Not signed in to iCloud"
+        ])
+        let auth = AIInsights.MealCompanionShareError.diagnosticSummary(signedOut)
+        #expect(auth.contains("CKError 9"))
+        #expect(auth.contains("notAuthenticated"))
+        #expect(auth.contains("Not signed in to iCloud"))
+        #expect(!auth.contains("couldn’t be completed"))
+
+        let inner = NSError(domain: "CKErrorDomain", code: 15, userInfo: [
+            NSLocalizedDescriptionKey: "Server rejected the share URL"
+        ])
+        let partial = NSError(domain: "CKErrorDomain", code: 2, userInfo: [
+            NSLocalizedDescriptionKey: "The operation couldn’t be completed. (CKErrorDomain error 2.)",
+            "CKPartialErrors": ["MealFeedRoot": inner]
+        ])
+        let partialSummary = AIInsights.MealCompanionShareError.diagnosticSummary(partial)
+        #expect(partialSummary.contains("CKError 2"))
+        #expect(partialSummary.contains("partialFailure"))
+        #expect(partialSummary.contains("CKError 15"))
+        #expect(partialSummary.contains("serverRejectedRequest"))
+        #expect(partialSummary.contains("Server rejected the share URL"))
+        #expect(!partialSummary.contains("No invite link yet"))
+    }
+
+    @Test("Stuck share without a URL is replaced; a usable share is kept")
+    func stuckShareRecoveryPlan() {
+        #expect(AIInsights.MealShareInviteRecovery.plan(for: .noShare) == .createShare)
+        #expect(AIInsights.MealShareInviteRecovery.plan(for: .usableURL) == .keepExistingShare)
+        #expect(AIInsights.MealShareInviteRecovery.plan(for: .shareWithoutURL) == .replaceBrokenShare)
+        #expect(AIInsights.MealShareInviteRecovery.plan(for: .danglingShareReference) == .replaceBrokenShare)
+
+        #expect(
+            AIInsights.MealShareInviteRecovery.shouldReplaceShare(
+                afterFailureCode: 30,
+                description: "record is already shared"
+            )
+        )
+        #expect(
+            AIInsights.MealShareInviteRecovery.shouldReplaceShare(
+                afterFailureCode: 31,
+                description: "share reference could not be found"
+            )
+        )
+        #expect(
+            AIInsights.MealShareInviteRecovery.shouldReplaceShare(
+                afterFailureCode: 15,
+                description: "Cannot create new type MealFeed in production schema"
+            ) == false
+        )
+        #expect(
+            AIInsights.MealShareInviteRecovery.shouldReplaceShare(
+                afterFailureCode: 9,
+                description: "Not signed in to iCloud"
+            ) == false
+        )
+        #expect(
+            AIInsights.MealShareInviteRecovery.shouldReplaceShare(
+                afterFailureCode: 4,
+                description: "network failure"
+            ) == false
+        )
+        #expect(
+            AIInsights.MealShareInviteRecovery.shouldReplaceShare(
+                afterFailureCode: 2,
+                partialCodes: [30],
+                description: "partial failure"
+            )
+        )
+        #expect(
+            AIInsights.MealShareInviteRecovery.shouldReplaceShare(
+                afterFailureCode: 2,
+                partialCodes: [9],
+                description: "partial failure"
+            ) == false
+        )
+
+        let schemaInner = NSError(domain: "CKErrorDomain", code: 15, userInfo: [
+            NSLocalizedDescriptionKey: "Cannot create new type MealFeed in production schema"
+        ])
+        let schemaPartial = NSError(domain: "CKErrorDomain", code: 2, userInfo: [
+            NSLocalizedDescriptionKey: "The operation couldn’t be completed. (CKErrorDomain error 2.)",
+            "CKPartialErrors": ["MealFeedRoot": schemaInner]
+        ])
+        #expect(AIInsights.MealShareInviteRecovery.shouldReplaceShare(after: schemaPartial) == false)
+        let dashboard = AIInsights.MealCompanionShareError.fromCloudKit(schemaPartial).localizedDescription
+        #expect(dashboard.contains("CloudKit Dashboard"))
+        #expect(!dashboard.contains("No invite link yet"))
+    }
+
+    @Test("Owner display name defaults to Trio, not the Meal placeholder")
+    func ownerDisplayNameIsNotMealPlaceholder() {
+        let suite = "MealGalleryShareTests.owner.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        #expect(AIInsights.MealCompanionShareSettings.ownerDisplayName(defaults) == "Trio")
+        #expect(
+            AIInsights.MealCompanionShareSettings.ownerDisplayNameForSave(
+                existingCloudValue: "Meal",
+                defaults: defaults
+            ) == "Trio"
+        )
+        #expect(
+            AIInsights.MealCompanionShareSettings.ownerDisplayNameForSave(
+                existingCloudValue: "Marijn",
+                defaults: defaults
+            ) == "Marijn"
+        )
+        AIInsights.MealCompanionShareSettings.setOwnerDisplayName("Alex", defaults: defaults)
+        #expect(
+            AIInsights.MealCompanionShareSettings.ownerDisplayNameForSave(
+                existingCloudValue: "Meal",
+                defaults: defaults
+            ) == "Alex"
+        )
+        AIInsights.MealCompanionShareSettings.setOwnerDisplayName("  ", defaults: defaults)
+        #expect(AIInsights.MealCompanionShareSettings.storedOwnerDisplayName(defaults).isEmpty)
+        #expect(AIInsights.MealShareInviteRecovery.iCloudAccountStatusName(1) == "available")
+        #expect(AIInsights.MealShareInviteRecovery.iCloudAccountStatusName(3) == "noAccount")
+        #expect(AIInsights.MealShareInviteRecovery.plan(for: .noShare) == .createShare)
+        defaults.removePersistentDomain(forName: suite)
     }
 
     @Test("gemini-flash-latest omits thinkingLevel MINIMAL")

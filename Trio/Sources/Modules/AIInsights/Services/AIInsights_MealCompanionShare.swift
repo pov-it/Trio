@@ -213,6 +213,9 @@ extension AIInsights {
                     comment: "Companion share could not read code-signing entitlements"
                 )
             case .shareURLMissing:
+                // Idle empty state only. Create / refresh failures use
+                // `inviteCreateFailed` or `diagnosticSummary` so TestFlight
+                // does not show this line after a CloudKit attempt.
                 return String(localized: "No invite link yet. Sign in to iCloud and tap Create invite, or publish one meal first.", comment: "Companion share URL missing")
             case .productionSchemaMissing:
                 return String(
@@ -222,15 +225,6 @@ extension AIInsights {
             case let .underlying(message):
                 return message
             }
-        }
-
-        /// Maps CloudKit's verbose "Error saving record <CKRecordID…>" dump to a
-        /// short action. Does not try to write Development types into Production.
-        static func fromCloudKit(_ error: Error) -> MealCompanionShareError {
-            if isProductionSchemaMissing(error) {
-                return .productionSchemaMissing
-            }
-            return .underlying(error.localizedDescription)
         }
 
         static func isProductionSchemaMissing(_ error: Error) -> Bool {
@@ -254,12 +248,256 @@ extension AIInsights {
                     parts.append(String(describing: value))
                 }
             }
-            if let nested = ns.userInfo["CKPartialErrors"] as? [AnyHashable: Error] {
-                for inner in nested.values {
-                    parts.append(flattenedCloudKitText(inner))
-                }
+            for inner in partialNSErrors(in: error) {
+                parts.append(flattenedCloudKitText(inner))
             }
             return parts.joined(separator: "\n")
+        }
+
+        /// Create / refresh failure. Distinct from the idle “No invite link yet” copy.
+        static func inviteCreateFailed(_ detail: String) -> MealCompanionShareError {
+            let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+            return .underlying("Invite create failed: \(trimmed)")
+        }
+
+        /// Settings row text. CloudKit failures include the numeric code, the
+        /// code name, and a short server message — not the idle empty-state line.
+        static func userFacingMessage(for error: Error) -> String {
+            if let typed = error as? MealCompanionShareError {
+                return typed.localizedDescription ?? diagnosticSummary(error)
+            }
+            if isProductionSchemaMissing(error) {
+                return productionSchemaMissing.localizedDescription
+            }
+            return diagnosticSummary(error)
+        }
+
+        static func fromCloudKit(_ error: Error) -> MealCompanionShareError {
+            if let typed = error as? MealCompanionShareError {
+                return typed
+            }
+            if isProductionSchemaMissing(error) {
+                return .productionSchemaMissing
+            }
+            return .underlying(diagnosticSummary(error))
+        }
+
+        /// `CKError 15 (serverRejectedRequest): …`. Strips `CKRecordID` pointer dumps.
+        static func diagnosticSummary(_ error: Error) -> String {
+            summarize(error, depth: 0)
+        }
+
+        static func cloudKitCodeName(_ code: Int) -> String {
+            switch code {
+            case 1: return "internalError"
+            case 2: return "partialFailure"
+            case 3: return "networkUnavailable"
+            case 4: return "networkFailure"
+            case 5: return "badContainer"
+            case 6: return "serviceUnavailable"
+            case 7: return "requestRateLimited"
+            case 8: return "missingEntitlement"
+            case 9: return "notAuthenticated"
+            case 10: return "permissionFailure"
+            case 11: return "unknownItem"
+            case 12: return "invalidArguments"
+            case 13: return "resultsTruncated"
+            case 14: return "serverRecordChanged"
+            case 15: return "serverRejectedRequest"
+            case 16: return "assetFileNotFound"
+            case 17: return "assetFileModified"
+            case 18: return "incompatibleVersion"
+            case 19: return "constraintViolation"
+            case 20: return "operationCancelled"
+            case 21: return "changeTokenExpired"
+            case 22: return "batchRequestFailed"
+            case 23: return "zoneBusy"
+            case 24: return "badDatabase"
+            case 25: return "quotaExceeded"
+            case 26: return "zoneNotFound"
+            case 27: return "limitExceeded"
+            case 28: return "userDeletedZone"
+            case 29: return "tooManyParticipants"
+            case 30: return "alreadyShared"
+            case 31: return "referenceViolation"
+            case 32: return "managedAccountRestricted"
+            case 33: return "participantMayNeedVerification"
+            case 34: return "serverResponseLost"
+            case 35: return "assetNotAvailable"
+            default: return "code\(code)"
+            }
+        }
+
+        static func partialNSErrors(in error: Error) -> [NSError] {
+            #if canImport(CloudKit)
+                if let ck = error as? CKError, let partials = ck.partialErrorsByItemID {
+                    return partials.values.map { $0 as NSError }
+                }
+            #endif
+            let ns = error as NSError
+            for key in ["CKPartialErrorsByItemIDKey", "CKPartialErrors"] {
+                if let dict = ns.userInfo[key] as? [String: NSError], !dict.isEmpty {
+                    return Array(dict.values)
+                }
+                if let dict = ns.userInfo[key] as? [AnyHashable: NSError], !dict.isEmpty {
+                    return Array(dict.values)
+                }
+                if let dict = ns.userInfo[key] as? [AnyHashable: Any] {
+                    let errors = dict.values.compactMap { $0 as? NSError }
+                    if !errors.isEmpty { return errors }
+                }
+                if let dict = ns.userInfo[key] as? NSDictionary {
+                    let errors = dict.allValues.compactMap { $0 as? NSError }
+                    if !errors.isEmpty { return errors }
+                }
+            }
+            return []
+        }
+
+        private static func summarize(_ error: Error, depth: Int) -> String {
+            let ns = error as NSError
+            var detail = bestShortMessage(ns)
+            if detail.isEmpty, let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError {
+                detail = bestShortMessage(underlying)
+            }
+            if depth < 2, let first = partialNSErrors(in: error).first {
+                let inner = summarize(first, depth: depth + 1)
+                if detail.isEmpty {
+                    detail = inner
+                } else if !inner.isEmpty, !detail.contains(inner) {
+                    detail = "\(detail) — \(inner)"
+                }
+            }
+            return prefixed(ns, detail: detail)
+        }
+
+        private static func prefixed(_ error: NSError, detail: String) -> String {
+            let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+            if error.domain == "CKErrorDomain" {
+                let label = cloudKitCodeName(error.code)
+                if trimmed.isEmpty { return "CKError \(error.code) (\(label))" }
+                return "CKError \(error.code) (\(label)): \(trimmed)"
+            }
+            if trimmed.isEmpty { return "\(error.domain) \(error.code)" }
+            return "\(error.domain) \(error.code): \(trimmed)"
+        }
+
+        private static func bestShortMessage(_ error: NSError) -> String {
+            let candidates: [String?] = [
+                error.userInfo["CKErrorDescription"] as? String,
+                error.localizedFailureReason,
+                error.userInfo[NSLocalizedDescriptionKey] as? String,
+                error.localizedDescription,
+                error.userInfo["NSDebugDescription"] as? String
+            ]
+            var best = ""
+            for raw in candidates {
+                guard let raw else { continue }
+                let cleaned = condenseCloudKitText(raw)
+                guard !cleaned.isEmpty, !isWrapper(cleaned) else { continue }
+                if cleaned.count > best.count { best = cleaned }
+            }
+            return best
+        }
+
+        private static func isWrapper(_ text: String) -> Bool {
+            let lowered = text.lowercased()
+            return lowered.contains("operation couldn’t be completed")
+                || lowered.contains("operation couldn't be completed")
+        }
+
+        /// Drops `CKRecordID` pointer dumps and the "Error saving record … to server:" prefix.
+        static func condenseCloudKitText(_ raw: String) -> String {
+            var text = raw
+            if let regex = try? NSRegularExpression(pattern: "<CKRecordID:[^>]*>", options: []) {
+                let range = NSRange(text.startIndex ..< text.endIndex, in: text)
+                text = regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "")
+            }
+            if let regex = try? NSRegularExpression(pattern: "\\(CKErrorDomain error \\d+\\.\\)", options: []) {
+                let range = NSRange(text.startIndex ..< text.endIndex, in: text)
+                text = regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "")
+            }
+            if let marker = text.range(of: "to server:") {
+                text = String(text[marker.upperBound...])
+            }
+            text = text.replacingOccurrences(of: "The operation couldn’t be completed.", with: "")
+            text = text.replacingOccurrences(of: "The operation couldn't be completed.", with: "")
+            text = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.count > 180 {
+                let end = text.index(text.startIndex, offsetBy: 177)
+                text = String(text[..<end]) + "..."
+            }
+            return text
+        }
+    }
+
+    /// What to do when Create / refresh finds `MealFeedRoot`'s current share.
+    /// A usable https iCloud URL is kept. A share with no URL, or a root whose
+    /// share record is gone, is deleted and replaced. Healthy shares are not.
+    enum MealShareInviteRecovery {
+        enum LinkState: Equatable {
+            case noShare
+            case usableURL
+            case shareWithoutURL
+            case danglingShareReference
+        }
+
+        enum Plan: Equatable {
+            case createShare
+            case keepExistingShare
+            case replaceBrokenShare
+        }
+
+        static func plan(for state: LinkState) -> Plan {
+            switch state {
+            case .noShare:
+                return .createShare
+            case .usableURL:
+                return .keepExistingShare
+            case .shareWithoutURL, .danglingShareReference:
+                return .replaceBrokenShare
+            }
+        }
+
+        /// Second attempt after an atomic save failed. Schema, auth, and network
+        /// errors stay on screen; only "already shared" / dangling-reference style
+        /// failures delete the share and try once more.
+        static func shouldReplaceShare(
+            afterFailureCode code: Int,
+            partialCodes: [Int] = [],
+            description: String
+        ) -> Bool {
+            if MealCompanionShareError.isProductionSchemaMissing(description: description) {
+                return false
+            }
+            let recoverable: Set<Int> = [14, 22, 30, 31]
+            if recoverable.contains(code) { return true }
+            if code == 2 {
+                return partialCodes.contains { recoverable.contains($0) }
+            }
+            return false
+        }
+
+        static func shouldReplaceShare(after error: Error) -> Bool {
+            let ns = error as NSError
+            return shouldReplaceShare(
+                afterFailureCode: ns.code,
+                partialCodes: MealCompanionShareError.partialNSErrors(in: error).map(\.code),
+                description: MealCompanionShareError.flattenedCloudKitText(error)
+            )
+        }
+
+        /// `CKAccountStatus` raw values. Used when Create / refresh cannot start a share.
+        static func iCloudAccountStatusName(_ rawValue: Int) -> String {
+            switch rawValue {
+            case 0: return "couldNotDetermine"
+            case 1: return "available"
+            case 2: return "restricted"
+            case 3: return "noAccount"
+            case 4: return "temporarilyUnavailable"
+            default: return "code\(rawValue)"
+            }
         }
     }
 
@@ -595,10 +833,49 @@ extension AIInsights {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
+        /// CloudKit `ownerDisplayName` when the user has not set one.
+        /// "Meal" was a placeholder and showed up as the sharer's name.
+        static let defaultOwnerDisplayName = "Trio"
+        static let placeholderOwnerDisplayName = "Meal"
+
         static func ownerDisplayName(_ defaults: UserDefaults = .standard) -> String {
-            let stored = (defaults.string(forKey: ownerDisplayNameKey) ?? "")
+            ownerDisplayNameForSave(existingCloudValue: nil, defaults: defaults)
+        }
+
+        static func setOwnerDisplayName(_ name: String?, defaults: UserDefaults = .standard) {
+            let trimmed = (name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                defaults.removeObject(forKey: ownerDisplayNameKey)
+            } else {
+                defaults.set(trimmed, forKey: ownerDisplayNameKey)
+            }
+        }
+
+        static func storedOwnerDisplayName(_ defaults: UserDefaults = .standard) -> String {
+            (defaults.string(forKey: ownerDisplayNameKey) ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            return stored.isEmpty ? "Meal" : stored
+        }
+
+        /// Prefer a name the user typed. Otherwise keep a real CloudKit value.
+        /// Replace an empty value or the old "Meal" placeholder with "Trio".
+        static func ownerDisplayNameForSave(
+            existingCloudValue: String?,
+            defaults: UserDefaults = .standard
+        ) -> String {
+            let stored = storedOwnerDisplayName(defaults)
+            if !stored.isEmpty, !isPlaceholderOwnerDisplayName(stored) {
+                return stored
+            }
+            let cloud = (existingCloudValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cloud.isEmpty, !isPlaceholderOwnerDisplayName(cloud) {
+                return cloud
+            }
+            return defaultOwnerDisplayName
+        }
+
+        static func isPlaceholderOwnerDisplayName(_ name: String) -> Bool {
+            name.trimmingCharacters(in: .whitespacesAndNewlines)
+                .caseInsensitiveCompare(placeholderOwnerDisplayName) == .orderedSame
         }
 
         static func companionAppGroupIdentifier(_ defaults: UserDefaults = .standard) -> String? {
@@ -839,7 +1116,12 @@ extension AIInsights {
                     if let validated = MealCompanionShareSettings.validatedICloudShareURL(from: url) {
                         return .success(validated.absoluteString)
                     }
-                    return .failure(MealCompanionShareError.shareURLMissing)
+                    let shown = url.count > 120 ? String(url.prefix(117)) + "..." : url
+                    return .failure(
+                        MealCompanionShareError.inviteCreateFailed(
+                            "CloudKit returned \"\(shown)\" which is not an https iCloud share link."
+                        )
+                    )
                 } catch let error as MealCompanionShareError {
                     return .failure(error)
                 } catch {
@@ -889,21 +1171,85 @@ extension AIInsights {
                 }
             }
 
+            private struct ShareSavedWithoutURL: Error {
+                var summary: String
+
+                func detail(previous: String?) -> String {
+                    var text = "CloudKit returned no share URL (\(summary))"
+                    if let previous, !previous.isEmpty {
+                        text += " after \(previous)"
+                    }
+                    return text
+                }
+            }
+
+            private struct ShareInspection {
+                var state: MealShareInviteRecovery.LinkState
+                var url: String?
+                var shareID: CKRecord.ID?
+                var reason: String?
+            }
+
             private func createOrRefreshShare(containerID: String) async throws -> String {
+                try await requireAvailableICloudAccount(containerID: containerID)
                 let database = try entitledPrivateDatabase(containerID: containerID)
                 let feed = try await ensureFeed(database: database)
-                if let existing = try await existingShareURL(database: database, feed: feed) {
+                let named = await repairPlaceholderOwnerName(database: database, feed: feed)
+                // No share on the server is the common Production case: create one.
+                // A lookup error must surface; it must not become the idle
+                // "No invite link yet" line.
+                if let existing = try await existingShareURL(database: database, feed: named) {
                     MealCompanionShareSettings.persistShareURLString(existing, defaults: defaults)
                     return existing
                 }
                 do {
-                    return try await ensureShare(database: database, feed: feed)
+                    return try await ensureShare(database: database, feed: named)
                 } catch {
-                    if let existing = try await existingShareURL(database: database, feed: feed) {
+                    if let existing = try? await existingShareURL(database: database, feed: named) {
                         MealCompanionShareSettings.persistShareURLString(existing, defaults: defaults)
                         return existing
                     }
                     throw error
+                }
+            }
+
+            private func requireAvailableICloudAccount(containerID: String) async throws {
+                switch MealCloudKitEntitlement.check(containerID) {
+                case .entitled:
+                    break
+                case .missing:
+                    throw MealCompanionShareError.missingCloudKitEntitlement
+                case .unreadable:
+                    throw MealCompanionShareError.unreadableSigningEntitlements
+                }
+                let status: CKAccountStatus
+                do {
+                    status = try await CKContainer(identifier: containerID).accountStatus()
+                } catch {
+                    throw MealCompanionShareError.fromCloudKit(error)
+                }
+                guard status == .available else {
+                    let name = MealShareInviteRecovery.iCloudAccountStatusName(status.rawValue)
+                    throw MealCompanionShareError.inviteCreateFailed(
+                        "iCloud account \(name) (\(status.rawValue)). Sign in to iCloud and try Create invite again."
+                    )
+                }
+            }
+
+            /// Rewrites ownerDisplayName "Meal" (the old empty-setting placeholder)
+            /// before the share save. A rename failure does not block the invite.
+            private func repairPlaceholderOwnerName(database: CKDatabase, feed: CKRecord) async -> CKRecord {
+                let existing = feed[MealCloudKitContract.ownerDisplayNameKey] as? String
+                let resolved = MealCompanionShareSettings.ownerDisplayNameForSave(
+                    existingCloudValue: existing,
+                    defaults: defaults
+                )
+                guard (existing ?? "") != resolved else { return feed }
+                feed[MealCloudKitContract.ownerDisplayNameKey] = resolved as NSString
+                do {
+                    return try await database.save(feed)
+                } catch {
+                    return feed
                 }
             }
 
@@ -914,21 +1260,32 @@ extension AIInsights {
                     recordName: MealCloudKitContract.feedRecordName,
                     zoneID: zoneID
                 )
-                if let existing = try? await database.record(for: feedID) {
-                    return existing
+                do {
+                    return try await database.record(for: feedID)
+                } catch let error as CKError where error.code == .unknownItem {
+                    return try await database.save(makeUnsavedFeed(recordID: feedID))
+                } catch {
+                    throw MealCompanionShareError.fromCloudKit(error)
                 }
-                let feed = CKRecord(recordType: MealCloudKitContract.feedRecordType, recordID: feedID)
-                feed[MealCloudKitContract.ownerDisplayNameKey] = MealCompanionShareSettings.ownerDisplayName(defaults) as NSString
-                return try await database.save(feed)
             }
 
+            /// Network and auth errors propagate. `unknownItem` on the share record
+            /// means the root's link is dangling and the caller may replace it.
             private func existingShareURL(database: CKDatabase, feed: CKRecord) async throws -> String? {
-                let latest = (try? await database.record(for: feed.recordID)) ?? feed
+                let latest: CKRecord
+                do {
+                    latest = try await database.record(for: feed.recordID)
+                } catch let error as CKError where error.code == .unknownItem {
+                    latest = feed
+                }
                 guard let shareRef = latest.share else { return nil }
-                guard let share = try? await database.record(for: shareRef.recordID) as? CKShare else {
+                do {
+                    let record = try await database.record(for: shareRef.recordID)
+                    guard let share = record as? CKShare else { return nil }
+                    return MealCompanionShareSettings.validatedICloudShareURL(share.url)?.absoluteString
+                } catch let error as CKError where error.code == .unknownItem {
                     return nil
                 }
-                return MealCompanionShareSettings.validatedICloudShareURL(share.url)?.absoluteString
             }
 
             private func ensureZone(database: CKDatabase, zoneID: CKRecordZone.ID) async throws {
@@ -944,54 +1301,378 @@ extension AIInsights {
                 }
             }
 
-            /// Apple requires saving the root record and the new `CKShare` in the
-            /// same modify operation. Saving the share alone often leaves `share.url`
-            /// nil and a half-created share that later blows up the invite UI.
+            /// Primary path: `MealFeedRoot` has no share (what Production dashboard
+            /// showed). Save the root and a new `CKShare` together. `changedKeys`
+            /// first, then one `ifServerRecordUnchanged` retry on a fresh fetch.
+            /// A root that already points at a share with no https iCloud URL is
+            /// detached once, then saved the same way. Failures keep the CKError.
             @discardableResult
             private func ensureShare(database: CKDatabase, feed: CKRecord) async throws -> String {
-                if let existing = try await existingShareURL(database: database, feed: feed) {
-                    MealCompanionShareSettings.persistShareURLString(existing, defaults: defaults)
-                    return existing
-                }
-
-                let latestFeed = (try? await database.record(for: feed.recordID)) ?? feed
-                guard latestFeed.recordType == MealCloudKitContract.feedRecordType else {
-                    throw MealCompanionShareError.shareURLMissing
-                }
-                if latestFeed.share != nil {
-                    if let existing = try await existingShareURL(database: database, feed: latestFeed) {
-                        MealCompanionShareSettings.persistShareURLString(existing, defaults: defaults)
-                        return existing
+                let current = try await refreshedFeed(database: database, feed: feed)
+                let inspection = try await classifyShare(database: database, feed: current)
+                switch MealShareInviteRecovery.plan(for: inspection.state) {
+                case .keepExistingShare:
+                    guard let url = inspection.url else {
+                        throw MealCompanionShareError.inviteCreateFailed(
+                            "MealFeed share was marked usable but had no iCloud URL."
+                        )
                     }
-                    throw MealCompanionShareError.shareURLMissing
+                    MealCompanionShareSettings.persistShareURLString(url, defaults: defaults)
+                    return url
+                case .replaceBrokenShare:
+                    let cleared = try await clearStuckShare(
+                        database: database,
+                        feed: current,
+                        shareID: inspection.shareID
+                    )
+                    return try await createShareOnUnsharedRoot(database: database, feed: cleared)
+                case .createShare:
+                    return try await createShareOnUnsharedRoot(database: database, feed: current)
                 }
+            }
 
-                let share = CKShare(rootRecord: latestFeed)
-                share.publicPermission = .none
+            /// No share reference on the root. Do not delete `MealFeedRoot`.
+            private func createShareOnUnsharedRoot(database: CKDatabase, feed: CKRecord) async throws -> String {
+                let root = feed.share == nil
+                    ? feed
+                    : try await clearStuckShare(database: database, feed: feed, shareID: feed.share?.recordID)
+                do {
+                    return try await saveRootAndShare(
+                        database: database,
+                        feed: root,
+                        savePolicy: .changedKeys
+                    )
+                } catch let first as ShareSavedWithoutURL {
+                    let clean = try await refreshedFeed(database: database, feed: root)
+                    let retryRoot = clean.share == nil
+                        ? clean
+                        : try await clearStuckShare(database: database, feed: clean, shareID: clean.share?.recordID)
+                    do {
+                        return try await saveRootAndShare(
+                            database: database,
+                            feed: retryRoot,
+                            savePolicy: .ifServerRecordUnchanged
+                        )
+                    } catch let second as ShareSavedWithoutURL {
+                        throw MealCompanionShareError.inviteCreateFailed(
+                            second.detail(previous: first.summary)
+                        )
+                    } catch {
+                        throw wrappedShareSaveError(error)
+                    }
+                } catch {
+                    if let recoveredURL = try await urlIfConflictHasShare(
+                        database: database,
+                        feed: root,
+                        error: error
+                    ) {
+                        MealCompanionShareSettings.persistShareURLString(recoveredURL, defaults: defaults)
+                        return recoveredURL
+                    }
+                    guard MealShareInviteRecovery.shouldReplaceShare(after: error) else {
+                        throw wrappedShareSaveError(error)
+                    }
+                    let latest = try await recordOrUnsaved(
+                        database: database,
+                        recordID: root.recordID,
+                        ownerFrom: root
+                    )
+                    let retryRoot = latest.share == nil
+                        ? latest
+                        : try await clearStuckShare(database: database, feed: latest, shareID: latest.share?.recordID)
+                    do {
+                        return try await saveRootAndShare(
+                            database: database,
+                            feed: retryRoot,
+                            savePolicy: .ifServerRecordUnchanged
+                        )
+                    } catch let second as ShareSavedWithoutURL {
+                        throw MealCompanionShareError.inviteCreateFailed(
+                            second.detail(previous: MealCompanionShareError.diagnosticSummary(error))
+                        )
+                    } catch {
+                        throw wrappedShareSaveError(error)
+                    }
+                }
+            }
 
+            private func wrappedShareSaveError(_ error: Error) -> Error {
+                MealCompanionShareError.fromCloudKit(error)
+            }
+
+            private func refreshedFeed(database: CKDatabase, feed: CKRecord) async throws -> CKRecord {
+                do {
+                    let latest = try await database.record(for: feed.recordID)
+                    guard latest.recordType == MealCloudKitContract.feedRecordType else {
+                        throw MealCompanionShareError.inviteCreateFailed(
+                            "expected record type MealFeed, found \(latest.recordType)."
+                        )
+                    }
+                    return latest
+                } catch let error as CKError where error.code == .unknownItem {
+                    return makeUnsavedFeed(recordID: feed.recordID, copying: feed)
+                } catch let error as MealCompanionShareError {
+                    throw error
+                } catch {
+                    throw MealCompanionShareError.fromCloudKit(error)
+                }
+            }
+
+            private func classifyShare(database: CKDatabase, feed: CKRecord) async throws -> ShareInspection {
+                let latest: CKRecord
+                do {
+                    latest = try await database.record(for: feed.recordID)
+                } catch let error as CKError where error.code == .unknownItem {
+                    latest = feed
+                } catch let error as MealCompanionShareError {
+                    throw error
+                } catch {
+                    throw MealCompanionShareError.fromCloudKit(error)
+                }
+                if latest.recordChangeTag != nil, latest.recordType != MealCloudKitContract.feedRecordType {
+                    throw MealCompanionShareError.inviteCreateFailed(
+                        "expected record type MealFeed, found \(latest.recordType)."
+                    )
+                }
+                guard let shareRef = latest.share else {
+                    return ShareInspection(state: .noShare, url: nil, shareID: nil, reason: nil)
+                }
+                do {
+                    let record = try await database.record(for: shareRef.recordID)
+                    guard let share = record as? CKShare else {
+                        return ShareInspection(
+                            state: .shareWithoutURL,
+                            url: nil,
+                            shareID: shareRef.recordID,
+                            reason: "linked record \(record.recordID.recordName) is \(record.recordType), not a share"
+                        )
+                    }
+                    if let url = MealCompanionShareSettings.validatedICloudShareURL(share.url)?.absoluteString {
+                        return ShareInspection(state: .usableURL, url: url, shareID: share.recordID, reason: nil)
+                    }
+                    let raw = share.url?.absoluteString ?? "nil"
+                    let shown = raw.count > 80 ? String(raw.prefix(77)) + "..." : raw
+                    return ShareInspection(
+                        state: .shareWithoutURL,
+                        url: nil,
+                        shareID: share.recordID,
+                        reason: "CKShare.url unusable (\(shown))"
+                    )
+                } catch let error as CKError where error.code == .unknownItem {
+                    return ShareInspection(
+                        state: .danglingShareReference,
+                        url: nil,
+                        shareID: shareRef.recordID,
+                        reason: "CKShare record missing (CKError 11 unknownItem)"
+                    )
+                } catch let error as MealCompanionShareError {
+                    throw error
+                } catch {
+                    throw MealCompanionShareError.fromCloudKit(error)
+                }
+            }
+
+            /// Deletes the broken share. If `MealFeedRoot` still points at a share,
+            /// deletes that root too and returns an unsaved replacement with the
+            /// same record name so child `Meal` parent refs stay valid. The caller
+            /// saves the replacement together with a new `CKShare`.
+            private func clearStuckShare(
+                database: CKDatabase,
+                feed: CKRecord,
+                shareID: CKRecord.ID?
+            ) async throws -> CKRecord {
+                if let shareID {
+                    try await deleteIfPresent(database: database, recordID: shareID)
+                }
+                let latest: CKRecord
+                do {
+                    latest = try await database.record(for: feed.recordID)
+                } catch let error as CKError where error.code == .unknownItem {
+                    return makeUnsavedFeed(recordID: feed.recordID, copying: feed)
+                } catch {
+                    throw MealCompanionShareError.fromCloudKit(error)
+                }
+                if latest.share == nil {
+                    return latest
+                }
+                if let leftover = latest.share?.recordID, leftover != shareID {
+                    try await deleteIfPresent(database: database, recordID: leftover)
+                }
+                do {
+                    let refetched = try await database.record(for: feed.recordID)
+                    if refetched.share == nil {
+                        return refetched
+                    }
+                } catch let error as CKError where error.code == .unknownItem {
+                    return makeUnsavedFeed(recordID: feed.recordID, copying: latest)
+                } catch {
+                    throw MealCompanionShareError.fromCloudKit(error)
+                }
+                try await deleteIfPresent(database: database, recordID: latest.recordID)
+                return makeUnsavedFeed(recordID: feed.recordID, copying: latest)
+            }
+
+            private func saveRootAndShare(
+                database: CKDatabase,
+                feed: CKRecord,
+                savePolicy: CKModifyRecordsOperation.RecordSavePolicy
+            ) async throws -> String {
+                if feed.share != nil {
+                    throw MealCompanionShareError.inviteCreateFailed(
+                        "MealFeedRoot still has a share reference, so a new CKShare was not saved."
+                    )
+                }
+                applyOwnerDisplayName(to: feed)
+                let share = CKShare(rootRecord: feed)
+                // readOnly: the copied iCloud link is the invite. `.none` only
+                // admits participants added by Apple ID, which this screen does not collect.
+                share.publicPermission = .readOnly
+                share[CKShare.SystemFieldKey.title] = "Meals" as NSString
+                let outcome = try await database.modifyRecords(
+                    saving: [feed, share],
+                    deleting: [],
+                    savePolicy: savePolicy,
+                    atomically: true
+                )
+                try throwIfAnySaveFailed(outcome.saveResults)
+                if let url = firstValidatedShareURL(in: outcome.saveResults, fallback: share) {
+                    MealCompanionShareSettings.persistShareURLString(url, defaults: defaults)
+                    return url
+                }
+                var summary = saveResultSummary(outcome.saveResults, policy: savePolicy)
+                if feed.recordChangeTag != nil || feed.creationDate != nil {
+                    do {
+                        let inspection = try await classifyShare(database: database, feed: feed)
+                        if inspection.state == .usableURL, let url = inspection.url {
+                            MealCompanionShareSettings.persistShareURLString(url, defaults: defaults)
+                            return url
+                        }
+                    } catch {
+                        summary += "; refetch \(MealCompanionShareError.diagnosticSummary(error))"
+                    }
+                }
+                throw ShareSavedWithoutURL(summary: summary)
+            }
+
+            private func applyOwnerDisplayName(to feed: CKRecord) {
+                let existing = feed[MealCloudKitContract.ownerDisplayNameKey] as? String
+                let resolved = MealCompanionShareSettings.ownerDisplayNameForSave(
+                    existingCloudValue: existing,
+                    defaults: defaults
+                )
+                guard (existing ?? "") != resolved else { return }
+                feed[MealCloudKitContract.ownerDisplayNameKey] = resolved as NSString
+            }
+
+            private func saveResultSummary(
+                _ saveResults: [CKRecord.ID: Result<CKRecord, any Error>],
+                policy: CKModifyRecordsOperation.RecordSavePolicy
+            ) -> String {
+                let policyName: String
+                switch policy {
+                case .changedKeys: policyName = "changedKeys"
+                case .allKeys: policyName = "allKeys"
+                case .ifServerRecordUnchanged: policyName = "ifServerRecordUnchanged"
+                @unknown default: policyName = "savePolicy"
+                }
+                if saveResults.isEmpty {
+                    return "\(policyName), saveResults empty, MealFeedRoot.share still unset"
+                }
+                var parts = ["\(policyName)"]
+                for (id, result) in saveResults {
+                    switch result {
+                    case let .success(record):
+                        if let savedShare = record as? CKShare {
+                            let raw = savedShare.url?.absoluteString ?? "nil"
+                            let shown = raw.count > 80 ? String(raw.prefix(77)) + "..." : raw
+                            parts.append("CKShare \(id.recordName) url=\(shown)")
+                        } else {
+                            let linked = record.share == nil ? "no share ref" : "share ref set"
+                            parts.append("\(record.recordType) \(linked)")
+                        }
+                    case let .failure(error):
+                        parts.append(MealCompanionShareError.diagnosticSummary(error))
+                    }
+                }
+                return parts.joined(separator: "; ")
+            }
+
+            private func urlIfConflictHasShare(
+                database: CKDatabase,
+                feed: CKRecord,
+                error: Error
+            ) async throws -> String? {
+                guard let ck = error as? CKError, isShareConflict(ck) else { return nil }
+                return try await existingShareURLAfterConflict(database: database, feed: feed, error: ck)
+            }
+
+            private func recordOrUnsaved(
+                database: CKDatabase,
+                recordID: CKRecord.ID,
+                ownerFrom: CKRecord
+            ) async throws -> CKRecord {
+                do {
+                    return try await database.record(for: recordID)
+                } catch let error as CKError where error.code == .unknownItem {
+                    return makeUnsavedFeed(recordID: recordID, copying: ownerFrom)
+                } catch {
+                    throw MealCompanionShareError.fromCloudKit(error)
+                }
+            }
+
+            private func makeUnsavedFeed(recordID: CKRecord.ID, copying ownerFrom: CKRecord? = nil) -> CKRecord {
+                let feed = CKRecord(recordType: MealCloudKitContract.feedRecordType, recordID: recordID)
+                let copied = (ownerFrom?[MealCloudKitContract.ownerDisplayNameKey] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let owner = (copied?.isEmpty == false ? copied : nil)
+                    ?? MealCompanionShareSettings.ownerDisplayName(defaults)
+                feed[MealCloudKitContract.ownerDisplayNameKey] = owner as NSString
+                return feed
+            }
+
+            private func deleteIfPresent(database: CKDatabase, recordID: CKRecord.ID) async throws {
                 do {
                     let outcome = try await database.modifyRecords(
-                        saving: [latestFeed, share],
-                        deleting: [],
+                        saving: [],
+                        deleting: [recordID],
                         savePolicy: .ifServerRecordUnchanged,
                         atomically: true
                     )
-                    if let url = firstValidatedShareURL(in: outcome.saveResults, fallback: share) {
-                        MealCompanionShareSettings.persistShareURLString(url, defaults: defaults)
-                        return url
+                    for (_, result) in outcome.deleteResults {
+                        if case let .failure(error) = result {
+                            if let ck = error as? CKError, deleteIsAlreadyGone(ck) { continue }
+                            throw error
+                        }
                     }
-                    if let url = try await existingShareURL(database: database, feed: latestFeed) {
-                        MealCompanionShareSettings.persistShareURLString(url, defaults: defaults)
-                        return url
-                    }
-                    throw MealCompanionShareError.shareURLMissing
-                } catch let error as CKError where isShareConflict(error) {
-                    if let url = try await existingShareURLAfterConflict(database: database, feed: latestFeed, error: error) {
-                        MealCompanionShareSettings.persistShareURLString(url, defaults: defaults)
-                        return url
-                    }
-                    throw error
+                } catch let error as CKError where deleteIsAlreadyGone(error) {
+                    return
                 }
+            }
+
+            private func deleteIsAlreadyGone(_ error: CKError) -> Bool {
+                if error.code == .unknownItem { return true }
+                guard error.code == .partialFailure || error.code == .batchRequestFailed,
+                      let partials = error.partialErrorsByItemID,
+                      !partials.isEmpty
+                else { return false }
+                return partials.values.allSatisfy { inner in
+                    (inner as? CKError)?.code == .unknownItem
+                }
+            }
+
+            private func throwIfAnySaveFailed(
+                _ saveResults: [CKRecord.ID: Result<CKRecord, any Error>]
+            ) throws {
+                let failures: [Error] = saveResults.compactMap { _, result in
+                    if case let .failure(error) = result { return error }
+                    return nil
+                }
+                guard let first = failures.first else { return }
+                if failures.count == 1 {
+                    throw first
+                }
+                let details = failures.map { MealCompanionShareError.diagnosticSummary($0) }.joined(separator: " — ")
+                throw MealCompanionShareError.inviteCreateFailed(details)
             }
 
             private func firstValidatedShareURL(
@@ -1011,7 +1692,7 @@ extension AIInsights {
 
             private func isShareConflict(_ error: CKError) -> Bool {
                 switch error.code {
-                case .alreadyShared, .serverRecordChanged, .partialFailure:
+                case .alreadyShared, .serverRecordChanged, .partialFailure, .batchRequestFailed, .referenceViolation:
                     return true
                 default:
                     return false
