@@ -1194,7 +1194,7 @@ extension AIInsights {
                     text: $state.foodDescription,
                     axis: .vertical
                 )
-                .lineLimit(isComposerExpanded ? 1...6 : 1)
+                .lineLimit(1...(isComposerExpanded ? 6 : 1))
                 .focused($isTextFieldFocused)
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 12)
