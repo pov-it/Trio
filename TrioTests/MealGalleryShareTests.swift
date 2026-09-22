@@ -639,6 +639,50 @@ struct MealGalleryShareTests {
         #expect(AIInsights.MealShareInviteRecovery.plan(for: .usableURL) == .keepExistingShare)
         #expect(AIInsights.MealShareInviteRecovery.plan(for: .shareWithoutURL) == .replaceBrokenShare)
         #expect(AIInsights.MealShareInviteRecovery.plan(for: .danglingShareReference) == .replaceBrokenShare)
+        #expect(
+            AIInsights.MealShareInviteRecovery.linkState(
+                hasShareReference: true,
+                shareRecordMissing: false,
+                validatedURL: nil
+            ) == .shareWithoutURL
+        )
+        #expect(
+            AIInsights.MealShareInviteRecovery.plan(
+                for: AIInsights.MealShareInviteRecovery.linkState(
+                    hasShareReference: true,
+                    shareRecordMissing: false,
+                    validatedURL: nil
+                )
+            ) == .replaceBrokenShare
+        )
+        #expect(
+            AIInsights.MealShareInviteRecovery.linkState(
+                hasShareReference: true,
+                shareRecordMissing: false,
+                validatedURL: ""
+            ) == .shareWithoutURL
+        )
+        #expect(
+            AIInsights.MealShareInviteRecovery.linkState(
+                hasShareReference: true,
+                shareRecordMissing: true,
+                validatedURL: nil
+            ) == .danglingShareReference
+        )
+        #expect(
+            AIInsights.MealShareInviteRecovery.linkState(
+                hasShareReference: true,
+                shareRecordMissing: false,
+                validatedURL: "https://www.icloud.com/share/Token"
+            ) == .usableURL
+        )
+        #expect(
+            AIInsights.MealShareInviteRecovery.linkState(
+                hasShareReference: false,
+                shareRecordMissing: false,
+                validatedURL: nil
+            ) == .noShare
+        )
 
         #expect(
             AIInsights.MealShareInviteRecovery.shouldReplaceShare(

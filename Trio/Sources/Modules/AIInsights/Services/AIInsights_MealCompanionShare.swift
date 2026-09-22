@@ -460,6 +460,20 @@ extension AIInsights {
             }
         }
 
+        /// `MealFeed` is not indexable, so this is decided from `record(for: MealFeedRoot)`,
+        /// not a dashboard query. A share reference whose `url` is nil or not an
+        /// https iCloud link is replaced. A validated URL is kept.
+        static func linkState(
+            hasShareReference: Bool,
+            shareRecordMissing: Bool,
+            validatedURL: String?
+        ) -> LinkState {
+            guard hasShareReference else { return .noShare }
+            if shareRecordMissing { return .danglingShareReference }
+            if let validatedURL, !validatedURL.isEmpty { return .usableURL }
+            return .shareWithoutURL
+        }
+
         /// Second attempt after an atomic save failed. Schema, auth, and network
         /// errors stay on screen; only "already shared" / dangling-reference style
         /// failures delete the share and try once more.
@@ -1193,19 +1207,13 @@ extension AIInsights {
             private func createOrRefreshShare(containerID: String) async throws -> String {
                 try await requireAvailableICloudAccount(containerID: containerID)
                 let database = try entitledPrivateDatabase(containerID: containerID)
+                // Zone MealsZone already existing does not mean MealFeedRoot has a
+                // share. MealFeed is not queryable; fetch the root by record name.
                 let feed = try await ensureFeed(database: database)
-                let named = await repairPlaceholderOwnerName(database: database, feed: feed)
-                // No share on the server is the common Production case: create one.
-                // A lookup error must surface; it must not become the idle
-                // "No invite link yet" line.
-                if let existing = try await existingShareURL(database: database, feed: named) {
-                    MealCompanionShareSettings.persistShareURLString(existing, defaults: defaults)
-                    return existing
-                }
                 do {
-                    return try await ensureShare(database: database, feed: named)
+                    return try await ensureShare(database: database, feed: feed)
                 } catch {
-                    if let existing = try? await existingShareURL(database: database, feed: named) {
+                    if let existing = try? await existingShareURL(database: database, feed: feed) {
                         MealCompanionShareSettings.persistShareURLString(existing, defaults: defaults)
                         return existing
                     }
@@ -1301,11 +1309,10 @@ extension AIInsights {
                 }
             }
 
-            /// Primary path: `MealFeedRoot` has no share (what Production dashboard
-            /// showed). Save the root and a new `CKShare` together. `changedKeys`
-            /// first, then one `ifServerRecordUnchanged` retry on a fresh fetch.
-            /// A root that already points at a share with no https iCloud URL is
-            /// detached once, then saved the same way. Failures keep the CKError.
+            /// If `MealFeedRoot.share` is set but the share record is missing or its
+            /// `url` is nil / not https iCloud, delete that share and save the root
+            /// with a new `CKShare`. A delete or save CKError is returned to the UI.
+            /// A root with no share reference is created in place, not deleted.
             @discardableResult
             private func ensureShare(database: CKDatabase, feed: CKRecord) async throws -> String {
                 let current = try await refreshedFeed(database: database, feed: feed)
@@ -1317,14 +1324,22 @@ extension AIInsights {
                             "MealFeed share was marked usable but had no iCloud URL."
                         )
                     }
+                    _ = await repairPlaceholderOwnerName(database: database, feed: current)
                     MealCompanionShareSettings.persistShareURLString(url, defaults: defaults)
                     return url
                 case .replaceBrokenShare:
-                    let cleared = try await clearStuckShare(
-                        database: database,
-                        feed: current,
-                        shareID: inspection.shareID
-                    )
+                    let cleared: CKRecord
+                    do {
+                        cleared = try await clearStuckShare(
+                            database: database,
+                            feed: current,
+                            shareID: inspection.shareID
+                        )
+                    } catch {
+                        throw MealCompanionShareError.inviteCreateFailed(
+                            "MealFeedRoot share has no usable iCloud URL (\(inspection.reason ?? "url missing")). \(MealCompanionShareError.userFacingMessage(for: error))"
+                        )
+                    }
                     return try await createShareOnUnsharedRoot(database: database, feed: cleared)
                 case .createShare:
                     return try await createShareOnUnsharedRoot(database: database, feed: current)
@@ -1435,32 +1450,53 @@ extension AIInsights {
                     )
                 }
                 guard let shareRef = latest.share else {
-                    return ShareInspection(state: .noShare, url: nil, shareID: nil, reason: nil)
+                    let state = MealShareInviteRecovery.linkState(
+                        hasShareReference: false,
+                        shareRecordMissing: false,
+                        validatedURL: nil
+                    )
+                    return ShareInspection(state: state, url: nil, shareID: nil, reason: nil)
                 }
                 do {
                     let record = try await database.record(for: shareRef.recordID)
                     guard let share = record as? CKShare else {
+                        let state = MealShareInviteRecovery.linkState(
+                            hasShareReference: true,
+                            shareRecordMissing: false,
+                            validatedURL: nil
+                        )
                         return ShareInspection(
-                            state: .shareWithoutURL,
+                            state: state,
                             url: nil,
                             shareID: shareRef.recordID,
                             reason: "linked record \(record.recordID.recordName) is \(record.recordType), not a share"
                         )
                     }
-                    if let url = MealCompanionShareSettings.validatedICloudShareURL(share.url)?.absoluteString {
-                        return ShareInspection(state: .usableURL, url: url, shareID: share.recordID, reason: nil)
+                    let validated = MealCompanionShareSettings.validatedICloudShareURL(share.url)?.absoluteString
+                    let state = MealShareInviteRecovery.linkState(
+                        hasShareReference: true,
+                        shareRecordMissing: false,
+                        validatedURL: validated
+                    )
+                    if state == .usableURL, let validated {
+                        return ShareInspection(state: state, url: validated, shareID: share.recordID, reason: nil)
                     }
                     let raw = share.url?.absoluteString ?? "nil"
                     let shown = raw.count > 80 ? String(raw.prefix(77)) + "..." : raw
                     return ShareInspection(
-                        state: .shareWithoutURL,
+                        state: state,
                         url: nil,
                         shareID: share.recordID,
-                        reason: "CKShare.url unusable (\(shown))"
+                        reason: "CKShare.url missing or not an https iCloud link (\(shown))"
                     )
                 } catch let error as CKError where error.code == .unknownItem {
+                    let state = MealShareInviteRecovery.linkState(
+                        hasShareReference: true,
+                        shareRecordMissing: true,
+                        validatedURL: nil
+                    )
                     return ShareInspection(
-                        state: .danglingShareReference,
+                        state: state,
                         url: nil,
                         shareID: shareRef.recordID,
                         reason: "CKShare record missing (CKError 11 unknownItem)"
