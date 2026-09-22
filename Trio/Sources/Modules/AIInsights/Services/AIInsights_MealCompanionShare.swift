@@ -23,6 +23,9 @@
 //
 
 import Foundation
+#if canImport(Security)
+    import Security
+#endif
 #if canImport(CloudKit)
     import CloudKit
 #endif
@@ -189,6 +192,7 @@ extension AIInsights {
     enum MealCompanionShareError: LocalizedError {
         case cloudKitUnavailable
         case missingContainer
+        case missingCloudKitEntitlement
         case shareURLMissing
         case underlying(String)
 
@@ -198,11 +202,62 @@ extension AIInsights {
                 return String(localized: "CloudKit is not available on this device.", comment: "Companion share CloudKit unavailable")
             case .missingContainer:
                 return String(localized: "The meals CloudKit container is not configured.", comment: "Companion share missing container")
+            case .missingCloudKitEntitlement:
+                return String(
+                    localized: "Meals CloudKit container not entitled on this build",
+                    comment: "Companion share missing CloudKit entitlement"
+                )
             case .shareURLMissing:
                 return String(localized: "No invite link yet. Sign in to iCloud and tap Create invite, or publish one meal first.", comment: "Companion share URL missing")
             case let .underlying(message):
                 return message
             }
+        }
+    }
+
+    /// Runtime check for the **signed** iCloud CloudKit entitlement.
+    /// `CKContainer(identifier:)` traps (`EXC_BREAKPOINT`) when the container
+    /// is missing from the profile — never call it without this preflight.
+    enum MealCloudKitEntitlement {
+        static let containerIdentifiersKey = "com.apple.developer.icloud-container-identifiers"
+        static let icloudServicesKey = "com.apple.developer.icloud-services"
+        static let cloudKitServiceValue = "CloudKit"
+
+        static func isContainerEntitled(
+            _ identifier: String,
+            signedIdentifiers: [String]? = nil
+        ) -> Bool {
+            let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return false }
+            let ids = signedIdentifiers ?? readSignedICloudContainerIdentifiers()
+            return ids.contains(trimmed)
+        }
+
+        static func readSignedICloudContainerIdentifiers() -> [String] {
+            #if canImport(Security)
+                guard let task = SecTaskCreateFromSelf(nil) else { return [] }
+                var error: Unmanaged<CFError>?
+                guard let raw = SecTaskCopyValueForEntitlement(
+                    task,
+                    containerIdentifiersKey as CFString,
+                    &error
+                ), error == nil
+                else {
+                    return []
+                }
+                if let strings = raw as? [String] {
+                    return strings
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty }
+                }
+                if let one = raw as? String {
+                    let trimmed = one.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? [] : [trimmed]
+                }
+                return []
+            #else
+                return []
+            #endif
         }
     }
 
@@ -525,6 +580,7 @@ extension AIInsights {
             if MealSharePrivacy.rejectReason(for: record.payload) != nil { return }
             let containerID = MealCompanionShareSettings.cloudKitContainerIdentifier(defaults)
             guard !containerID.isEmpty else { return }
+            guard MealCloudKitEntitlement.isContainerEntitled(containerID) else { return }
 
             #if canImport(CloudKit)
                 do {
@@ -539,6 +595,9 @@ extension AIInsights {
             #if canImport(CloudKit)
                 let containerID = MealCompanionShareSettings.cloudKitContainerIdentifier(defaults)
                 guard !containerID.isEmpty else { return .failure(MealCompanionShareError.missingContainer) }
+                guard MealCloudKitEntitlement.isContainerEntitled(containerID) else {
+                    return .failure(MealCompanionShareError.missingCloudKitEntitlement)
+                }
                 do {
                     let url = try await createOrRefreshShare(containerID: containerID)
                     if let validated = MealCompanionShareSettings.validatedICloudShareURL(from: url) {
@@ -556,8 +615,17 @@ extension AIInsights {
         }
 
         #if canImport(CloudKit)
+            /// The only `CKContainer(identifier:)` call site. `_checkRequiredEntitlements`
+            /// is a SIGTRAP, not a Swift error — never reach it without the preflight.
+            private func entitledPrivateDatabase(containerID: String) throws -> CKDatabase {
+                guard MealCloudKitEntitlement.isContainerEntitled(containerID) else {
+                    throw MealCompanionShareError.missingCloudKitEntitlement
+                }
+                return CKContainer(identifier: containerID).privateCloudDatabase
+            }
+
             private func saveToCloudKit(_ record: SharedMealRecord, containerID: String) async throws {
-                let database = CKContainer(identifier: containerID).privateCloudDatabase
+                let database = try entitledPrivateDatabase(containerID: containerID)
                 let feed = try await ensureFeed(database: database)
                 let zoneID = feed.recordID.zoneID
 
@@ -582,7 +650,7 @@ extension AIInsights {
             }
 
             private func createOrRefreshShare(containerID: String) async throws -> String {
-                let database = CKContainer(identifier: containerID).privateCloudDatabase
+                let database = try entitledPrivateDatabase(containerID: containerID)
                 let feed = try await ensureFeed(database: database)
                 if let existing = try await existingShareURL(database: database, feed: feed) {
                     MealCompanionShareSettings.persistShareURLString(existing, defaults: defaults)

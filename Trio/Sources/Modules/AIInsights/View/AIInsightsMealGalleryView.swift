@@ -1086,6 +1086,7 @@ extension AIInsights {
                 .onChange(of: isEnabled) { _, newValue in
                     MealCompanionPublisher.shared.isShareEnabled = newValue
                     reloadStoredURL()
+                    if newValue { refreshEntitlementStatus() }
                 }
 
                 if isEnabled {
@@ -1146,11 +1147,20 @@ extension AIInsights {
                 ))
             }
             .modifier(OptionalChartRowBackground(enabled: usesChartRowBackground))
-            .onAppear { reloadStoredURL() }
+            .onAppear {
+                reloadStoredURL()
+                if isEnabled { refreshEntitlementStatus() }
+            }
         }
 
         private func reloadStoredURL() {
             shareURLString = MealCompanionPublisher.shared.storedShareURLString() ?? ""
+        }
+
+        private func refreshEntitlementStatus() {
+            let id = MealCompanionShareSettings.cloudKitContainerIdentifier()
+            guard !MealCloudKitEntitlement.isContainerEntitled(id) else { return }
+            inviteStatus = MealCompanionShareError.missingCloudKitEntitlement.localizedDescription
         }
 
         /// Pasteboard-only copy on the next main-queue turn. Do not flip button
