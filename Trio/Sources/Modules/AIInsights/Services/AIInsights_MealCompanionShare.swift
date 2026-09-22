@@ -193,6 +193,7 @@ extension AIInsights {
         case missingCloudKitEntitlement
         case unreadableSigningEntitlements
         case shareURLMissing
+        case productionSchemaMissing
         case underlying(String)
 
         var errorDescription: String? {
@@ -213,9 +214,52 @@ extension AIInsights {
                 )
             case .shareURLMissing:
                 return String(localized: "No invite link yet. Sign in to iCloud and tap Create invite, or publish one meal first.", comment: "Companion share URL missing")
+            case .productionSchemaMissing:
+                return String(
+                    localized: "CloudKit Production schema missing MealFeed — deploy from CloudKit Dashboard",
+                    comment: "Companion share CloudKit production schema not deployed"
+                )
             case let .underlying(message):
                 return message
             }
+        }
+
+        /// Maps CloudKit's verbose "Error saving record <CKRecordID…>" dump to a
+        /// short action. Does not try to write Development types into Production.
+        static func fromCloudKit(_ error: Error) -> MealCompanionShareError {
+            if isProductionSchemaMissing(error) {
+                return .productionSchemaMissing
+            }
+            return .underlying(error.localizedDescription)
+        }
+
+        static func isProductionSchemaMissing(_ error: Error) -> Bool {
+            isProductionSchemaMissing(description: flattenedCloudKitText(error))
+        }
+
+        static func isProductionSchemaMissing(description: String) -> Bool {
+            let lowered = description.lowercased()
+            guard lowered.contains("production schema") else { return false }
+            return lowered.contains("cannot create new type")
+                || lowered.contains("create new type")
+        }
+
+        static func flattenedCloudKitText(_ error: Error) -> String {
+            var parts: [String] = [error.localizedDescription]
+            let ns = error as NSError
+            if let reason = ns.localizedFailureReason { parts.append(reason) }
+            if let recovery = ns.localizedRecoverySuggestion { parts.append(recovery) }
+            for key in [NSUnderlyingErrorKey, "CKErrorDescription", "NSDebugDescription"] {
+                if let value = ns.userInfo[key] {
+                    parts.append(String(describing: value))
+                }
+            }
+            if let nested = ns.userInfo["CKPartialErrors"] as? [AnyHashable: Error] {
+                for inner in nested.values {
+                    parts.append(flattenedCloudKitText(inner))
+                }
+            }
+            return parts.joined(separator: "\n")
         }
     }
 
@@ -799,7 +843,7 @@ extension AIInsights {
                 } catch let error as MealCompanionShareError {
                     return .failure(error)
                 } catch {
-                    return .failure(MealCompanionShareError.underlying(error.localizedDescription))
+                    return .failure(MealCompanionShareError.fromCloudKit(error))
                 }
             #else
                 return .failure(MealCompanionShareError.cloudKitUnavailable)

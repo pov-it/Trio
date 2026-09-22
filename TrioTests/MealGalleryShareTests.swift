@@ -562,6 +562,20 @@ struct MealGalleryShareTests {
         #expect(ids == ["iCloud.org.pov-it.Q6QCL8J6FN.meals"])
     }
 
+    @Test("Production schema missing MealFeed is worded for Dashboard deploy")
+    func productionSchemaMissingMealFeedCopy() {
+        let raw = "Error saving record <CKRecordID: 0x7d9534e680; recordName=MealFeedRoot, zoneID=MealsZone:__defaultOwner__> to server: Cannot create new type MealFeed in production schema"
+        #expect(AIInsights.MealCompanionShareError.isProductionSchemaMissing(description: raw))
+        let mapped = AIInsights.MealCompanionShareError.productionSchemaMissing.localizedDescription
+        #expect(mapped.contains("CloudKit Production schema missing MealFeed"))
+        #expect(mapped.contains("CloudKit Dashboard"))
+        #expect(!mapped.contains("CKRecordID"))
+        #expect(!mapped.contains("0x7d9534e680"))
+        #expect(
+            AIInsights.MealCompanionShareError.isProductionSchemaMissing(description: "network timeout") == false
+        )
+    }
+
     @Test("gemini-flash-latest omits thinkingLevel MINIMAL")
     func geminiFlashLatestOmitsUnsupportedThinking() {
         #expect(

@@ -480,9 +480,157 @@ extension AIInsights {
         }
     }
 
-    /// Diagrammatic (not photoreal) overlay: plate + arrows for the next angle.
+    /// Diagrammatic (not photoreal) overlay: plate + pulsing arrows for the next angle.
     final class MealAngleHintView: UIView {
         var angle: MealCaptureAngle = .topDown {
+            didSet {
+                guard oldValue != angle else { return }
+                setNeedsDisplay()
+                layoutArrowFrame()
+                restartPulse()
+            }
+        }
+
+        private let pulseHost = UIView()
+        private let arrowView = MealAngleArrowView()
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            commonInit()
+        }
+
+        required init?(coder: NSCoder) {
+            super.init(coder: coder)
+            commonInit()
+        }
+
+        private func commonInit() {
+            backgroundColor = .clear
+            isOpaque = false
+            isUserInteractionEnabled = false
+            pulseHost.backgroundColor = .clear
+            pulseHost.isUserInteractionEnabled = false
+            arrowView.isUserInteractionEnabled = false
+            pulseHost.addSubview(arrowView)
+            addSubview(pulseHost)
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if window == nil {
+                pulseHost.layer.removeAnimation(forKey: "mealAngleMove")
+                arrowView.layer.removeAnimation(forKey: "mealAnglePulse")
+            } else {
+                restartPulse()
+            }
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            layoutArrowFrame()
+        }
+
+        override func draw(_ rect: CGRect) {
+            guard let ctx = UIGraphicsGetCurrentContext() else { return }
+            ctx.clear(rect)
+            let plate = plateRect(in: rect)
+            UIColor.white.withAlphaComponent(0.92).setStroke()
+            let platePath = UIBezierPath(ovalIn: plate)
+            platePath.lineWidth = 3
+            platePath.stroke()
+            UIBezierPath(ovalIn: plate.insetBy(dx: 10, dy: 8)).stroke()
+        }
+
+        private func plateRect(in rect: CGRect) -> CGRect {
+            CGRect(x: rect.midX - 54, y: rect.midY - 28, width: 108, height: 72)
+        }
+
+        private func layoutArrowFrame() {
+            let plate = plateRect(in: bounds)
+            let size = CGSize(width: 44, height: 52)
+            switch angle {
+            case .topDown:
+                pulseHost.frame = CGRect(
+                    x: plate.midX - size.width / 2,
+                    y: plate.minY - size.height - 2,
+                    width: size.width,
+                    height: size.height
+                )
+                arrowView.pointing = .down
+            case .side:
+                pulseHost.frame = CGRect(
+                    x: plate.maxX + 4,
+                    y: plate.midY - size.height / 2,
+                    width: size.width,
+                    height: size.height
+                )
+                arrowView.pointing = .left
+            case .otherSide:
+                pulseHost.frame = CGRect(
+                    x: plate.minX - size.width - 2,
+                    y: plate.minY - size.height + 18,
+                    width: size.width,
+                    height: size.height
+                )
+                arrowView.pointing = .downRight
+            }
+            arrowView.frame = pulseHost.bounds
+        }
+
+        private func restartPulse() {
+            layoutArrowFrame()
+            pulseHost.layer.removeAnimation(forKey: "mealAngleMove")
+            arrowView.layer.removeAnimation(forKey: "mealAnglePulse")
+            guard window != nil || superview != nil else { return }
+
+            let translation: CGPoint
+            switch angle {
+            case .topDown: translation = CGPoint(x: 0, y: 11)
+            case .side: translation = CGPoint(x: -11, y: 0)
+            case .otherSide: translation = CGPoint(x: 9, y: 9)
+            }
+
+            let move = CABasicAnimation(keyPath: "transform")
+            move.fromValue = NSValue(caTransform3D: CATransform3DIdentity)
+            move.toValue = NSValue(
+                caTransform3D: CATransform3DMakeTranslation(translation.x, translation.y, 0)
+            )
+
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = 0.42
+            fade.toValue = 1
+
+            let scale = CABasicAnimation(keyPath: "transform.scale")
+            scale.fromValue = 0.88
+            scale.toValue = 1.1
+
+            let visual = CAAnimationGroup()
+            visual.animations = [fade, scale]
+            visual.duration = 0.78
+            visual.autoreverses = true
+            visual.repeatCount = .infinity
+            visual.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            visual.isRemovedOnCompletion = false
+            arrowView.layer.add(visual, forKey: "mealAnglePulse")
+
+            move.duration = 0.78
+            move.autoreverses = true
+            move.repeatCount = .infinity
+            move.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            move.isRemovedOnCompletion = false
+            pulseHost.layer.add(move, forKey: "mealAngleMove")
+        }
+    }
+
+    /// White diagrammatic chevron used by `MealAngleHintView`.
+    final class MealAngleArrowView: UIView {
+        enum Pointing {
+            case down
+            case left
+            case downRight
+        }
+
+        var pointing: Pointing = .down {
             didSet { setNeedsDisplay() }
         }
 
@@ -499,27 +647,20 @@ extension AIInsights {
         }
 
         override func draw(_ rect: CGRect) {
-            guard let ctx = UIGraphicsGetCurrentContext() else { return }
-            ctx.clear(rect)
-            let plate = CGRect(x: rect.midX - 54, y: rect.midY - 28, width: 108, height: 72)
-            UIColor.white.withAlphaComponent(0.92).setStroke()
-            let platePath = UIBezierPath(ovalIn: plate)
-            platePath.lineWidth = 3
-            platePath.stroke()
-            let inner = plate.insetBy(dx: 10, dy: 8)
-            UIBezierPath(ovalIn: inner).stroke()
-
-            switch angle {
-            case .topDown:
-                drawArrow(from: CGPoint(x: rect.midX, y: plate.minY - 36), to: CGPoint(x: rect.midX, y: plate.minY - 4))
-            case .side:
-                drawArrow(from: CGPoint(x: plate.maxX + 36, y: plate.midY), to: CGPoint(x: plate.maxX + 6, y: plate.midY))
-            case .otherSide:
-                drawArrow(from: CGPoint(x: plate.minX - 36, y: plate.minY - 8), to: CGPoint(x: plate.minX - 4, y: plate.midY - 6))
+            let inset = rect.insetBy(dx: 8, dy: 6)
+            let from: CGPoint
+            let to: CGPoint
+            switch pointing {
+            case .down:
+                from = CGPoint(x: inset.midX, y: inset.minY)
+                to = CGPoint(x: inset.midX, y: inset.maxY)
+            case .left:
+                from = CGPoint(x: inset.maxX, y: inset.midY)
+                to = CGPoint(x: inset.minX, y: inset.midY)
+            case .downRight:
+                from = CGPoint(x: inset.minX, y: inset.minY)
+                to = CGPoint(x: inset.maxX, y: inset.maxY)
             }
-        }
-
-        private func drawArrow(from: CGPoint, to: CGPoint) {
             UIColor.white.withAlphaComponent(0.95).setStroke()
             UIColor.white.withAlphaComponent(0.95).setFill()
             let line = UIBezierPath()
