@@ -103,7 +103,8 @@ Apple-side work that git cannot do:
 
 1. Add this meals container as a **second** CloudKit container on the Trio App ID (keep glucose elsewhere).
 2. CloudKit Dashboard: record types `Meal` and `MealFeed` with the fields above; mark `Meal` queryable; **Deploy Schema to Production** before TestFlight.
-3. Invite the companion Apple ID (Messages / iCloud share URL). Pairing happens in meals-companion, not in Trio.
+3. After the App ID has the container, regenerate Match profiles once: run **3. Create Certificates** with `MATCH_FORCE=true` (workflow input or repo variable). That does **not** nuke certificates (`FORCE_NUKE_CERTS` stays off). Then unset `MATCH_FORCE`.
+4. Invite the companion Apple ID (Messages / iCloud share URL). Pairing happens in meals-companion, not in Trio.
 
 ## Dedicated companion App Group (optional, same phone only)
 
