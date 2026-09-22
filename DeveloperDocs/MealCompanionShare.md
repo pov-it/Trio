@@ -8,6 +8,8 @@ This is **off by default**. Nothing is written until **Share meals with companio
 
 Linux / this cloud agent cannot run Xcode, CloudKit, or a device. No TestFlight or pairing success is claimed here.
 
+TestFlight / App Store builds typically **do not contain** `embedded.mobileprovision`. Preflight must read the **code signature** entitlements (`SecCodeCopySelf` / `SecStaticCodeCreateWithPath` + `SecCodeCopySigningInformation`). An absent provision file is unknown, not “not entitled”. Trio only shows “not entitled” when signed entitlements are readable and lack `iCloud.org.pov-it.<TEAMID>.meals`. If the signature cannot be read, it shows that it couldn’t confirm entitlements and still never calls `CKContainer(identifier:)` (that SIGTRAPs). Trio never invents a share URL.
+
 ## What is shared
 
 Local outbox JSON (`SharedMealPayload`) is an explicit allow-list:

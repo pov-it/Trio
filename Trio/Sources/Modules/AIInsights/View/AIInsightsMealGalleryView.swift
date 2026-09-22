@@ -1159,8 +1159,14 @@ extension AIInsights {
 
         private func refreshEntitlementStatus() {
             let id = MealCompanionShareSettings.cloudKitContainerIdentifier()
-            guard !MealCloudKitEntitlement.isContainerEntitled(id) else { return }
-            inviteStatus = MealCompanionShareError.missingCloudKitEntitlement.localizedDescription
+            switch MealCloudKitEntitlement.check(id) {
+            case .entitled:
+                return
+            case .missing:
+                inviteStatus = MealCompanionShareError.missingCloudKitEntitlement.localizedDescription
+            case .unreadable:
+                inviteStatus = MealCompanionShareError.unreadableSigningEntitlements.localizedDescription
+            }
         }
 
         /// Pasteboard-only copy on the next main-queue turn. Do not flip button

@@ -187,8 +187,6 @@ private struct KeyboardDockFrameKey: PreferenceKey {
 private struct AIInsightsKeyboardDock: ViewModifier {
     @State private var dockPad: CGFloat = 0
     @State private var viewFrame: CGRect = .zero
-    @State private var keyboardFrame: CGRect = .zero
-    @State private var debounce = ShrinkDebounce()
 
     func body(content: Content) -> some View {
         content
@@ -203,54 +201,85 @@ private struct AIInsightsKeyboardDock: ViewModifier {
                     recompute()
                 }
             }
-            .onReceive(Self.keyboardFrames) { frame in
-                keyboardFrame = frame
+            .onAppear {
+                AIInsightsKeyboardFrameMonitor.start()
+                recompute()
+            }
+            .onReceive(AIInsightsKeyboardFrameMonitor.frames) { _ in
                 recompute()
             }
             .padding(.bottom, dockPad)
-            .animation(.easeOut(duration: 0.25), value: dockPad)
     }
-
-    private static let keyboardFrames: AnyPublisher<CGRect, Never> = {
-        let center = Foundation.NotificationCenter.default
-        let shown = Publishers.MergeMany(
-            center.publisher(for: UIResponder.keyboardWillChangeFrameNotification),
-            center.publisher(for: UIResponder.keyboardDidChangeFrameNotification),
-            center.publisher(for: UIResponder.keyboardDidShowNotification)
-        )
-        .compactMap { note -> CGRect? in
-            note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
-        }
-        let hidden = center.publisher(for: UIResponder.keyboardWillHideNotification)
-            .map { _ in CGRect.zero }
-        return shown.merge(with: hidden)
-            .receive(on: DispatchQueue.main)
-            .eraseToAnyPublisher()
-    }()
 
     private func recompute() {
-        applyHeight(AIInsightsKeyboardDockMath.overlap(viewFrame: viewFrame, keyboardFrame: keyboardFrame))
+        let keyboardFrame = AIInsightsKeyboardFrameMonitor.current
+        let needed = AIInsightsKeyboardDockMath.overlap(
+            viewFrame: viewFrame,
+            keyboardFrame: keyboardFrame,
+            appliedPad: dockPad
+        )
+        guard let needed else { return }
+        guard abs(needed - dockPad) > 0.5 else { return }
+        dockPad = needed
+    }
+}
+
+/// Always-on keyboard frame cache. A cold-start FoodFinder open used to miss
+/// `keyboardWillChangeFrame` when the dock subscribed after the first
+/// notification; Combine `NotificationCenter.Publisher` does not replay.
+enum AIInsightsKeyboardFrameMonitor {
+    static let frames: CurrentValueSubject<CGRect, Never> = {
+        let subject = CurrentValueSubject<CGRect, Never>(.zero)
+        start(publishing: subject)
+        return subject
+    }()
+
+    static var current: CGRect { frames.value }
+
+    static func start() {
+        _ = frames
     }
 
-    private func applyHeight(_ newHeight: CGFloat) {
-        debounce.pending?.cancel()
-        debounce.pending = nil
-        if newHeight >= dockPad {
-            dockPad = newHeight
-            return
+    private static func start(publishing subject: CurrentValueSubject<CGRect, Never>) {
+        let center = Foundation.NotificationCenter.default
+        for name in [
+            UIResponder.keyboardWillChangeFrameNotification,
+            UIResponder.keyboardDidChangeFrameNotification,
+            UIResponder.keyboardDidShowNotification
+        ] {
+            center.addObserver(forName: name, object: nil, queue: .main) { note in
+                guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+                else { return }
+                subject.send(Self.normalized(frame))
+            }
         }
-        let work = DispatchWorkItem { dockPad = newHeight }
-        debounce.pending = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+        center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
+            subject.send(.zero)
+        }
+    }
+
+    static func normalized(_ frame: CGRect) -> CGRect {
+        let screenH = UIScreen.main.bounds.height
+        if frame.isNull || frame.isEmpty { return .zero }
+        if frame.minY >= screenH - 1 { return .zero }
+        return frame
     }
 }
 
 /// Overlap of a view with the keyboard, in global/screen coordinates.
+/// `appliedPad` is the dock padding already applied so measuring the *padded*
+/// view does not collapse overlap to 0 (that feedback loop flickered the bar
+/// and dropped the first-open Hub pad).
 enum AIInsightsKeyboardDockMath {
-    static func overlap(viewFrame: CGRect, keyboardFrame: CGRect) -> CGFloat {
-        guard viewFrame.width > 1 else { return 0 }
+    static func overlap(
+        viewFrame: CGRect,
+        keyboardFrame: CGRect,
+        appliedPad: CGFloat = 0
+    ) -> CGFloat? {
+        guard viewFrame.width > 1 else { return nil }
         guard keyboardFrame.height > 1 else { return 0 }
-        if keyboardFrame.minY >= viewFrame.maxY - 1 { return 0 }
-        return max(0, viewFrame.maxY - keyboardFrame.minY)
+        let unpaddedMaxY = viewFrame.maxY + max(0, appliedPad)
+        if keyboardFrame.minY >= unpaddedMaxY - 1 { return 0 }
+        return max(0, unpaddedMaxY - keyboardFrame.minY)
     }
 }

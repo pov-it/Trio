@@ -114,8 +114,13 @@ extension AIInsights {
                 }
             }
             .fullScreenCover(isPresented: $state.showCamera) {
-                AIInsights.CameraCaptureView { imageData in
-                    state.pendingImageForCrop = imageData
+                AIInsights.CameraCaptureView(
+                    targetCount: min(
+                        AIInsights.CameraCaptureView.mealPhotoTarget,
+                        max(1, state.maxFoodFinderImages - state.capturedImages.count)
+                    )
+                ) { images in
+                    state.attachImages(images)
                 }
                 .ignoresSafeArea()
             }
@@ -1178,6 +1183,11 @@ extension AIInsights {
                 .ignoresSafeArea(.container, edges: .bottom)
             }
             .offset(y: isComposerExpanded ? composerDragOffset : 0)
+            .transaction { transaction in
+                if composerDragOffset != 0 {
+                    transaction.animation = nil
+                }
+            }
         }
 
         private var compactFoodInputRow: some View {

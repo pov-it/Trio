@@ -23,6 +23,7 @@
 //
 
 import Foundation
+import Darwin
 #if canImport(CloudKit)
     import CloudKit
 #endif
@@ -190,6 +191,7 @@ extension AIInsights {
         case cloudKitUnavailable
         case missingContainer
         case missingCloudKitEntitlement
+        case unreadableSigningEntitlements
         case shareURLMissing
         case underlying(String)
 
@@ -204,6 +206,11 @@ extension AIInsights {
                     localized: "Meals CloudKit container not entitled on this build. Refresh signing profiles and install a new build.",
                     comment: "Companion share missing CloudKit entitlement"
                 )
+            case .unreadableSigningEntitlements:
+                return String(
+                    localized: "Couldn't read signing entitlements on this build, so the meals CloudKit container cannot be confirmed.",
+                    comment: "Companion share could not read code-signing entitlements"
+                )
             case .shareURLMissing:
                 return String(localized: "No invite link yet. Sign in to iCloud and tap Create invite, or publish one meal first.", comment: "Companion share URL missing")
             case let .underlying(message):
@@ -216,35 +223,88 @@ extension AIInsights {
     /// `CKContainer(identifier:)` traps (`EXC_BREAKPOINT`) when the container
     /// is missing from the profile — never call it without this preflight.
     ///
-    /// Reads `embedded.mobileprovision` (same approach as telemetry / profile
-    /// expiry). `SecTaskCreateFromSelf` is not available to this target's SDK.
+    /// TestFlight / App Store often strip `embedded.mobileprovision`. An absent
+    /// provision file is **unknown**, not “not entitled”. Read the code
+    /// signature via `SecCodeCopySelf` / `SecStaticCodeCreateWithPath` +
+    /// `SecCodeCopySigningInformation` (not `SecTaskCreateFromSelf`).
+    /// Only report “not entitled” when a source was readable and lacks the
+    /// meals container. Never call `CKContainer` unless the check is `.entitled`.
     enum MealCloudKitEntitlement {
         static let containerIdentifiersKey = "com.apple.developer.icloud-container-identifiers"
+        /// `kSecCSSigningInformation` (1 << 1).
+        private static let signingInformationFlags: UInt32 = 1 << 1
+        private static let entitlementsDictKey = "entitlements-dict"
+        private static let entitlementsBlobKey = "entitlements"
+
+        enum SignedSource: Equatable {
+            case readable([String])
+            case unreadable
+        }
+
+        enum Check: Equatable {
+            case entitled
+            case missing
+            case unreadable
+        }
 
         static func isContainerEntitled(
             _ identifier: String,
             signedIdentifiers: [String]? = nil
         ) -> Bool {
+            let source = signedIdentifiers.map { SignedSource.readable($0) }
+            return check(identifier, source: source) == .entitled
+        }
+
+        static func check(
+            _ identifier: String,
+            source: SignedSource? = nil
+        ) -> Check {
             let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return false }
-            let ids = signedIdentifiers ?? readSignedICloudContainerIdentifiers()
-            return ids.contains(trimmed)
+            guard !trimmed.isEmpty else { return .missing }
+            switch source ?? signedSource() {
+            case let .readable(ids):
+                return ids.contains(trimmed) ? .entitled : .missing
+            case .unreadable:
+                return .unreadable
+            }
+        }
+
+        static func signedSource() -> SignedSource {
+            if let fromProvision = readIdentifiersFromEmbeddedProvision() {
+                return .readable(fromProvision)
+            }
+            if let fromSignature = readIdentifiersFromCodeSignature() {
+                return .readable(fromSignature)
+            }
+            return .unreadable
         }
 
         static func readSignedICloudContainerIdentifiers() -> [String] {
-            guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
-                  let data = try? Data(contentsOf: url)
-            else { return [] }
-            return iCloudContainerIdentifiers(fromProvisioningProfile: data)
+            switch signedSource() {
+            case let .readable(ids): return ids
+            case .unreadable: return []
+            }
         }
 
         static func iCloudContainerIdentifiers(fromProvisioningProfile data: Data) -> [String] {
+            parsedICloudContainerIdentifiers(fromProvisioningProfile: data) ?? []
+        }
+
+        private static func parsedICloudContainerIdentifiers(fromProvisioningProfile data: Data) -> [String]? {
             guard let plist = provisioningPlist(from: data),
                   let entitlements = plist["Entitlements"] as? [String: Any]
-            else { return [] }
+            else { return nil }
+            return iCloudContainerIdentifiers(fromEntitlements: entitlements)
+        }
+
+        static func iCloudContainerIdentifiers(fromEntitlements entitlements: [String: Any]) -> [String] {
             if let list = entitlements[containerIdentifiersKey] as? [String] {
                 return list
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            }
+            if let list = entitlements[containerIdentifiersKey] as? [Any] {
+                return list.compactMap { ($0 as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) }
                     .filter { !$0.isEmpty }
             }
             if let one = entitlements[containerIdentifiersKey] as? String {
@@ -252,6 +312,118 @@ extension AIInsights {
                 return trimmed.isEmpty ? [] : [trimmed]
             }
             return []
+        }
+
+        private static func readIdentifiersFromEmbeddedProvision() -> [String]? {
+            guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+                  let data = try? Data(contentsOf: url)
+            else { return nil }
+            return parsedICloudContainerIdentifiers(fromProvisioningProfile: data)
+        }
+
+        private static func readIdentifiersFromCodeSignature() -> [String]? {
+            guard let entitlements = entitlementsFromCodeSignature() else { return nil }
+            return iCloudContainerIdentifiers(fromEntitlements: entitlements)
+        }
+
+        /// Signed entitlements dict from this process / this bundle. Returns
+        /// nil when the signature cannot be read (unknown), not when the dict
+        /// is empty. Resolved with `dlsym` so this compiles when the iOS SDK
+        /// does not export `SecCode*` headers (same class of gap as `SecTask*`).
+        static func entitlementsFromCodeSignature() -> [String: Any]? {
+            if let fromSelf = entitlementsFromSecCodeSelf() {
+                return fromSelf
+            }
+            return entitlementsFromStaticCode(at: Bundle.main.bundleURL)
+        }
+
+        private static func entitlementsFromSecCodeSelf() -> [String: Any]? {
+            typealias CopySelf = @convention(c) (UInt32, UnsafeMutablePointer<OpaquePointer?>) -> Int32
+            typealias CopyStatic = @convention(c) (OpaquePointer, UInt32, UnsafeMutablePointer<OpaquePointer?>) -> Int32
+            guard let copySelf = dlsymProc("SecCodeCopySelf", as: CopySelf.self),
+                  let copyStatic = dlsymProc("SecCodeCopyStaticCode", as: CopyStatic.self)
+            else { return nil }
+            var code: OpaquePointer?
+            guard copySelf(0, &code) == 0, let code else { return nil }
+            var staticCode: OpaquePointer?
+            guard copyStatic(code, 0, &staticCode) == 0, let staticCode else { return nil }
+            return entitlements(fromStaticCodeRef: staticCode)
+        }
+
+        private static func entitlementsFromStaticCode(at url: URL) -> [String: Any]? {
+            typealias CreateWithPath = @convention(c) (CFURL, UInt32, UnsafeMutablePointer<OpaquePointer?>) -> Int32
+            guard let create = dlsymProc("SecStaticCodeCreateWithPath", as: CreateWithPath.self) else {
+                return nil
+            }
+            var staticCode: OpaquePointer?
+            guard create(url as CFURL, 0, &staticCode) == 0, let staticCode else { return nil }
+            return entitlements(fromStaticCodeRef: staticCode)
+        }
+
+        private static func entitlements(fromStaticCodeRef staticCode: OpaquePointer) -> [String: Any]? {
+            if let entitlements = entitlements(fromStaticCodeRef: staticCode, flags: signingInformationFlags) {
+                return entitlements
+            }
+            return entitlements(fromStaticCodeRef: staticCode, flags: 0)
+        }
+
+        private static func entitlements(fromStaticCodeRef staticCode: OpaquePointer, flags: UInt32) -> [String: Any]? {
+            typealias CopyInfo = @convention(c) (
+                OpaquePointer,
+                UInt32,
+                UnsafeMutablePointer<Unmanaged<CFDictionary>?>
+            ) -> Int32
+            guard let copyInfo = dlsymProc("SecCodeCopySigningInformation", as: CopyInfo.self) else {
+                return nil
+            }
+            var info: Unmanaged<CFDictionary>?
+            guard copyInfo(staticCode, flags, &info) == 0, let unmanaged = info else { return nil }
+            let ns = unmanaged.takeRetainedValue() as NSDictionary
+            var dictionary: [String: Any] = [:]
+            ns.enumerateKeysAndObjects { key, value, _ in
+                if let key = key as? String {
+                    dictionary[key] = value
+                }
+            }
+            if let entitlements = dictionary[entitlementsDictKey] as? [String: Any] {
+                return entitlements
+            }
+            if let nsEntitlements = dictionary[entitlementsDictKey] as? NSDictionary {
+                return stringKeyedDictionary(nsEntitlements)
+            }
+            for (key, value) in dictionary where key.lowercased().contains("entitlements-dict") {
+                if let entitlements = value as? [String: Any] {
+                    return entitlements
+                }
+            }
+            if let blob = dictionary[entitlementsBlobKey] as? Data {
+                return entitlementsPlist(from: blob)
+            }
+            return nil
+        }
+
+        private static func stringKeyedDictionary(_ ns: NSDictionary) -> [String: Any] {
+            var dictionary: [String: Any] = [:]
+            ns.enumerateKeysAndObjects { key, value, _ in
+                if let key = key as? String {
+                    dictionary[key] = value
+                }
+            }
+            return dictionary
+        }
+
+        private static func dlsymProc<T>(_ name: String, as _: T.Type) -> T? {
+            guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), name) else { return nil }
+            return unsafeBitCast(symbol, to: T.self)
+        }
+
+        private static func entitlementsPlist(from data: Data) -> [String: Any]? {
+            if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+               let dictionary = plist as? [String: Any]
+            {
+                return dictionary
+            }
+            return provisioningPlist(from: data)
         }
 
         private static func provisioningPlist(from data: Data) -> [String: Any]? {
@@ -595,7 +767,7 @@ extension AIInsights {
             if MealSharePrivacy.rejectReason(for: record.payload) != nil { return }
             let containerID = MealCompanionShareSettings.cloudKitContainerIdentifier(defaults)
             guard !containerID.isEmpty else { return }
-            guard MealCloudKitEntitlement.isContainerEntitled(containerID) else { return }
+            guard MealCloudKitEntitlement.check(containerID) == .entitled else { return }
 
             #if canImport(CloudKit)
                 do {
@@ -610,8 +782,13 @@ extension AIInsights {
             #if canImport(CloudKit)
                 let containerID = MealCompanionShareSettings.cloudKitContainerIdentifier(defaults)
                 guard !containerID.isEmpty else { return .failure(MealCompanionShareError.missingContainer) }
-                guard MealCloudKitEntitlement.isContainerEntitled(containerID) else {
+                switch MealCloudKitEntitlement.check(containerID) {
+                case .entitled:
+                    break
+                case .missing:
                     return .failure(MealCompanionShareError.missingCloudKitEntitlement)
+                case .unreadable:
+                    return .failure(MealCompanionShareError.unreadableSigningEntitlements)
                 }
                 do {
                     let url = try await createOrRefreshShare(containerID: containerID)
@@ -633,10 +810,14 @@ extension AIInsights {
             /// The only `CKContainer(identifier:)` call site. `_checkRequiredEntitlements`
             /// is a SIGTRAP, not a Swift error — never reach it without the preflight.
             private func entitledPrivateDatabase(containerID: String) throws -> CKDatabase {
-                guard MealCloudKitEntitlement.isContainerEntitled(containerID) else {
+                switch MealCloudKitEntitlement.check(containerID) {
+                case .entitled:
+                    return CKContainer(identifier: containerID).privateCloudDatabase
+                case .missing:
                     throw MealCompanionShareError.missingCloudKitEntitlement
+                case .unreadable:
+                    throw MealCompanionShareError.unreadableSigningEntitlements
                 }
-                return CKContainer(identifier: containerID).privateCloudDatabase
             }
 
             private func saveToCloudKit(_ record: SharedMealRecord, containerID: String) async throws {

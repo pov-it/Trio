@@ -459,6 +459,22 @@ struct MealGalleryShareTests {
         #expect(AIInsightsKeyboardDockMath.overlap(viewFrame: view, keyboardFrame: offscreen) == 0)
     }
 
+    @Test("Keyboard dock overlap stays stable after applying pad")
+    func keyboardDockOverlapIgnoresOwnPad() {
+        let keyboard = CGRect(x: 0, y: 508, width: 390, height: 336)
+        let unpadded = CGRect(x: 0, y: 0, width: 390, height: 844)
+        #expect(
+            AIInsightsKeyboardDockMath.overlap(viewFrame: unpadded, keyboardFrame: keyboard, appliedPad: 0) == 336
+        )
+        let padded = CGRect(x: 0, y: 0, width: 390, height: 508)
+        #expect(
+            AIInsightsKeyboardDockMath.overlap(viewFrame: padded, keyboardFrame: keyboard, appliedPad: 336) == 336
+        )
+        #expect(
+            AIInsightsKeyboardDockMath.overlap(viewFrame: .zero, keyboardFrame: keyboard, appliedPad: 0) == nil
+        )
+    }
+
     @Test("Unentitled CloudKit container is refused")
     func unentitledContainerRefused() {
         #expect(
@@ -506,6 +522,44 @@ struct MealGalleryShareTests {
                 signedIdentifiers: ids
             )
         )
+    }
+
+    @Test("Unreadable signing entitlements are not a false not-entitled")
+    func unreadableSigningIsUnknownNotDenied() {
+        let container = "iCloud.org.pov-it.Q6QCL8J6FN.meals"
+        #expect(
+            AIInsights.MealCloudKitEntitlement.check(container, source: .unreadable) == .unreadable
+        )
+        #expect(
+            AIInsights.MealCloudKitEntitlement.check(
+                container,
+                source: .readable([])
+            ) == .missing
+        )
+        #expect(
+            AIInsights.MealCloudKitEntitlement.check(
+                container,
+                source: .readable([container])
+            ) == .entitled
+        )
+        #expect(
+            AIInsights.MealCloudKitEntitlement.isContainerEntitled(container, signedIdentifiers: []) == false
+        )
+        let unreadable = AIInsights.MealCompanionShareError.unreadableSigningEntitlements.localizedDescription
+        #expect(unreadable.localizedCaseInsensitiveContains("signing entitlements"))
+        #expect(!unreadable.localizedCaseInsensitiveContains("not entitled"))
+    }
+
+    @Test("Entitlements dict lists the meals CloudKit container")
+    func entitlementsDictListsMealsContainer() {
+        let ids = AIInsights.MealCloudKitEntitlement.iCloudContainerIdentifiers(
+            fromEntitlements: [
+                "com.apple.developer.icloud-container-identifiers": [
+                    "iCloud.org.pov-it.Q6QCL8J6FN.meals"
+                ]
+            ]
+        )
+        #expect(ids == ["iCloud.org.pov-it.Q6QCL8J6FN.meals"])
     }
 
     @Test("gemini-flash-latest omits thinkingLevel MINIMAL")
