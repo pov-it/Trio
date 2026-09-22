@@ -436,4 +436,26 @@ struct MealGalleryShareTests {
 
         defaults.removePersistentDomain(forName: suite)
     }
+
+    @Test("Keyboard dock overlap is zero when the view is already above the keyboard")
+    func keyboardDockNoDoublePadWhenAlreadyLifted() {
+        let view = CGRect(x: 0, y: 0, width: 390, height: 508)
+        let keyboard = CGRect(x: 0, y: 508, width: 390, height: 336)
+        #expect(AIInsightsKeyboardDockMath.overlap(viewFrame: view, keyboardFrame: keyboard) == 0)
+    }
+
+    @Test("Keyboard dock overlap matches keyboard coverage on an unlifted view")
+    func keyboardDockPadsUnliftedView() {
+        let view = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let keyboard = CGRect(x: 0, y: 508, width: 390, height: 336)
+        #expect(AIInsightsKeyboardDockMath.overlap(viewFrame: view, keyboardFrame: keyboard) == 336)
+    }
+
+    @Test("Keyboard dock overlap is zero when the keyboard is hidden")
+    func keyboardDockHiddenKeyboard() {
+        let view = CGRect(x: 0, y: 0, width: 390, height: 844)
+        #expect(AIInsightsKeyboardDockMath.overlap(viewFrame: view, keyboardFrame: .zero) == 0)
+        let offscreen = CGRect(x: 0, y: 844, width: 390, height: 336)
+        #expect(AIInsightsKeyboardDockMath.overlap(viewFrame: view, keyboardFrame: offscreen) == 0)
+    }
 }

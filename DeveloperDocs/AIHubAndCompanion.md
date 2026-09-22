@@ -99,7 +99,7 @@ v1.0.1 already uses Liquid Glass on Home (`GlassChrome`, `glassActionSheet`). Th
 - FoodFinder composer Camera / Library / Barcode / Dictate circles (`.glassMaterialFill`)
 - iOS 26 system nav/toolbar glass on Hub / FoodFinder / AI Settings (not restyled as custom chrome)
 
-**Not** applied to freeaps / glucose critical-path screens beyond what v1.0.1 already ships. FoodFinder keyboard-flush and “no white leftover panel on drag” are preserved: the composer still uses `.safeAreaInset` and only ignores the **container** home-indicator inset, never `.keyboard`.
+**Not** applied to freeaps / glucose critical-path screens beyond what v1.0.1 already ships. FoodFinder keyboard-flush and “no white leftover panel on drag” are preserved: the composer uses `.safeAreaInset` plus a single keyboard-vs-view overlap dock (Hub, Treatments sheet, and bolus share that path).
 
 ## Out of scope / still on Marijn
 

@@ -1061,7 +1061,7 @@ extension AIInsights {
         }
     }
 
-    /// Toggle + Mayee invite link. User-visible copy never includes `<TEAM>`.
+    /// Toggle + companion invite link. User-visible copy never includes `<TEAM>`.
     struct CompanionShareSettingsForm: View {
         @Binding var isEnabled: Bool
         var usesChartRowBackground: Bool = false
@@ -1069,7 +1069,6 @@ extension AIInsights {
         @State private var shareURLString: String = MealCompanionPublisher.shared.storedShareURLString() ?? ""
         @State private var isRefreshingInvite = false
         @State private var inviteStatus: String?
-        @State private var didCopy = false
 
         private var containerID: String {
             MealCompanionShareSettings.displayContainerIdentifier()
@@ -1107,15 +1106,10 @@ extension AIInsights {
                                 .font(.caption)
                                 .textSelection(.enabled)
                                 .foregroundStyle(.secondary)
-                            Button(action: copyInviteLink) {
-                                Label(
-                                    didCopy
-                                        ? String(localized: "Copied", comment: "Invite link copied")
-                                        : String(localized: "Copy invite link", comment: "Copy companion invite URL"),
-                                    systemImage: didCopy ? "checkmark" : "doc.on.doc"
-                                )
+                            Button(String(localized: "Copy invite link", comment: "Copy companion invite URL")) {
+                                copyInviteLink()
                             }
-                            .buttonStyle(.bordered)
+                            .disabled(isRefreshingInvite)
                         }
                     } else {
                         Text(String(
@@ -1147,7 +1141,7 @@ extension AIInsights {
                 Text(String(localized: "Companion sharing", comment: "Companion meal share settings header"))
             } footer: {
                 Text(String(
-                    localized: "Off by default. When on, newly archived meals share name, time, and photo only — never glucose, IOB, COB, or Nightscout. Copy the invite link for Mayee. This is not the Trio therapy App Group.",
+                    localized: "Off by default. When on, newly archived meals share name, time, and photo only — never glucose, IOB, COB, or Nightscout. Copy the invite link for the companion app. This is not the Trio therapy App Group.",
                     comment: "Companion meal share privacy footer without TEAM placeholder"
                 ))
             }
@@ -1157,24 +1151,47 @@ extension AIInsights {
 
         private func reloadStoredURL() {
             shareURLString = MealCompanionPublisher.shared.storedShareURLString() ?? ""
-            didCopy = false
         }
 
-        /// Pasteboard-only copy. `ShareLink` inside a `Form` `HStack` with
-        /// `.buttonStyle(.bordered)` can crash SwiftUI on this OS; do not use it here.
+        /// Pasteboard-only copy on the next main-queue turn. Do not flip button
+        /// identity (`didCopy` / `ShareLink` / bordered `HStack`) during the tap —
+        /// that rebuild crashed SwiftUI on device.
         @MainActor
         private func copyInviteLink() {
             guard let url = MealCompanionShareSettings.validatedICloudShareURL(from: shareURLString) else {
-                didCopy = false
                 inviteStatus = String(
                     localized: "No valid invite link to copy. Tap Create / refresh invite.",
                     comment: "Companion invite copy missing or invalid URL"
                 )
                 return
             }
-            UIPasteboard.general.string = url.absoluteString
-            didCopy = true
-            inviteStatus = nil
+            let text = url.absoluteString
+            guard !text.isEmpty else {
+                inviteStatus = String(
+                    localized: "No valid invite link to copy. Tap Create / refresh invite.",
+                    comment: "Companion invite copy missing or invalid URL"
+                )
+                return
+            }
+            DispatchQueue.main.async {
+                writeInviteToPasteboard(text)
+            }
+        }
+
+        @MainActor
+        private func writeInviteToPasteboard(_ text: String) {
+            guard MealCompanionShareSettings.validatedICloudShareURL(from: text) != nil else {
+                inviteStatus = String(
+                    localized: "No valid invite link to copy. Tap Create / refresh invite.",
+                    comment: "Companion invite copy missing or invalid URL"
+                )
+                return
+            }
+            UIPasteboard.general.string = text
+            inviteStatus = String(
+                localized: "Copied. Send this invite link to your companion.",
+                comment: "Companion invite copied confirmation"
+            )
         }
 
         @MainActor
@@ -1187,8 +1204,10 @@ extension AIInsights {
             case let .success(url):
                 if let validated = MealCompanionShareSettings.validatedICloudShareURL(from: url) {
                     shareURLString = validated.absoluteString
-                    inviteStatus = String(localized: "Invite ready. Copy the link for Mayee.", comment: "Companion invite created")
-                    didCopy = false
+                    inviteStatus = String(
+                        localized: "Invite ready. Copy the link for your companion.",
+                        comment: "Companion invite created"
+                    )
                 } else {
                     reloadStoredURL()
                     inviteStatus = MealCompanionShareError.shareURLMissing.localizedDescription

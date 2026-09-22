@@ -2,8 +2,8 @@
 //  AIInsights_MealCompanionShare.swift
 //  Trio
 //
-//  Opt-in publisher that can hand a meal-ONLY payload to a companion app
-//  (Mayee). Default OFF. Local-first: writes an on-disk outbox and never
+//  Opt-in publisher that can hand a meal-ONLY payload to a companion app.
+//  Default OFF. Local-first: writes an on-disk outbox and never
 //  blocks FoodFinder / gallery archive on network or CloudKit.
 //
 //  Privacy boundary (enforced in `SharedMealPayload` + `MealSharePrivacy`):
@@ -499,7 +499,7 @@ extension AIInsights {
 
         /// Optional mirror of the meal-only JSON into a dedicated companion
         /// App Group. Refuses `trio-app-group` so Nightscout/CGM App Group
-        /// state cannot be mixed into Mayee's suite.
+        /// state cannot be mixed into the companion suite.
         private func writeCompanionAppGroupIndexIfConfigured(_ payload: SharedMealPayload) {
             guard let suiteName = MealCompanionShareSettings.companionAppGroupIdentifier(defaults),
                   let suite = UserDefaults(suiteName: suiteName)
@@ -647,6 +647,9 @@ extension AIInsights {
                 }
 
                 let latestFeed = (try? await database.record(for: feed.recordID)) ?? feed
+                guard latestFeed.recordType == MealCloudKitContract.feedRecordType else {
+                    throw MealCompanionShareError.shareURLMissing
+                }
                 if latestFeed.share != nil {
                     if let existing = try await existingShareURL(database: database, feed: latestFeed) {
                         MealCompanionShareSettings.persistShareURLString(existing, defaults: defaults)

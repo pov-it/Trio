@@ -37,14 +37,14 @@ extension AIInsights {
                     .background(appState.trioBackgroundColor(for: colorScheme))
                 barcodeStatusBanner
             }
-            // Native keyboard avoidance only. A previous helper padded by the
-            // keyboard frame *and* ignored the keyboard safe area while this
-            // inset still lifted — that double offset left the large white gap
-            // above the keyboard. Backgrounds must not ignore `.keyboard`.
+            // Composer is a bottom safe-area inset. Keyboard docking is applied
+            // once on the whole screen (not on the bar) so Hub, Treatments sheet,
+            // and bolus paths share one overlap measurement. Do not also pad the
+            // bar — that was the mid-screen gap above the keyboard.
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 foodInputBar
-                    .aiInsightsKeyboardOverlapPadding()
             }
+            .aiInsightsKeyboardDock()
             .background(appState.trioBackgroundColor(for: colorScheme))
             .navigationTitle(currentNavTitle)
             .navigationBarTitleDisplayMode(.inline)

@@ -3,9 +3,9 @@
 //  Trio
 //
 //  Keyboard-avoidance helper used by the AI chat input bar.
-//  FoodFinder uses `aiInsightsKeyboardOverlapPadding` with `.safeAreaInset`
-//  instead of this modifier: it must not ignore `.keyboard` (that double
-//  offset left a white gap above the keyboard).
+//  FoodFinder uses `aiInsightsKeyboardDock` with `.safeAreaInset` instead of
+//  this modifier: it docks by keyboard-vs-view overlap so Hub and sheet paths
+//  share one lift and do not double-offset.
 //
 //  Why this exists:
 //  SwiftUI's built-in keyboard avoidance lifts the entire view that owns a
@@ -39,6 +39,7 @@
 //  triggering additional SwiftUI invalidations.
 //
 
+import Combine
 import SwiftUI
 import UIKit
 
@@ -47,22 +48,24 @@ import UIKit
 extension View {
     /// Apply this near the root of a view that contains a TextField at the
     /// bottom (chat input) so the input remains visible while the keyboard is
-    /// up. Prefer `aiInsightsKeyboardOverlapPadding` when the view already
-    /// uses `.safeAreaInset` (FoodFinder): that path must not ignore `.keyboard`.
+    /// up. Prefer `aiInsightsKeyboardDock` when the view already uses
+    /// `.safeAreaInset` (FoodFinder).
     func aiInsightsKeyboardAdaptive(bottomSpacing: CGFloat = 0) -> some View {
         modifier(AIInsightsKeyboardAdaptive(bottomSpacing: bottomSpacing))
     }
 
-    /// Pads only by how much the keyboard currently covers this view.
+    /// Dock a bottom composer to the keyboard for **every** presentation path.
     ///
     /// Hub / NavigationLink FoodFinder lives in the WindowGroup hosting
     /// controller, whose keyboard safe area is stripped (`safeAreaRegions =
-    /// .container`) to stop Home from collapsing on a stale keyboard frame.
-    /// `.safeAreaInset` then does not lift. Treatments presents FoodFinder in
-    /// a sheet whose hosting controller still has keyboard safe area, so
-    /// inset already lifts and overlap is ~0 — no double padding / white gap.
-    func aiInsightsKeyboardOverlapPadding() -> some View {
-        modifier(AIInsightsKeyboardOverlapPadding())
+    /// .container`) so Home does not collapse on a stale keyboard frame.
+    /// Treatments presents FoodFinder in a sheet that still has keyboard safe
+    /// area. Measuring this view’s frame against the keyboard frame yields
+    /// extra pad only when the keyboard actually covers the view, so Hub and
+    /// sheet do not double-offset. SwiftUI’s keyboard safe area is ignored
+    /// here so only this pad lifts the composer.
+    func aiInsightsKeyboardDock() -> some View {
+        modifier(AIInsightsKeyboardDock())
     }
 }
 
@@ -169,89 +172,86 @@ private final class ShrinkDebounce {
     var pending: DispatchWorkItem?
 }
 
-// MARK: - Overlap padding (FoodFinder)
+// MARK: - Keyboard dock (FoodFinder)
 
-private struct ComposerBottomInsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+private struct KeyboardDockFrameKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
         value = nextValue()
     }
 }
 
-private struct AIInsightsKeyboardOverlapPadding: ViewModifier {
-    @State private var extraPad: CGFloat = 0
-    @State private var keyboardVisible: CGFloat = 0
-    @State private var currentBottomInset: CGFloat = 0
-    @State private var restBottomInset: CGFloat = 0
-    @State private var hasSubscribed = false
+/// Lifts a bottom-pinned composer by the overlap between this view and the
+/// keyboard. Works whether or not the hosting controller includes keyboard
+/// in `safeAreaRegions` (Hub vs Treatments sheet vs bolus).
+private struct AIInsightsKeyboardDock: ViewModifier {
+    @State private var dockPad: CGFloat = 0
+    @State private var viewFrame: CGRect = .zero
+    @State private var keyboardFrame: CGRect = .zero
     @State private var debounce = ShrinkDebounce()
 
     func body(content: Content) -> some View {
         content
+            .ignoresSafeArea(.keyboard, edges: .bottom)
             .background {
                 GeometryReader { geo in
-                    Color.clear.preference(key: ComposerBottomInsetKey.self, value: geo.safeAreaInsets.bottom)
+                    Color.clear.preference(key: KeyboardDockFrameKey.self, value: geo.frame(in: .global))
                 }
             }
-            .onPreferenceChange(ComposerBottomInsetKey.self) { inset in
-                currentBottomInset = inset
-                if keyboardVisible == 0 {
-                    restBottomInset = inset
+            .onPreferenceChange(KeyboardDockFrameKey.self) { frame in
+                DispatchQueue.main.async {
+                    viewFrame = frame
+                    recompute()
                 }
+            }
+            .onReceive(Self.keyboardFrames) { frame in
+                keyboardFrame = frame
                 recompute()
             }
-            .onChange(of: keyboardVisible) {
-                recompute()
-            }
-            .padding(.bottom, extraPad)
-            .animation(.easeOut(duration: 0.25), value: extraPad)
-            .onAppear(perform: subscribeOnce)
+            .padding(.bottom, dockPad)
+            .animation(.easeOut(duration: 0.25), value: dockPad)
     }
 
-    private func subscribeOnce() {
-        guard !hasSubscribed else { return }
-        hasSubscribed = true
+    private static let keyboardFrames: AnyPublisher<CGRect, Never> = {
         let center = Foundation.NotificationCenter.default
-        for name in [
-            UIResponder.keyboardWillChangeFrameNotification,
-            UIResponder.keyboardDidChangeFrameNotification,
-            UIResponder.keyboardDidShowNotification
-        ] {
-            center.addObserver(forName: name, object: nil, queue: .main) { note in
-                guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
-                let screenH = UIScreen.main.bounds.height
-                keyboardVisible = max(0, screenH - frame.origin.y)
-            }
+        let shown = Publishers.MergeMany(
+            center.publisher(for: UIResponder.keyboardWillChangeFrameNotification),
+            center.publisher(for: UIResponder.keyboardDidChangeFrameNotification),
+            center.publisher(for: UIResponder.keyboardDidShowNotification)
+        )
+        .compactMap { note -> CGRect? in
+            note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
         }
-        center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
-            keyboardVisible = 0
-        }
-    }
+        let hidden = center.publisher(for: UIResponder.keyboardWillHideNotification)
+            .map { _ in CGRect.zero }
+        return shown.merge(with: hidden)
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }()
 
     private func recompute() {
-        guard keyboardVisible > 0 else {
-            applyHeight(0)
-            return
-        }
-        // Sheet / keyboard-safe-area path: SwiftUI already lifted us.
-        if currentBottomInset + 24 >= keyboardVisible {
-            applyHeight(0)
-            return
-        }
-        // Hub NavigationLink path: root hosting controller dropped keyboard
-        // from safeAreaRegions, so inset stays at the home indicator.
-        applyHeight(max(0, keyboardVisible - restBottomInset))
+        applyHeight(AIInsightsKeyboardDockMath.overlap(viewFrame: viewFrame, keyboardFrame: keyboardFrame))
     }
 
     private func applyHeight(_ newHeight: CGFloat) {
         debounce.pending?.cancel()
         debounce.pending = nil
-        if newHeight >= extraPad {
-            extraPad = newHeight
+        if newHeight >= dockPad {
+            dockPad = newHeight
             return
         }
-        let work = DispatchWorkItem { extraPad = newHeight }
+        let work = DispatchWorkItem { dockPad = newHeight }
         debounce.pending = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+    }
+}
+
+/// Overlap of a view with the keyboard, in global/screen coordinates.
+enum AIInsightsKeyboardDockMath {
+    static func overlap(viewFrame: CGRect, keyboardFrame: CGRect) -> CGFloat {
+        guard viewFrame.width > 1 else { return 0 }
+        guard keyboardFrame.height > 1 else { return 0 }
+        if keyboardFrame.minY >= viewFrame.maxY - 1 { return 0 }
+        return max(0, viewFrame.maxY - keyboardFrame.minY)
     }
 }
