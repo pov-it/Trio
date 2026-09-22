@@ -20,7 +20,6 @@ extension AIInsights {
         @State private var selectedSourceItem: FoodItem?
         @State private var compactInputMeasuredHeight: CGFloat = 0
         @State private var compactInputSingleLineHeight: CGFloat = 0
-        @State private var composerFocusRequest = 0
         @GestureState private var composerDragOffset: CGFloat = 0
         @Namespace private var composerNamespace
         @State private var pendingGalleryBolus: FoodAnalysisResult?
@@ -37,10 +36,8 @@ extension AIInsights {
                     .background(appState.trioBackgroundColor(for: colorScheme))
                 barcodeStatusBanner
             }
-            // Composer is a bottom safe-area inset. Keyboard docking is applied
-            // once on the whole screen (not on the bar) so Hub, Treatments sheet,
-            // and bolus paths share one overlap measurement. Do not also pad the
-            // bar — that was the mid-screen gap above the keyboard.
+            // One bottom composer. Pad only by keyboard overlap (Hub vs sheet);
+            // do not ignore `.keyboard` here — that stacked two lifts.
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 foodInputBar
             }
@@ -1149,67 +1146,55 @@ extension AIInsights {
         // MARK: - Input Bar
 
         private var foodInputBar: some View {
-            VStack(spacing: 0) {
-                VStack(spacing: 8) {
-                    if isComposerExpanded {
-                        expandedFoodComposer
-                            .transition(.asymmetric(
-                                insertion: .scale(scale: 0.94, anchor: .bottom).combined(with: .opacity),
-                                removal: .scale(scale: 0.98, anchor: .bottom).combined(with: .opacity)
-                            ))
-                            .zIndex(1)
-                    } else {
-                        if let result = state.currentResult {
-                            compactContextBanner(result)
-                                .transition(.opacity.combined(with: .move(edge: .bottom)))
-                        }
-                        if !state.capturedImages.isEmpty || !state.capturedBarcodeItems.isEmpty {
-                            attachedDraftStrip
-                                .transition(.opacity.combined(with: .move(edge: .bottom)))
-                        }
-                        compactFoodInputRow
+            VStack(spacing: 8) {
+                if isComposerExpanded {
+                    composerDragHandle
+                    if let result = state.currentResult {
+                        expandedContextBanner(result)
                     }
+                    composerActionGrid
+                } else if let result = state.currentResult {
+                    compactContextBanner(result)
                 }
-                .padding(.top, isComposerExpanded ? 0 : 8)
-                .padding(.bottom, isComposerExpanded ? 0 : 8)
+
+                if !state.capturedImages.isEmpty || !state.capturedBarcodeItems.isEmpty {
+                    attachedDraftStrip
+                }
+
+                compactFoodInputRow
             }
-            // Collapsed bar: rounded only at the top. Ignore the *container*
-            // home-indicator inset so the bar is flush with the screen edge
-            // when the keyboard is hidden — but do NOT ignore the keyboard
-            // region (`.ignoresSafeArea(edges: .bottom)` defaults to `.all`
-            // and was painting a white slab into the keyboard gap).
-            // Expanded composer is a self-contained card; no extra fill, so
-            // dragging it down reveals the AI Hub grey instead of a white panel.
+            .padding(.top, 8)
+            .padding(.bottom, 8)
             .background {
-                if !isComposerExpanded {
-                    UnevenRoundedRectangle(
-                        topLeadingRadius: 24,
-                        bottomLeadingRadius: 0,
-                        bottomTrailingRadius: 0,
-                        topTrailingRadius: 24,
-                        style: .continuous
-                    )
-                    .fill(colorScheme == .dark ? Color.bgDarkBlue.opacity(0.96) : Color.white.opacity(0.96))
-                    .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.10), radius: 8, y: -2)
-                    .ignoresSafeArea(.container, edges: .bottom)
-                }
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 24,
+                    bottomLeadingRadius: 0,
+                    bottomTrailingRadius: 0,
+                    topTrailingRadius: 24,
+                    style: .continuous
+                )
+                .fill(colorScheme == .dark ? Color.bgDarkBlue.opacity(0.96) : Color.white.opacity(0.96))
+                .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.10), radius: 8, y: -2)
+                .ignoresSafeArea(.container, edges: .bottom)
             }
             .offset(y: isComposerExpanded ? composerDragOffset : 0)
-            .animation(.spring(response: 0.45, dampingFraction: 0.72), value: state.currentResult?.id)
-            .animation(.interactiveSpring(response: 0.42, dampingFraction: 0.88, blendDuration: 0.08), value: isComposerExpanded)
         }
 
         private var compactFoodInputRow: some View {
             HStack(spacing: 8) {
-                expandComposerButton
-                    .disabled(state.isAnalyzing)
+                if isComposerExpanded {
+                    collapseComposerButton
+                } else {
+                    expandComposerButton
+                        .disabled(state.isAnalyzing)
+                }
 
                 TextField(
                     compactInputPlaceholder,
                     text: $state.foodDescription,
                     axis: .vertical
                 )
-                .lineLimit(1)
+                .lineLimit(isComposerExpanded ? 1...6 : 1)
                 .focused($isTextFieldFocused)
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 12)
@@ -1219,7 +1204,6 @@ extension AIInsights {
                     RoundedRectangle(cornerRadius: 20)
                         .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray6))
                 )
-                .matchedGeometryEffect(id: "composer-text", in: composerNamespace)
                 .overlay(alignment: .topLeading) {
                     compactInputMeasurementLayer
                 }
@@ -1324,69 +1308,6 @@ extension AIInsights {
             expandComposer(keepKeyboard: true)
         }
 
-        private var expandedFoodComposer: some View {
-            VStack(spacing: 10) {
-                composerDragHandle
-
-                if let result = state.currentResult {
-                    expandedContextBanner(result)
-                }
-
-                composerActionGrid
-
-                if !state.capturedImages.isEmpty || !state.capturedBarcodeItems.isEmpty {
-                    attachedDraftStrip
-                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
-                }
-
-                expandedTextEditor
-
-                HStack(spacing: 10) {
-                    Button {
-                        collapseComposer(keepKeyboard: true)
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .frame(width: 38, height: 38)
-                            .background(
-                                Circle()
-                                    .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray5))
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(colorScheme == .dark ? .white : .primary)
-
-                    Text(
-                        state.currentResult != nil
-                            ? String(localized: "Add ingredient to this meal", comment: "Expanded FoodFinder add mode hint")
-                            : String(localized: "Add photos or describe the meal", comment: "Expanded FoodFinder analyze mode hint")
-                    )
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    foodSearchButton
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-            .padding(.bottom, 10)
-            .background(
-                FoodFinderComposerBackground(cornerRadius: 24)
-                    .fill(colorScheme == .dark ? Color.bgDarkBlue : Color.white)
-                    .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.12), radius: 18, y: 8)
-            )
-            .frame(maxWidth: .infinity)
-            .onAppear {
-                refocusComposerInput()
-            }
-            .onChange(of: isComposerExpanded) {
-                if isComposerExpanded {
-                    refocusComposerInput()
-                }
-            }
-        }
-
         private func expandedContextBanner(_ result: FoodAnalysisResult) -> some View {
             HStack(spacing: 6) {
                 Image(systemName: "plus.circle.fill")
@@ -1411,48 +1332,19 @@ extension AIInsights {
         }
 
         private func expandComposer(keepKeyboard: Bool) {
-            composerFocusRequest += 1
-            let request = composerFocusRequest
-            if keepKeyboard {
-                isTextFieldFocused = true
-            }
             withAnimation(.interactiveSpring(response: 0.42, dampingFraction: 0.88, blendDuration: 0.08)) {
                 isComposerExpanded = true
             }
             if keepKeyboard {
-                refocusComposerInput(request: request)
+                isTextFieldFocused = true
             }
         }
 
         private func collapseComposer(keepKeyboard: Bool) {
-            composerFocusRequest += 1
-            let request = composerFocusRequest
-            if !keepKeyboard {
-                isTextFieldFocused = false
-            }
             withAnimation(.interactiveSpring(response: 0.42, dampingFraction: 0.9, blendDuration: 0.08)) {
                 isComposerExpanded = false
             }
-            if keepKeyboard {
-                isTextFieldFocused = true
-                DispatchQueue.main.async {
-                    guard composerFocusRequest == request, !isComposerExpanded else { return }
-                    isTextFieldFocused = true
-                }
-            }
-        }
-
-        private func refocusComposerInput(request: Int? = nil) {
-            let request = request ?? composerFocusRequest
-            isTextFieldFocused = true
-            DispatchQueue.main.async {
-                guard isComposerExpanded, composerFocusRequest == request else { return }
-                isTextFieldFocused = true
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                guard isComposerExpanded, composerFocusRequest == request else { return }
-                isTextFieldFocused = true
-            }
+            isTextFieldFocused = keepKeyboard
         }
 
         private var composerDragHandle: some View {
@@ -1529,36 +1421,6 @@ extension AIInsights {
             .frame(maxWidth: .infinity)
         }
 
-        private var expandedTextEditor: some View {
-            ZStack(alignment: .topLeading) {
-                if state.foodDescription.isEmpty {
-                    Text(
-                        state.currentResult != nil
-                            ? String(localized: "Describe the ingredient(s) to add...", comment: "Composer placeholder add mode")
-                            : String(localized: "Describe your meal in detail...", comment: "Composer placeholder analyze mode")
-                    )
-                    .font(.body)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 14)
-                    .allowsHitTesting(false)
-                }
-
-                TextEditor(text: $state.foodDescription)
-                    .focused($isTextFieldFocused)
-                    .scrollContentBackground(.hidden)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .frame(height: 132)
-            }
-            .frame(height: 132)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray6))
-            )
-            .matchedGeometryEffect(id: "composer-text", in: composerNamespace)
-        }
-
         private var expandComposerButton: some View {
             Button {
                 expandComposer(keepKeyboard: true)
@@ -1578,6 +1440,23 @@ extension AIInsights {
             .buttonStyle(.plain)
             .accessibilityLabel(String(localized: "Open FoodFinder tools", comment: "Expand FoodFinder tools button"))
             .foregroundStyle(colorScheme == .dark ? .white : .primary)
+        }
+
+        private var collapseComposerButton: some View {
+            Button {
+                collapseComposer(keepKeyboard: true)
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: 42, height: 42)
+                    .background(
+                        Circle()
+                            .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue : Color(.systemGray5))
+                    )
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(colorScheme == .dark ? .white : .primary)
+            .accessibilityLabel(String(localized: "Close FoodFinder tools", comment: "Collapse FoodFinder tools button"))
         }
 
         private func peekingComposerIcon(_ systemImage: String, matchedID: String) -> some View {
@@ -1608,7 +1487,6 @@ extension AIInsights {
                             Image(systemName: systemImage)
                                 .font(.system(size: 20, weight: .semibold))
                                 .foregroundStyle(tint ?? Color.accentColor)
-                                .matchedGeometryEffect(id: matchedID, in: composerNamespace)
                         }
                     }
                     .frame(width: 48, height: 48)

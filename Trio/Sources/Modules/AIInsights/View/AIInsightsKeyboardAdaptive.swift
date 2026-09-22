@@ -62,8 +62,8 @@ extension View {
     /// Treatments presents FoodFinder in a sheet that still has keyboard safe
     /// area. Measuring this view’s frame against the keyboard frame yields
     /// extra pad only when the keyboard actually covers the view, so Hub and
-    /// sheet do not double-offset. SwiftUI’s keyboard safe area is ignored
-    /// here so only this pad lifts the composer.
+    /// sheet do not double-offset. Does not ignore `.keyboard` — that made
+    /// both paths extend behind the keyboard and stacked a second lift.
     func aiInsightsKeyboardDock() -> some View {
         modifier(AIInsightsKeyboardDock())
     }
@@ -192,7 +192,6 @@ private struct AIInsightsKeyboardDock: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .ignoresSafeArea(.keyboard, edges: .bottom)
             .background {
                 GeometryReader { geo in
                     Color.clear.preference(key: KeyboardDockFrameKey.self, value: geo.frame(in: .global))

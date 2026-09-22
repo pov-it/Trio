@@ -540,10 +540,10 @@ extension AIInsights {
             if request.responseFormat != nil, toolEntries.isEmpty {
                 genConfig["responseMimeType"] = "application/json"
             }
-            if request.disableThinking {
-                genConfig["thinkingConfig"] = usesModernParameters
-                    ? ["thinkingLevel": "minimal"]
-                    : ["thinkingBudget": 0]
+            if request.disableThinking,
+               let thinking = geminiThinkingConfigWhenDisabling(model: request.model, baseURL: baseURL)
+            {
+                genConfig["thinkingConfig"] = thinking
             }
             if !genConfig.isEmpty {
                 body["generationConfig"] = genConfig
@@ -630,6 +630,23 @@ extension AIInsights {
             return identifier.contains("gemini-flash-latest")
                 || identifier.contains("gemini-3.6-")
                 || identifier.contains("gemini-3.5-flash-lite")
+        }
+
+        /// Payload to turn thinking off. `gemini-flash-latest` rejects
+        /// `thinkingLevel: MINIMAL` (400 INVALID_ARGUMENT); omit thinkingConfig
+        /// for that SKU. Gemini 3 uses thinkingLevel; 2.x uses thinkingBudget.
+        static func geminiThinkingConfigWhenDisabling(model: String, baseURL: String = "") -> [String: Any]? {
+            let identifier = "\(model) \(baseURL)".lowercased()
+            if identifier.contains("gemini-flash-latest") {
+                return nil
+            }
+            if identifier.contains("gemini-3.") {
+                return ["thinkingLevel": "minimal"]
+            }
+            if identifier.contains("gemini-2.5") || identifier.contains("gemini-2.0") {
+                return ["thinkingBudget": 0]
+            }
+            return nil
         }
 
         // MARK: - OpenAI Compatible

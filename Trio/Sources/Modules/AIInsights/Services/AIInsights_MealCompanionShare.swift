@@ -201,7 +201,7 @@ extension AIInsights {
                 return String(localized: "The meals CloudKit container is not configured.", comment: "Companion share missing container")
             case .missingCloudKitEntitlement:
                 return String(
-                    localized: "Meals CloudKit container not entitled on this build",
+                    localized: "Meals CloudKit container not entitled on this build. Refresh signing profiles and install a new build.",
                     comment: "Companion share missing CloudKit entitlement"
                 )
             case .shareURLMissing:

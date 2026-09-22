@@ -507,4 +507,15 @@ struct MealGalleryShareTests {
             )
         )
     }
+
+    @Test("gemini-flash-latest omits thinkingLevel MINIMAL")
+    func geminiFlashLatestOmitsUnsupportedThinking() {
+        #expect(
+            AIInsights.AIServiceAdapter.geminiThinkingConfigWhenDisabling(model: "gemini-flash-latest") == nil
+        )
+        let gemini3 = AIInsights.AIServiceAdapter.geminiThinkingConfigWhenDisabling(model: "gemini-3.5-flash")
+        #expect(gemini3?["thinkingLevel"] as? String == "minimal")
+        let gemini25 = AIInsights.AIServiceAdapter.geminiThinkingConfigWhenDisabling(model: "gemini-2.5-flash")
+        #expect(gemini25?["thinkingBudget"] as? Int == 0)
+    }
 }
