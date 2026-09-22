@@ -458,4 +458,53 @@ struct MealGalleryShareTests {
         let offscreen = CGRect(x: 0, y: 844, width: 390, height: 336)
         #expect(AIInsightsKeyboardDockMath.overlap(viewFrame: view, keyboardFrame: offscreen) == 0)
     }
+
+    @Test("Unentitled CloudKit container is refused")
+    func unentitledContainerRefused() {
+        #expect(
+            AIInsights.MealCloudKitEntitlement.isContainerEntitled(
+                "iCloud.org.pov-it.Q6QCL8J6FN.meals",
+                signedIdentifiers: []
+            ) == false
+        )
+        #expect(
+            AIInsights.MealCloudKitEntitlement.isContainerEntitled(
+                "iCloud.org.pov-it.OTHER.meals",
+                signedIdentifiers: ["iCloud.org.pov-it.Q6QCL8J6FN.meals"]
+            ) == false
+        )
+    }
+
+    @Test("Provision plist lists the meals CloudKit container")
+    func provisionPlistListsMealsContainer() {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>Entitlements</key>
+            <dict>
+                <key>com.apple.developer.icloud-container-identifiers</key>
+                <array>
+                    <string>iCloud.org.pov-it.Q6QCL8J6FN.meals</string>
+                </array>
+                <key>com.apple.developer.icloud-services</key>
+                <array>
+                    <string>CloudKit</string>
+                </array>
+            </dict>
+        </dict>
+        </plist>
+        """
+        let ids = AIInsights.MealCloudKitEntitlement.iCloudContainerIdentifiers(
+            fromProvisioningProfile: Data(xml.utf8)
+        )
+        #expect(ids == ["iCloud.org.pov-it.Q6QCL8J6FN.meals"])
+        #expect(
+            AIInsights.MealCloudKitEntitlement.isContainerEntitled(
+                "iCloud.org.pov-it.Q6QCL8J6FN.meals",
+                signedIdentifiers: ids
+            )
+        )
+    }
 }

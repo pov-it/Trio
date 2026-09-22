@@ -23,9 +23,6 @@
 //
 
 import Foundation
-#if canImport(Security)
-    import Security
-#endif
 #if canImport(CloudKit)
     import CloudKit
 #endif
@@ -218,10 +215,11 @@ extension AIInsights {
     /// Runtime check for the **signed** iCloud CloudKit entitlement.
     /// `CKContainer(identifier:)` traps (`EXC_BREAKPOINT`) when the container
     /// is missing from the profile — never call it without this preflight.
+    ///
+    /// Reads `embedded.mobileprovision` (same approach as telemetry / profile
+    /// expiry). `SecTaskCreateFromSelf` is not available to this target's SDK.
     enum MealCloudKitEntitlement {
         static let containerIdentifiersKey = "com.apple.developer.icloud-container-identifiers"
-        static let icloudServicesKey = "com.apple.developer.icloud-services"
-        static let cloudKitServiceValue = "CloudKit"
 
         static func isContainerEntitled(
             _ identifier: String,
@@ -234,30 +232,47 @@ extension AIInsights {
         }
 
         static func readSignedICloudContainerIdentifiers() -> [String] {
-            #if canImport(Security)
-                guard let task = SecTaskCreateFromSelf(nil) else { return [] }
-                var error: Unmanaged<CFError>?
-                guard let raw = SecTaskCopyValueForEntitlement(
-                    task,
-                    containerIdentifiersKey as CFString,
-                    &error
-                ), error == nil
-                else {
-                    return []
-                }
-                if let strings = raw as? [String] {
-                    return strings
-                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                        .filter { !$0.isEmpty }
-                }
-                if let one = raw as? String {
-                    let trimmed = one.trimmingCharacters(in: .whitespacesAndNewlines)
-                    return trimmed.isEmpty ? [] : [trimmed]
-                }
-                return []
-            #else
-                return []
-            #endif
+            guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+                  let data = try? Data(contentsOf: url)
+            else { return [] }
+            return iCloudContainerIdentifiers(fromProvisioningProfile: data)
+        }
+
+        static func iCloudContainerIdentifiers(fromProvisioningProfile data: Data) -> [String] {
+            guard let plist = provisioningPlist(from: data),
+                  let entitlements = plist["Entitlements"] as? [String: Any]
+            else { return [] }
+            if let list = entitlements[containerIdentifiersKey] as? [String] {
+                return list
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            }
+            if let one = entitlements[containerIdentifiersKey] as? String {
+                let trimmed = one.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? [] : [trimmed]
+            }
+            return []
+        }
+
+        private static func provisioningPlist(from data: Data) -> [String: Any]? {
+            if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+               let dictionary = plist as? [String: Any]
+            {
+                return dictionary
+            }
+            let xmlProlog = data.range(of: Data("<?xml".utf8))
+            let plistTag = data.range(of: Data("<plist".utf8))
+            let plistEnd = Data("</plist>".utf8)
+            guard let start = xmlProlog ?? plistTag,
+                  let end = data.range(of: plistEnd, in: start.lowerBound ..< data.endIndex)
+            else { return nil }
+            let plistData = data[start.lowerBound ..< end.upperBound]
+            guard let plist = try? PropertyListSerialization.propertyList(
+                from: Data(plistData),
+                options: [],
+                format: nil
+            ) else { return nil }
+            return plist as? [String: Any]
         }
     }
 
