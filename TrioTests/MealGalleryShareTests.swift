@@ -494,14 +494,35 @@ struct MealGalleryShareTests {
         #expect(AIInsightsKeyboardDockMath.windowCover(keyboardMinY: 0, keyboardHeight: 0, windowHeight: 844) == 0)
     }
 
-    @Test("Resting inset updates from a hidden guide and ignores the keyboard")
+    @Test("Resting inset keeps the tab bar and ignores the keyboard")
     func restingInsetStaysPutWhileKeyboardIsUp() {
-        let hidden = AIInsightsKeyboardDockMath.restingBottomInset(current: 0, windowCover: 34, safeAreaBottom: 34)
+        let hidden = AIInsightsKeyboardDockMath.restingBottomInset(current: 0, candidate: 34, keyboardCover: 0)
         #expect(hidden == 34)
-        let seeded = AIInsightsKeyboardDockMath.restingBottomInset(current: 0, windowCover: 0, safeAreaBottom: 34)
-        #expect(seeded == 34)
-        let showing = AIInsightsKeyboardDockMath.restingBottomInset(current: 34, windowCover: 336, safeAreaBottom: 336)
-        #expect(showing == 34)
+        // The window inset is only the home indicator. The host inset includes
+        // the tab bar and must replace it, including after the keyboard is up.
+        let tab = AIInsightsKeyboardDockMath.restingBottomInset(current: 34, candidate: 83, keyboardCover: 336)
+        #expect(tab == 83)
+        let notShrunk = AIInsightsKeyboardDockMath.restingBottomInset(current: 83, candidate: 34, keyboardCover: 0)
+        #expect(notShrunk == 83)
+        let showing = AIInsightsKeyboardDockMath.restingBottomInset(current: 83, candidate: 336, keyboardCover: 336)
+        #expect(showing == 83)
+        // A safe area animating toward the keyboard must not raise the inset.
+        let growing = AIInsightsKeyboardDockMath.restingBottomInset(current: 83, candidate: 120, keyboardCover: 336)
+        #expect(growing == 83)
+    }
+
+    @Test("Composer lift subtracts the tab bar the bar already sits on")
+    func composerLiftSubtractsTabBar() {
+        // Subtracting only the 34pt home indicator leaves a 49pt gap, the
+        // part of an 83pt tab-bar inset above the home indicator.
+        let windowOnly = AIInsightsKeyboardDockMath.composerLift(windowCover: 336, restingBottomInset: 34)
+        let withTabBar = AIInsightsKeyboardDockMath.composerLift(windowCover: 336, restingBottomInset: 83)
+        #expect(windowOnly - withTabBar == 49)
+        #expect(withTabBar == 253)
+        // A hidden guide must not lift a bar that already clears the tab bar.
+        #expect(AIInsightsKeyboardDockMath.composerLift(windowCover: 34, restingBottomInset: 83) == 0)
+        // A sheet has no tab bar; subtracting the home indicator still docks flush.
+        #expect(AIInsightsKeyboardDockMath.composerLift(windowCover: 336, restingBottomInset: 34) == 302)
     }
 
     @Test("Saved meal thumbnails are center-cropped squares")

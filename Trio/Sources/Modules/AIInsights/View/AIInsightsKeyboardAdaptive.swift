@@ -57,10 +57,12 @@ extension View {
 
     /// Report the keyboard lift for a bottom composer.
     ///
-    /// The lift is the keyboard's overlap with the window, minus the
-    /// home-indicator inset measured while the keyboard is hidden. It does
-    /// not read this view's frame, so padding the composer cannot feed back
-    /// into the next measurement (that loop flickered drag-down).
+    /// The lift is the keyboard's overlap with the window, minus the bottom
+    /// chrome this composer already sits on (home indicator, plus the tab bar
+    /// when FoodFinder is pushed inside one). Subtracting only the window's
+    /// home indicator left a gap the height of the tab bar. It does not read
+    /// this view's frame, so padding the composer cannot feed back into the
+    /// next measurement (that loop flickered drag-down).
     ///
     /// Pass `isDragging: true` while a finger is moving the bar. Updates are
     /// held and delivered once when the drag ends.
@@ -227,12 +229,16 @@ enum AIInsightsKeyboardDockMath {
         return cover
     }
 
-    /// Extra pad for a composer that already sits above the home indicator.
+    /// Extra pad for a composer that already sits above bottom chrome.
     ///
-    /// `restingBottomInset` must be the home-indicator inset from while the
-    /// keyboard was hidden. Reading `safeAreaInsets.bottom` while the keyboard
-    /// is up can return the keyboard height and cancel the lift — that was
-    /// the cold-start miss.
+    /// `restingBottomInset` is the host's bottom safe area with the keyboard
+    /// excluded: the home indicator, or that plus the tab bar. The window's
+    /// own inset is only the home indicator. Subtracting that and not the tab
+    /// bar lifts the bar by the tab-bar height (~49pt) past the keyboard.
+    ///
+    /// A keyboard-height safe area must not be passed here. While the keyboard
+    /// is up that reading is the keyboard itself and cancels the lift — that
+    /// was the cold-start miss.
     static func composerLift(windowCover: CGFloat, restingBottomInset: CGFloat) -> CGFloat {
         let cover = max(0, windowCover)
         let inset = max(0, restingBottomInset)
@@ -240,13 +246,41 @@ enum AIInsightsKeyboardDockMath {
         return cover - inset
     }
 
-    /// Home-indicator sized covers update the resting inset. Keyboard-sized
-    /// covers do not, so a keyboard show cannot overwrite it.
-    static func restingBottomInset(current: CGFloat, windowCover: CGFloat, safeAreaBottom: CGFloat) -> CGFloat {
-        guard windowCover < 80 else { return max(0, current) }
-        if windowCover > 1 { return windowCover }
-        if safeAreaBottom > 0, safeAreaBottom < 80 { return safeAreaBottom }
-        return max(0, current)
+    /// Docked keyboards are taller than this. Tab bars, toolbars, and the
+    /// home indicator are not. iOS 26's floating tab bar still fits.
+    static let maxChromeBottomInset: CGFloat = 150
+
+    /// Guide covers under this are a hidden keyboard. The layout guide rests
+    /// on the home indicator; a visible keyboard is taller.
+    static let hiddenKeyboardCover: CGFloat = 80
+
+    /// `window.safeAreaInsets.bottom` on current phones (34pt portrait,
+    /// 21pt landscape). A host inset at or above this includes a bar.
+    static let homeIndicatorCeiling: CGFloat = 40
+
+    static func isChromeBottomInset(_ value: CGFloat) -> Bool {
+        value > 1 && value < maxChromeBottomInset
+    }
+
+    /// Remember the bottom chrome the composer is already laid out above.
+    ///
+    /// While the keyboard guide is hidden, keep the largest chrome inset so a
+    /// window home-indicator reading (34) does not win over the hosting
+    /// view's tab-bar inset (~83). A keyboard-sized safe area is ignored.
+    /// Once a host-sized inset is stored, a later reading may not grow it
+    /// while the keyboard is up — that growth is the safe area animating
+    /// toward the keyboard and would tuck the bar under it.
+    static func restingBottomInset(current: CGFloat, candidate: CGFloat, keyboardCover: CGFloat) -> CGFloat {
+        let current = max(0, current)
+        guard isChromeBottomInset(candidate) else { return current }
+        if keyboardCover < hiddenKeyboardCover {
+            return max(current, candidate)
+        }
+        if current < 1 { return candidate }
+        if current < homeIndicatorCeiling {
+            return max(current, candidate)
+        }
+        return current
     }
 }
 
@@ -300,17 +334,28 @@ struct AIInsightsComposerKeyboardProbe: UIViewRepresentable {
         private var emitScheduled = false
         private var fallbackToken = UUID()
 
-        func noteSafeArea(bottom: CGFloat, windowCover: CGFloat) {
+        func noteChromeInset(_ candidate: CGFloat) {
+            let cover = max(guideCover, notificationCover)
             restingBottomInset = AIInsightsKeyboardDockMath.restingBottomInset(
                 current: restingBottomInset,
-                windowCover: windowCover,
-                safeAreaBottom: bottom
+                candidate: candidate,
+                keyboardCover: cover
             )
         }
 
-        func guideMoved(cover: CGFloat, safeAreaBottom: CGFloat) {
-            noteSafeArea(bottom: safeAreaBottom, windowCover: cover)
+        /// Safe area changed without a guide move (the tab-bar inset often
+        /// arrives a layout after the window's home indicator). Recompute
+        /// only when the stored chrome inset actually changes.
+        func layoutDidObserveChrome(_ candidate: CGFloat) {
+            let before = restingBottomInset
+            noteChromeInset(candidate)
+            guard abs(restingBottomInset - before) > 0.5 else { return }
+            publishGuide()
+        }
+
+        func guideMoved(cover: CGFloat, chromeInset: CGFloat) {
             guideCover = max(0, cover)
+            noteChromeInset(chromeInset)
             if guideCover > restingBottomInset + 20 {
                 guideHasTrackedKeyboard = true
             }
@@ -321,27 +366,29 @@ struct AIInsightsComposerKeyboardProbe: UIViewRepresentable {
         /// cancel a pending first-show fallback so the layout guide can track
         /// the keyboard down. Show notifications arm that fallback; they do
         /// not jump the bar to the end frame ahead of the guide.
-        func notificationMoved(cover: CGFloat, safeAreaBottom: CGFloat, phase: KeyboardPhase) {
+        func notificationMoved(cover: CGFloat, chromeInset: CGFloat, phase: KeyboardPhase) {
             switch phase {
             case .hide:
                 fallbackToken = UUID()
                 notificationCover = 0
                 holdingFallback = false
+                noteChromeInset(chromeInset)
             case .didHide:
                 fallbackToken = UUID()
                 notificationCover = 0
                 guideCover = 0
                 guideHasTrackedKeyboard = false
                 holdingFallback = false
+                noteChromeInset(chromeInset)
                 schedule(0)
             case .change:
                 guard cover > 1 else { return }
-                noteSafeArea(bottom: safeAreaBottom, windowCover: cover)
                 notificationCover = cover
+                noteChromeInset(chromeInset)
             case .show:
                 guard cover > 1 else { return }
-                noteSafeArea(bottom: safeAreaBottom, windowCover: cover)
                 notificationCover = cover
+                noteChromeInset(chromeInset)
                 armFirstShowFallback()
             }
         }
@@ -439,6 +486,31 @@ struct AIInsightsComposerKeyboardProbe: UIViewRepresentable {
             installIfNeeded()
         }
 
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            coordinator?.layoutDidObserveChrome(observedChromeInset())
+        }
+
+        /// Bottom safe area the composer is already cleared, walking every
+        /// ancestor. Child views inside the safe area report 0. The hosting
+        /// view reports the home indicator plus the tab bar. The window
+        /// reports only the home indicator; the larger chrome inset wins.
+        /// Keyboard-sized insets are ignored so a keyboard show cannot
+        /// cancel the lift.
+        func observedChromeInset() -> CGFloat {
+            var best: CGFloat = 0
+            var view: UIView? = self
+            while let current = view {
+                let inset = current.safeAreaInsets.bottom
+                if AIInsightsKeyboardDockMath.isChromeBottomInset(inset) {
+                    best = max(best, inset)
+                }
+                if current is UIWindow { break }
+                view = current.superview
+            }
+            return best
+        }
+
         /// Hosting controllers above this probe keep keyboard safe area unless
         /// told otherwise. Strip them as soon as the probe is on screen, which
         /// is before the first focus, so SwiftUI does not also inset the bar.
@@ -478,14 +550,13 @@ struct AIInsightsComposerKeyboardProbe: UIViewRepresentable {
                 tracker.topAnchor.constraint(equalTo: window.keyboardLayoutGuide.topAnchor)
             ])
             tracker.onHeight = { [weak self] height in
-                guard let self, let window = self.window ?? self.installedWindow else { return }
-                self.coordinator?.guideMoved(cover: height, safeAreaBottom: window.safeAreaInsets.bottom)
+                guard let self else { return }
+                self.coordinator?.guideMoved(cover: height, chromeInset: self.observedChromeInset())
             }
-            // Seed the home-indicator inset while the keyboard is still hidden
-            // so the first show does not treat that inset as zero and over-pad,
-            // or — if UIKit has already folded the keyboard into the safe area —
-            // subtract the keyboard away.
-            coordinator?.noteSafeArea(bottom: window.safeAreaInsets.bottom, windowCover: 0)
+            // Seed tab-bar / home-indicator chrome while the keyboard is still
+            // hidden. The window inset alone is the home indicator; the host
+            // inset includes the tab bar the safe-area composer already clears.
+            coordinator?.noteChromeInset(observedChromeInset())
 
             let center = Foundation.NotificationCenter.default
             let names: [(Notification.Name, KeyboardPhase)] = [
@@ -521,7 +592,7 @@ struct AIInsightsComposerKeyboardProbe: UIViewRepresentable {
             }
             coordinator?.notificationMoved(
                 cover: cover,
-                safeAreaBottom: window.safeAreaInsets.bottom,
+                chromeInset: observedChromeInset(),
                 phase: phase
             )
         }

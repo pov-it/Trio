@@ -41,7 +41,8 @@ extension AIInsights {
             }
             // One bottom composer. The host's keyboard safe area is stripped
             // and this view ignores it, so the bar is lifted only by
-            // `keyboardLift` (window keyboard guide, not our own frame).
+            // `keyboardLift` (keyboard overlap minus the tab bar and home
+            // indicator this inset already clears).
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 foodInputBar
             }
