@@ -143,6 +143,7 @@ extension Home.RootView {
 
                 Spacer()
 
+                aiHubPill
                 alarmsPill
             }
         }.padding(.horizontal)
@@ -151,6 +152,37 @@ extension Home.RootView {
     func refreshAlarmsSnooze() {
         alarmsSnoozeUntil = UserDefaults.standard
             .object(forKey: "UserNotificationsManager.snoozeUntilDate") as? Date ?? .distantPast
+    }
+
+    /// Sparkles pill matching the alarm bell; opens AI Hub (FoodFinder / chat).
+    @ViewBuilder var aiHubPill: some View {
+        NavigationLink {
+            AIInsights.HubView(resolver: resolver)
+        } label: {
+            Image(systemName: "sparkles")
+                .font(.callout)
+                .fontWeight(.semibold)
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.7215686275, green: 0.3411764706, blue: 1),
+                            Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 32, height: 32)
+                .overlay(
+                    Circle()
+                        .stroke(Color.primary.opacity(0.4), lineWidth: 2)
+                )
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, 8)
+        .accessibilityLabel(String(localized: "AI Hub", comment: "AI Hub accessibility label"))
+        .accessibilityHint(Text(String(localized: "Opens FoodFinder, chat, and trackers", comment: "AI Hub accessibility hint")))
+        .accessibilityAddTraits(.isButton)
     }
 
     /// Bell pill matching the header pills; countdown replaces the label while snoozed.

@@ -1,6 +1,5 @@
 import CGMBLEKit
 import G7SensorKit
-import LibreTransmitter
 import LoopKit
 
 /// Trio-side stand-in for LoopKit next-dev's `CGMManager.providesOwnGlucoseAlerts`.
@@ -34,8 +33,10 @@ enum CGMManagerAlertOwnership {
             return OwningApp(name: "Dexcom G6 / One", deepLink: URL(string: "dexcomg6://"))
         case is G7CGMManager:
             return OwningApp(name: "Dexcom G7 / One+", deepLink: URL(string: "dexcomg7://"))
-        case is LibreTransmitterManagerV3:
-            return OwningApp(name: "FreeStyle Libre", deepLink: nil)
+        // LibreTransmitter is in-process: glucose arrives through Trio, not a
+        // companion app that can be relied on to wake the user overnight.
+        // Treating it as an "owning" CGM (post-upstream-dev merge) silently
+        // suppressed Trio hypo alarms. Do not add it back.
         default:
             return nil
         }

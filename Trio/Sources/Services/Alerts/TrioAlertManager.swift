@@ -178,9 +178,13 @@ final class BaseTrioAlertManager: TrioAlertManager, Injectable {
     /// `.playback` audio session bypasses those.
     ///
     /// Only fires for immediate-trigger alerts; delayed/repeating go
-    /// through UNNotification at fire time. No-op when muted or non-critical.
+    /// through UNNotification at fire time. Critical alerts pierce the
+    /// snooze/mute window by design — otherwise a pre-bed snooze of highs
+    /// would leave an overnight urgent-low silent on builds without the
+    /// Critical Alerts entitlement. Non-critical already returned earlier.
     private func playCriticalAudioFallbackIfNeeded(_ alert: Alert, muted: Bool) {
-        guard alert.interruptionLevel == .critical, !muted else { return }
+        guard alert.interruptionLevel == .critical else { return }
+        _ = muted
         // Honor `playsSound: false` (alert was issued with sound: nil) —
         // user explicitly opted out of audio on this alarm.
         guard let soundName = alert.sound?.filename else { return }
@@ -273,6 +277,7 @@ final class BaseTrioAlertManager: TrioAlertManager, Injectable {
         )
         // `.delayed`/`.repeating` alerts start their audio when the timer
         // fires (`alertDidFire`), not now — this is only their arm time.
+        // Critical still plays through mute (PR #5 / overnight hypo wakes).
         if case .immediate = effective.trigger {
             playCriticalAudioFallbackIfNeeded(effective, muted: muted)
         }

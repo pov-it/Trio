@@ -9,6 +9,10 @@ protocol KeyboardSafeAreaExcludable {
 extension UIHostingController: KeyboardSafeAreaExcludable {
     func excludeKeyboardFromSafeArea() {
         if #available(iOS 16.4, *) {
+            // Setting the same value still invalidates layout. FoodFinder asks
+            // again on appear; skip the no-op so the composer drag is not
+            // relaid out from a redundant safe-area write.
+            guard safeAreaRegions != .container else { return }
             safeAreaRegions = .container
         }
     }

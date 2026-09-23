@@ -1,7 +1,14 @@
 name: 3. Create Certificates
 run-name: Create Certificates (${{ github.ref_name }})
 
-on: [workflow_call, workflow_dispatch]
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      match_force:
+        description: "Regenerate Match provisioning profiles (does not nuke certificates)"
+        type: boolean
+        default: false
 
 env:
   TEAMID: ${{ secrets.TEAMID }}
@@ -11,6 +18,9 @@ env:
   FASTLANE_KEY_ID: ${{ secrets.FASTLANE_KEY_ID }}
   FASTLANE_ISSUER_ID: ${{ secrets.FASTLANE_ISSUER_ID }}
   FASTLANE_KEY: ${{ secrets.FASTLANE_KEY }}
+  # Profile regeneration only. Never set FORCE_NUKE_CERTS here.
+  MATCH_FORCE: ${{ github.event.inputs.match_force == 'true' && 'true' || vars.MATCH_FORCE }}
+  FORCE_PROFILES: ${{ vars.FORCE_PROFILES }}
 
 jobs:
   validate:

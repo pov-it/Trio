@@ -59,20 +59,30 @@ final class TrioUserNotificationAlertScheduler {
 
     private func sound(for alert: Alert, muted: Bool, soundURL: URL?) -> UNNotificationSound? {
         let isCritical = alert.interruptionLevel == .critical
-        if muted {
-            return isCritical ? .defaultCriticalSound(withAudioVolume: 0) : nil
+        // Non-critical alerts stay quiet during a snooze window. Critical
+        // alerts (Override Silence & Focus) must still make sound — volume 0
+        // was silencing overnight hypos after the upstream alerting-fixes
+        // merge, including when the user had only snoozed highs before bed.
+        if muted, !isCritical {
+            return nil
         }
         switch alert.sound {
         case .none,
              .vibrate:
+            // Honor playsSound: false — still a critical UN, but silent.
             return isCritical ? .defaultCriticalSound(withAudioVolume: 0) : nil
         case let .sound(name):
-            if let filename = soundURL?.lastPathComponent {
-                let unName = UNNotificationSoundName(rawValue: filename)
-                return isCritical ? .criticalSoundNamed(unName) : UNNotificationSound(named: unName)
+            if isCritical {
+                // Pre-merge main used the system critical sound for LOWALERT
+                // so DND breakthrough did not depend on copying a bundled
+                // .caf into Library/Sounds. Keep that UN sound; the
+                // in-process player still loops the user-selected file.
+                return .defaultCritical
             }
-            let unName = UNNotificationSoundName(name)
-            return isCritical ? .criticalSoundNamed(unName) : UNNotificationSound(named: unName)
+            if let filename = soundURL?.lastPathComponent {
+                return UNNotificationSound(named: UNNotificationSoundName(rawValue: filename))
+            }
+            return UNNotificationSound(named: UNNotificationSoundName(name))
         }
     }
 }

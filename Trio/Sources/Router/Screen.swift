@@ -52,6 +52,12 @@ enum Screen: Identifiable, Hashable {
     case appDiagnostics
     case settingsExport
     case treatmentsSettings
+    case aiInsights
+    case aiChat
+    case aiSettings
+    case aiFoodFinder
+    case aiCaffeine
+    case autoPresets
 
     var id: Int { String(reflecting: self).hashValue }
 }
@@ -171,6 +177,18 @@ extension Screen {
             SettingsExport.RootView(resolver: resolver)
         case .treatmentsSettings:
             TreatmentsSettingsView(resolver: resolver, state: Settings.StateModel())
+        case .aiInsights:
+            AIInsights.HubView(resolver: resolver)
+        case .aiChat:
+            AIInsights.ChatView(resolver: resolver)
+        case .aiSettings:
+            AIInsights.AISettingsView(resolver: resolver)
+        case .aiFoodFinder:
+            AIInsights.FoodFinderView(resolver: resolver)
+        case .aiCaffeine:
+            AIInsightsCaffeineLogView()
+        case .autoPresets:
+            AutoPresetsSettingsView()
         }
     }
 

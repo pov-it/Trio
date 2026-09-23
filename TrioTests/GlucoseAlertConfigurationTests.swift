@@ -184,4 +184,17 @@ import Testing
         // 0130 + 1h = 0230 local, which only exists once on fall-back days.
         #expect(config.isNight(at: oneThirty.addingTimeInterval(3600), calendar: Self.nyCalendar))
     }
+
+    @Test("Default configuration has Trio own glucose alerts") func defaultTrioOwnsGlucoseAlerts() {
+        #expect(GlucoseAlertConfiguration().forceTrioAlertsWhenCGMProvidesOwn == true)
+    }
+
+    @Test("Omitted forceTrioAlertsWhenCGMProvidesOwn decodes as Trio-owned")
+    func omittedForceFlagDefaultsToTrioOwned() throws {
+        let json = """
+        {"dayStart":{"hour":6,"minute":0},"nightStart":{"hour":22,"minute":0}}
+        """
+        let decoded = try JSONDecoder().decode(GlucoseAlertConfiguration.self, from: Data(json.utf8))
+        #expect(decoded.forceTrioAlertsWhenCGMProvidesOwn == true)
+    }
 }
