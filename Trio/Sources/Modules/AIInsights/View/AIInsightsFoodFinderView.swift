@@ -21,6 +21,9 @@ extension AIInsights {
         @State private var compactInputMeasuredHeight: CGFloat = 0
         @State private var compactInputSingleLineHeight: CGFloat = 0
         @GestureState private var composerDragOffset: CGFloat = 0
+        @State private var isComposerDragActive = false
+        @State private var keyboardLift: CGFloat = 0
+        @State private var dragFrozenKeyboardLift: CGFloat = 0
         @Namespace private var composerNamespace
         @State private var pendingGalleryBolus: FoodAnalysisResult?
 
@@ -36,12 +39,14 @@ extension AIInsights {
                     .background(appState.trioBackgroundColor(for: colorScheme))
                 barcodeStatusBanner
             }
-            // One bottom composer. Pad only by keyboard overlap (Hub vs sheet);
-            // do not ignore `.keyboard` here — that stacked two lifts.
+            // One bottom composer. The host's keyboard safe area is stripped
+            // and this view ignores it, so the bar is lifted only by
+            // `keyboardLift` (window keyboard guide, not our own frame).
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 foodInputBar
             }
-            .aiInsightsKeyboardDock()
+            .aiInsightsStripKeyboardSafeArea()
+            .ignoresSafeArea(.keyboard, edges: .bottom)
             .background(appState.trioBackgroundColor(for: colorScheme))
             .navigationTitle(currentNavTitle)
             .navigationBarTitleDisplayMode(.inline)
@@ -1178,16 +1183,40 @@ extension AIInsights {
                     topTrailingRadius: 24,
                     style: .continuous
                 )
-                .fill(colorScheme == .dark ? Color.bgDarkBlue.opacity(0.96) : Color.white.opacity(0.96))
+                .fill(composerBarFill)
                 .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.10), radius: 8, y: -2)
                 .ignoresSafeArea(.container, edges: .bottom)
             }
+            // Pad below the rounded bar, then paint the same fill through that
+            // gap so the list does not flash between the bar and the keyboard.
+            .padding(.bottom, isComposerDragActive ? dragFrozenKeyboardLift : keyboardLift)
+            .background {
+                composerBarFill
+                    .ignoresSafeArea(.container, edges: .bottom)
+            }
+            .aiInsightsComposerKeyboardLift(isDragging: isComposerDragActive) { lift in
+                keyboardLift = lift
+            }
+            // Offset does not change layout, and the lift is frozen for the
+            // gesture, so the keyboard pad cannot chase the finger.
             .offset(y: isComposerExpanded ? composerDragOffset : 0)
             .transaction { transaction in
-                if composerDragOffset != 0 {
+                if isComposerDragActive {
                     transaction.animation = nil
+                    transaction.disablesAnimations = true
                 }
             }
+            .onChange(of: composerDragOffset) { _, offset in
+                // Gesture cancellation resets GestureState without onEnded.
+                // Unfreeze the keyboard lift or the bar stays stuck.
+                if offset == 0 {
+                    isComposerDragActive = false
+                }
+            }
+        }
+
+        private var composerBarFill: Color {
+            colorScheme == .dark ? Color.bgDarkBlue.opacity(0.96) : Color.white.opacity(0.96)
         }
 
         private var compactFoodInputRow: some View {
@@ -1370,11 +1399,21 @@ extension AIInsights {
         }
 
         private var composerDismissDragGesture: some Gesture {
-            DragGesture(minimumDistance: 4, coordinateSpace: .local)
-                .updating($composerDragOffset) { value, state, _ in
+            DragGesture(minimumDistance: 4, coordinateSpace: .global)
+                .updating($composerDragOffset) { value, state, transaction in
+                    // GestureState otherwise springs every sample and fights
+                    // the keyboard pad. The finger owns this offset.
+                    transaction.animation = nil
+                    transaction.disablesAnimations = true
                     state = max(0, value.translation.height)
                 }
+                .onChanged { _ in
+                    guard !isComposerDragActive else { return }
+                    dragFrozenKeyboardLift = keyboardLift
+                    isComposerDragActive = true
+                }
                 .onEnded { value in
+                    isComposerDragActive = false
                     let shouldCollapse = value.translation.height > 64 || value.predictedEndTranslation.height > 120
                     guard shouldCollapse else { return }
                     collapseComposer(keepKeyboard: false)

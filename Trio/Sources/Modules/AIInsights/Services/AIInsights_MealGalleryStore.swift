@@ -7,9 +7,9 @@
 //  FoodFinder keeps the last 20 analyses (with inline JPEG imageData) in
 //  UserDefaults (`ai_foodfinder_recent`). This store is a separate, durable
 //  archive that outlives that 20-item cap: for every analyzed meal that has a
-//  photo it writes a small downscaled JPEG THUMBNAIL (~320px longest side,
-//  quality ~0.5) to Application Support/MealGallery/<uuid>.jpg and records a
-//  tiny Codable index entry in UserDefaults (`ai_meal_gallery_index`).
+//  photo it writes a small square JPEG THUMBNAIL (center-cropped, side capped
+//  at 320px, quality ~0.5) to Application Support/MealGallery/<uuid>.jpg and
+//  records a tiny Codable index entry in UserDefaults (`ai_meal_gallery_index`).
 //
 //  The index now also holds tags, auto meal-slot, and enough macros / item
 //  snapshots to reload FoodFinder or `FoodBolusHandoff` after the recent cap.
@@ -37,7 +37,7 @@ extension AIInsights {
         static let groupNamesKey = "ai_meal_gallery_group_names"
         /// Subfolder (under Application Support) holding the thumbnail JPEGs.
         private static let folderName = "MealGallery"
-        /// Longest-side target for the stored thumbnail, in pixels.
+        /// Side length cap for the stored square thumbnail, in pixels.
         private static let maxThumbnailSide: CGFloat = 320
         /// JPEG compression quality for stored thumbnails.
         private static let thumbnailQuality: CGFloat = 0.5
@@ -447,24 +447,40 @@ extension AIInsights {
 
         // MARK: - Image downscaling
 
-        /// Downscale to `maxThumbnailSide` on the longest edge (never upscaling)
-        /// and re-encode as a low-quality JPEG. Returns nil if the input cannot
-        /// be decoded as an image.
+        /// Center-crop to a square, downscale so the side is at most
+        /// `maxThumbnailSide` (never upscaling), and re-encode as a low-quality
+        /// JPEG. Portrait camera shots used to keep their aspect ratio, which
+        /// the gallery then laid out as tall cells. Returns nil if the input
+        /// cannot be decoded as an image.
         static func makeThumbnailJPEG(from imageData: Data) -> Data? {
             guard let image = UIImage(data: imageData) else { return nil }
             let size = image.size
             guard size.width > 0, size.height > 0 else { return nil }
 
-            let longestSide = max(size.width, size.height)
-            let scale = min(1.0, maxThumbnailSide / longestSide)
-            let targetSize = CGSize(width: size.width * scale, height: size.height * scale)
+            let cropSide = min(size.width, size.height)
+            let targetSide = min(maxThumbnailSide, cropSide)
+            let drawScale = targetSide / cropSide
+            let cropOrigin = CGPoint(
+                x: (size.width - cropSide) / 2,
+                y: (size.height - cropSide) / 2
+            )
 
             let format = UIGraphicsImageRendererFormat.default()
             format.scale = 1 // target size is already in pixels
             format.opaque = true
-            let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
+            let renderer = UIGraphicsImageRenderer(
+                size: CGSize(width: targetSide, height: targetSide),
+                format: format
+            )
             let resized = renderer.image { _ in
-                image.draw(in: CGRect(origin: .zero, size: targetSize))
+                // `draw(in:)` applies UIImage orientation, so the crop is in
+                // the oriented pixel space the gallery will display.
+                image.draw(in: CGRect(
+                    x: -cropOrigin.x * drawScale,
+                    y: -cropOrigin.y * drawScale,
+                    width: size.width * drawScale,
+                    height: size.height * drawScale
+                ))
             }
             return resized.jpegData(compressionQuality: thumbnailQuality)
         }

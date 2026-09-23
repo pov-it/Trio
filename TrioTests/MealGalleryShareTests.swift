@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import UIKit
 
 @testable import Trio
 
@@ -473,6 +474,68 @@ struct MealGalleryShareTests {
         #expect(
             AIInsightsKeyboardDockMath.overlap(viewFrame: .zero, keyboardFrame: keyboard, appliedPad: 0) == nil
         )
+    }
+
+    @Test("Composer lift subtracts only the resting home-indicator inset")
+    func composerLiftAboveHomeIndicator() {
+        #expect(AIInsightsKeyboardDockMath.composerLift(windowCover: 0, restingBottomInset: 34) == 0)
+        #expect(AIInsightsKeyboardDockMath.composerLift(windowCover: 34, restingBottomInset: 34) == 0)
+        #expect(AIInsightsKeyboardDockMath.composerLift(windowCover: 336, restingBottomInset: 34) == 302)
+        // A keyboard-height safe area must not be what we subtract. Callers
+        // pass the inset captured while the keyboard was hidden.
+        #expect(AIInsightsKeyboardDockMath.composerLift(windowCover: 336, restingBottomInset: 0) == 336)
+    }
+
+    @Test("Window cover rejects a hidden keyboard and a bad first-show frame")
+    func windowCoverHiddenAndImplausible() {
+        #expect(AIInsightsKeyboardDockMath.windowCover(keyboardMinY: 844, keyboardHeight: 336, windowHeight: 844) == 0)
+        #expect(AIInsightsKeyboardDockMath.windowCover(keyboardMinY: 508, keyboardHeight: 336, windowHeight: 844) == 336)
+        #expect(AIInsightsKeyboardDockMath.windowCover(keyboardMinY: -200, keyboardHeight: 1200, windowHeight: 844) == 0)
+        #expect(AIInsightsKeyboardDockMath.windowCover(keyboardMinY: 0, keyboardHeight: 0, windowHeight: 844) == 0)
+    }
+
+    @Test("Resting inset updates from a hidden guide and ignores the keyboard")
+    func restingInsetStaysPutWhileKeyboardIsUp() {
+        let hidden = AIInsightsKeyboardDockMath.restingBottomInset(current: 0, windowCover: 34, safeAreaBottom: 34)
+        #expect(hidden == 34)
+        let seeded = AIInsightsKeyboardDockMath.restingBottomInset(current: 0, windowCover: 0, safeAreaBottom: 34)
+        #expect(seeded == 34)
+        let showing = AIInsightsKeyboardDockMath.restingBottomInset(current: 34, windowCover: 336, safeAreaBottom: 336)
+        #expect(showing == 34)
+    }
+
+    @Test("Saved meal thumbnails are center-cropped squares")
+    @MainActor
+    func mealThumbnailIsSquare() throws {
+        let portrait = try #require(Self.jpeg(width: 90, height: 160))
+        let portraitThumb = try #require(AIInsights.MealGalleryStore.makeThumbnailJPEG(from: portrait))
+        let portraitImage = try #require(UIImage(data: portraitThumb))
+        #expect(abs(portraitImage.size.width - portraitImage.size.height) < 1)
+        #expect(abs(portraitImage.size.width - 90) < 1)
+
+        let landscape = try #require(Self.jpeg(width: 200, height: 80))
+        let landscapeThumb = try #require(AIInsights.MealGalleryStore.makeThumbnailJPEG(from: landscape))
+        let landscapeImage = try #require(UIImage(data: landscapeThumb))
+        #expect(abs(landscapeImage.size.width - landscapeImage.size.height) < 1)
+        #expect(abs(landscapeImage.size.width - 80) < 1)
+
+        let large = try #require(Self.jpeg(width: 800, height: 1400))
+        let largeThumb = try #require(AIInsights.MealGalleryStore.makeThumbnailJPEG(from: large))
+        let largeImage = try #require(UIImage(data: largeThumb))
+        #expect(abs(largeImage.size.width - 320) < 1)
+        #expect(abs(largeImage.size.height - 320) < 1)
+    }
+
+    private static func jpeg(width: CGFloat, height: CGFloat) -> Data? {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format)
+        let image = renderer.image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        return image.jpegData(compressionQuality: 0.9)
     }
 
     @Test("Unentitled CloudKit container is refused")

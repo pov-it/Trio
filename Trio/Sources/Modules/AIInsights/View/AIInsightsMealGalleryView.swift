@@ -344,6 +344,8 @@ extension AIInsights {
                                     thumbnailCell(meal)
                                 }
                                 .buttonStyle(.plain)
+                                .frame(maxWidth: .infinity)
+                                .aspectRatio(1, contentMode: .fit)
                             }
                         }
                         .padding(16)
@@ -403,27 +405,39 @@ extension AIInsights {
         }
 
         private func thumbnailCell(_ meal: DisplayMeal) -> some View {
-            ZStack(alignment: .bottomTrailing) {
-                Group {
-                    if let data = meal.thumbnailData, let image = UIImage(data: data) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.gray.opacity(0.25))
-                            .overlay(
-                                Image(systemName: "photo")
-                                    .foregroundStyle(.secondary)
-                            )
-                    }
+            // The square is the layout size. The photo is only an overlay, so a
+            // portrait JPEG cannot stretch the grid row. `scaledToFill` + clip
+            // aspect-fills that square for both new (portrait) and old thumbs.
+            // `.aspectRatio(1, contentMode: .fill)` on the image itself does not
+            // do this: LazyVGrid proposes an unbounded height and the image's
+            // own aspect wins.
+            Color.clear
+                .aspectRatio(1, contentMode: .fit)
+                .overlay {
+                    thumbnailFill(meal)
+                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 }
-                .frame(minWidth: 0, maxWidth: .infinity)
-                .aspectRatio(1, contentMode: .fill)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(alignment: .bottomTrailing) {
+                    carbsBadge(meal.totalCarbs)
+                        .padding(6)
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
 
-                carbsBadge(meal.totalCarbs)
-                    .padding(6)
+        @ViewBuilder
+        private func thumbnailFill(_ meal: DisplayMeal) -> some View {
+            if let data = meal.thumbnailData, let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Color.gray.opacity(0.25)
+                    .overlay {
+                        Image(systemName: "photo")
+                            .foregroundStyle(.secondary)
+                    }
             }
         }
 
