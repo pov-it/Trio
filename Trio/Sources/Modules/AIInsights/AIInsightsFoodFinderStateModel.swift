@@ -167,6 +167,8 @@ extension AIInsights {
         var mealName: String? = nil
         var mealPortion: String? = nil
         var confidence: Double? = nil
+        /// Meal-photo engine that produced this estimate. Nil for text, barcode, and older saves.
+        var photoEngine: FoodFinderPhotoEngine? = nil
         var manualMacroOverride: MacroOverride? = nil
         var carbEstimateLowerBound: Double? = nil
         var carbEstimateUpperBound: Double? = nil
@@ -316,6 +318,7 @@ extension AIInsights {
         var foodFinderAHToken: String = ""
         var foodFinderDoseGuardEnabled: Bool = true
         var foodFinderDoseGuardSamples: Int = 2
+        var foodFinderPhotoEngine: FoodFinderPhotoEnginePreference = .automatic
         var maxFoodFinderImages: Int { max(1, providerType.foodFinderImageLimit) }
 
         /// FoodFinder always uses Gemini Flash latest for Google, even if
@@ -395,6 +398,7 @@ extension AIInsights {
             foodFinderPreferredSource = provider.settings.foodFinderPreferredSource
             foodFinderDoseGuardEnabled = provider.settings.foodFinderDoseGuardEnabled
             foodFinderDoseGuardSamples = min(3, max(1, provider.settings.foodFinderDoseGuardSamples))
+            foodFinderPhotoEngine = provider.settings.foodFinderPhotoEngine
 
             loadDraftDescription()
             loadRecentResults()
@@ -1638,9 +1642,8 @@ extension AIInsights {
             await analyzeImages([imageData], description: description)
         }
 
-        /// Multi-image AI analysis: sends every attached photo as a separate
-        /// part of the same user turn so the model can reason across them
-        /// (e.g. side dish + portion ruler + ingredient label).
+        /// Multi-image analysis. Automatic mode tries on-device Foundation Models
+        /// when Apple Intelligence is ready, then the existing Gemini photo path.
         @MainActor
         func analyzeImages(_ images: [Data], description: String = "") async {
             guard !images.isEmpty else { return }
@@ -1648,18 +1651,115 @@ extension AIInsights {
                 errorMessage = String(localized: "AI Insights is not ready yet.", comment: "AI error")
                 return
             }
-            guard !apiKey.isEmpty else {
-                errorMessage = String(localized: "API Key is missing. Configure it in AI Settings.", comment: "AI error")
-                return
-            }
+
+            let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+            let preference = provider.settings.foodFinderPhotoEngine
+            let geminiConfigured = !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let route = FoodFinderPhotoRouter.route(
+                preference: preference,
+                onDeviceAvailable: FoodFinderOnDeviceAnalyzer.isReady,
+                geminiConfigured: geminiConfigured
+            )
 
             isAnalyzing = true
             errorMessage = nil
             defer { isAnalyzing = false }
 
+            switch route {
+            case let .blocked(block):
+                errorMessage = photoRouteBlockedMessage(block)
+            case .gemini:
+                await analyzeImagesWithGemini(images, description: trimmedDescription)
+            case .onDevice:
+                switch await analyzeImagesOnDevice(images, description: trimmedDescription) {
+                case .committed:
+                    debug(.service, "FoodFinder photo analysis: on-device")
+                case let .failed(message):
+                    guard FoodFinderPhotoRouter.fallsBackToGemini(
+                        preference: preference,
+                        geminiConfigured: geminiConfigured
+                    ) else {
+                        errorMessage = message
+                        return
+                    }
+                    debug(.service, "FoodFinder on-device photo analysis failed; using Gemini")
+                    await analyzeImagesWithGemini(images, description: trimmedDescription)
+                }
+            }
+        }
+
+        private enum OnDevicePhotoOutcome {
+            case committed
+            case failed(String)
+        }
+
+        @MainActor
+        private func analyzeImagesOnDevice(_ images: [Data], description: String) async -> OnDevicePhotoOutcome {
             do {
-                let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
-                let context = trimmedDescription.isEmpty ? "" : "\nUser context: \(trimmedDescription)"
+                let estimate = try await FoodFinderOnDeviceAnalyzer.analyze(
+                    images: images,
+                    description: description,
+                    extraContext: scannedBarcodePromptContext()
+                )
+                let parsed = ParsedFoodAnalysis(
+                    items: estimate.items.map { item in
+                        FoodItem(
+                            name: item.name,
+                            portion: item.portion,
+                            carbs: item.carbs,
+                            fat: item.fat,
+                            protein: item.protein,
+                            fiber: item.fiber,
+                            calories: item.calories
+                        )
+                    },
+                    mealName: estimate.mealName,
+                    mealPortion: estimate.mealPortion,
+                    confidence: estimate.confidence
+                )
+                let validationDescription = description.isEmpty ? (parsed.mealName ?? "") : description
+                guard !parsed.items.isEmpty,
+                      !isSuspiciousZeroCarbResult(parsed, description: validationDescription, hasImage: true)
+                else {
+                    return .failed(photoEstimateRejectedMessage(itemsEmpty: parsed.items.isEmpty))
+                }
+                finishCameraAnalysis(
+                    parsed: parsed,
+                    rawResponse: estimate.rawJSON,
+                    images: images,
+                    description: description,
+                    diagnostics: FoodDoseGuardDiagnostics(
+                        lowerBound: nil,
+                        upperBound: nil,
+                        uncertaintyUnits: nil,
+                        candidateCount: 1,
+                        applied: false
+                    ),
+                    engine: .onDevice
+                )
+                return .committed
+            } catch let failure as FoodFinderOnDeviceFailure {
+                return .failed(onDeviceFailureMessage(failure))
+            } catch {
+                return .failed(
+                    String(
+                        localized: "On-device meal analysis failed.",
+                        comment: "FoodFinder on-device generic failure"
+                    )
+                )
+            }
+        }
+
+        /// Existing Gemini photo path, including the dose-guard ensemble.
+        @MainActor
+        private func analyzeImagesWithGemini(_ images: [Data], description: String) async {
+            guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                errorMessage = String(localized: "API Key is missing. Configure it in AI Settings.", comment: "AI error")
+                return
+            }
+
+            do {
+                let context = description.isEmpty ? "" : "\nUser context: \(description)"
                 let multi = images.count > 1
                     ? "These \(images.count) photos show ONE meal. "
                     : ""
@@ -1667,15 +1767,15 @@ extension AIInsights {
                     prompt: "\(multi)Analyze the food. Identify each item and provide the nutritional breakdown.\(context)",
                     imageData: images.first,
                     additionalImageData: Array(images.dropFirst()),
-                    description: trimmedDescription,
+                    description: description,
                     hasImage: true
                 )
 
                 var parsed = candidate.parsed
-                let validationDescription = trimmedDescription.isEmpty ? (parsed.mealName ?? "") : trimmedDescription
+                let validationDescription = description.isEmpty ? (parsed.mealName ?? "") : description
                 if shouldRetrySuspiciousResult(parsed, description: validationDescription, hasImage: true) {
                     let retry = try await requestFoodAnalysisCandidates(
-                        prompt: "Re-evaluate this photo and user context carefully. The previous estimate returned zero or near-zero carbs for a likely carb-containing meal. Return the same strict JSON object schema and break the meal into ingredients. User context: \(trimmedDescription)",
+                        prompt: "Re-evaluate this photo and user context carefully. The previous estimate returned zero or near-zero carbs for a likely carb-containing meal. Return the same strict JSON object schema and break the meal into ingredients. User context: \(description)",
                         imageData: images.first,
                         additionalImageData: Array(images.dropFirst()),
                         description: validationDescription,
@@ -1688,34 +1788,89 @@ extension AIInsights {
                 guard !parsed.items.isEmpty,
                       !isSuspiciousZeroCarbResult(parsed, description: validationDescription, hasImage: true)
                 else {
-                    errorMessage = parsed.items.isEmpty
-                        ? String(localized: "The photo could not be analyzed. Try a clearer photo, add a short meal description, or check whether your AI provider supports image input.", comment: "FoodFinder image analysis empty result error")
-                        : String(localized: "The AI returned an implausible nutrition estimate. Add portion details and try again.", comment: "FoodFinder implausible estimate error")
+                    errorMessage = photoEstimateRejectedMessage(itemsEmpty: parsed.items.isEmpty)
                     return
                 }
 
-                var result = FoodAnalysisResult(
-                    items: parsed.items,
+                finishCameraAnalysis(
+                    parsed: parsed,
                     rawResponse: candidate.rawResponse,
-                    timestamp: Date(),
-                    source: .aiCamera,
-                    // Store only the first image to keep the recent-results
-                    // payload small; the AI saw all of them.
-                    imageData: images.first,
-                    mealDescription: trimmedDescription.isEmpty ? nil : trimmedDescription,
-                    mealName: parsed.mealName ?? trimmedDescription.aiInsightsNilIfEmpty,
-                    mealPortion: parsed.mealPortion,
-                    confidence: parsed.confidence
+                    images: images,
+                    description: description,
+                    diagnostics: diagnostics,
+                    engine: .gemini
                 )
-                applyDoseGuardDiagnostics(diagnostics, to: &result)
-                applyLearnedPortions(to: &result)
-                rescaleCarbEstimateBounds(&result)
-                commitNewMeal(result)
-
+                debug(.service, "FoodFinder photo analysis: Gemini")
             } catch let error as AIServiceAdapter.AIError {
                 errorMessage = error.errorDescription ?? error.localizedDescription
             } catch {
                 errorMessage = String(localized: "Error: \(error.localizedDescription)", comment: "AI error")
+            }
+        }
+
+        @MainActor
+        private func finishCameraAnalysis(
+            parsed: ParsedFoodAnalysis,
+            rawResponse: String?,
+            images: [Data],
+            description: String,
+            diagnostics: FoodDoseGuardDiagnostics?,
+            engine: FoodFinderPhotoEngine
+        ) {
+            var result = FoodAnalysisResult(
+                items: parsed.items,
+                rawResponse: rawResponse,
+                timestamp: Date(),
+                source: .aiCamera,
+                // Store only the first image to keep the recent-results
+                // payload small; the model saw all of them.
+                imageData: images.first,
+                mealDescription: description.isEmpty ? nil : description,
+                mealName: parsed.mealName ?? description.aiInsightsNilIfEmpty,
+                mealPortion: parsed.mealPortion,
+                confidence: parsed.confidence,
+                photoEngine: engine
+            )
+            if let diagnostics {
+                applyDoseGuardDiagnostics(diagnostics, to: &result)
+            }
+            applyLearnedPortions(to: &result)
+            rescaleCarbEstimateBounds(&result)
+            commitNewMeal(result)
+        }
+
+        private func photoEstimateRejectedMessage(itemsEmpty: Bool) -> String {
+            itemsEmpty
+                ? String(
+                    localized: "The photo could not be analyzed. Try a clearer photo, add a short meal description, or check whether your AI provider supports image input.",
+                    comment: "FoodFinder image analysis empty result error"
+                )
+                : String(
+                    localized: "The AI returned an implausible nutrition estimate. Add portion details and try again.",
+                    comment: "FoodFinder implausible estimate error"
+                )
+        }
+
+        private func photoRouteBlockedMessage(_ block: FoodFinderPhotoRouteBlock) -> String {
+            switch block {
+            case .geminiNotConfigured:
+                return String(localized: "API Key is missing. Configure it in AI Settings.", comment: "AI error")
+            case .neitherAvailable:
+                return String(
+                    localized: "Meal photos need Apple Intelligence on this iPhone, or a Gemini API key in AI Settings.",
+                    comment: "FoodFinder neither photo engine available"
+                )
+            case .onDeviceUnavailable:
+                return FoodFinderOnDeviceAnalyzer.statusText
+            }
+        }
+
+        private func onDeviceFailureMessage(_ failure: FoodFinderOnDeviceFailure) -> String {
+            switch failure {
+            case .emptyResult, .generationFailed, .unreadableImage:
+                return photoEstimateRejectedMessage(itemsEmpty: true)
+            case let .unavailable(blocker):
+                return blocker.localizedMessage
             }
         }
 
