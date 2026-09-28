@@ -20,7 +20,7 @@ Trio/Sources/Modules/AIInsights/
   AIInsightsFoodFinderStateModel.swift
   AIInsightsTherapyInsightsStateModel.swift
   ZGlucoParser.swift
-  Services/                          LLM adapter, gallery, companion share, recap, trackers
+  Services/                          LLM adapter, on-device meal photos, gallery, companion share, recap, trackers
   View/                              Hub, FoodFinder, gallery, chat, settings, camera/barcode
 ```
 
@@ -51,3 +51,14 @@ Glucose alerts / critical-alert policy is **not** in this folder; it lives under
 - **In this folder:** UI + FoodFinder/LLM + local meal gallery + opt-in meal-only CloudKit publisher.
 - **Not in this folder:** oref/looping, pump/CGM drivers, glucose time series UI, Nightscout tokens.
 - **Never on the companion path:** glucose, IOB, COB, Nightscout URL/token, pump fields, Trio therapy App Group.
+
+## Meal photo engines
+
+Automatic (default) tries on-device Apple Intelligence first, then Gemini:
+
+1. `SystemLanguageModel.default.availability == .available` on iOS 27, and this build was made with the iOS 27 SDK (Xcode 27 / Swift 6.4).
+2. `LanguageModelSession` plus an image `Attachment`, guided by `@Generable` into the same meal fields Gemini already returns (name, portion, carbs, fat, protein, fiber, calories).
+3. If the model is missing, still downloading, or generation fails, the existing Gemini photo request runs.
+4. AI Settings → Meal photos can force **On this iPhone** or **Gemini**.
+
+On-device numbers are estimates. The result card says so, and the existing Edit control still changes them. Builds made with Xcode 26 keep the Gemini path only.

@@ -40,6 +40,7 @@ Hub surfaces: AI Chat, Therapy Insights, Recap, FoodFinder, Caffeine tracker, Al
 **FoodFinder**
 
 - Camera / Library / Barcode / Dictate composer (purple accents preserved).
+- Meal photos try on-device Apple Intelligence first (`LanguageModelSession` + image `Attachment`, guided `@Generable` macros) when the iOS 27 model is downloaded, then the existing Gemini path. AI Settings → Meal photos → Photo analysis: Automatic (default), On this iPhone, or Gemini.
 - Composer flushes to the keyboard (no gap); expanded card does not leave a white panel when dragged down.
 - Barcode scanner **dismisses after a successful scan**.
 - Scanned packaged-food data is attached to the draft and included in the LLM context.

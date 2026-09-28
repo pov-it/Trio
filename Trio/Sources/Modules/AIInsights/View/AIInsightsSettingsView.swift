@@ -285,6 +285,31 @@ extension AIInsights {
                 }
                 .listRowBackground(Color.chart)
 
+                Section(
+                    header: Text("Meal photos", comment: "FoodFinder photo engine section header"),
+                    footer: Text(
+                        "Automatic uses Apple Intelligence on this iPhone when the model is downloaded, then Gemini. These numbers are estimates you can edit.",
+                        comment: "FoodFinder photo engine section footer"
+                    )
+                ) {
+                    Picker(
+                        String(localized: "Photo analysis", comment: "FoodFinder photo engine picker"),
+                        selection: $state.foodFinderPhotoEngine
+                    ) {
+                        ForEach(FoodFinderPhotoEnginePreference.allCases) { mode in
+                            Text(mode.localizedTitle).tag(mode)
+                        }
+                    }
+                    .onChange(of: state.foodFinderPhotoEngine) {
+                        state.saveSettings()
+                    }
+
+                    Text(FoodFinderOnDeviceAnalyzer.statusText)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .listRowBackground(Color.chart)
+
                 CompanionShareSettingsForm(
                     isEnabled: Binding(
                         get: { MealCompanionPublisher.shared.isShareEnabled },

@@ -760,6 +760,11 @@ extension AIInsights {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
+                if let engine = result.photoEngine {
+                    Text(engine.localizedCaption)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
