@@ -253,6 +253,8 @@ extension AIInsights {
         var barcodeStatusIsSuccess: Bool = false
         var lastAddedFoodItemID: UUID?
         var currentResult: FoodAnalysisResult?
+        /// Post-meal 2h/4h summaries keyed by `FoodAnalysisResult.id`.
+        var postMealSummaries: [UUID: FoodFinderPostMealSummary] = [:]
         var foodDescription: String = "" {
             didSet { saveDraftDescription() }
         }
@@ -397,6 +399,9 @@ extension AIInsights {
             loadDraftDescription()
             loadRecentResults()
             loadFrequentMeals()
+            Task { @MainActor in
+                await refreshPostMealSummaries()
+            }
         }
 
         // MARK: - Persistence
@@ -416,6 +421,46 @@ extension AIInsights {
             {
                 recentResults = saved
             }
+        }
+
+        /// Loads glucose and any Warsaw equivalents for the open meal and the recent list.
+        /// Limits are `TrioSettings.low` / `TrioSettings.high` (home chart low and high).
+        @MainActor func refreshPostMealSummaries(now: Date = Date()) async {
+            var meals: [(id: UUID, time: Date, carbs: Double)] = recentResults.prefix(5).map {
+                ($0.id, $0.timestamp, $0.totalCarbs)
+            }
+            if let current = currentResult, !meals.contains(where: { $0.id == current.id }) {
+                meals.append((current.id, current.timestamp, current.totalCarbs))
+            }
+            guard let earliest = meals.map(\.time).min() else {
+                postMealSummaries = [:]
+                return
+            }
+            let latestWindowEnd = meals.map { $0.time.addingTimeInterval(FoodFinderPostMealSummary.fourHourDuration) }.max() ?? now
+            let fetchEnd = min(now, latestWindowEnd)
+            let low = NSDecimalNumber(decimal: settingsManager.settings.low).intValue
+            let high = NSDecimalNumber(decimal: settingsManager.settings.high).intValue
+            let limits = FoodFinderPostMealLimits.resolved(lowMgdl: low, highMgdl: high)
+            let glucose = await provider.fetchGlucose(since: earliest)
+            let carbs = await provider.fetchCarbEntriesIncludingFPU(
+                since: earliest.addingTimeInterval(-FoodFinderPostMealSummary.carbMatchWindow)
+            )
+            let readings = glucose.compactMap { sample -> PostMealGlucoseReading? in
+                guard let mgdl = sample.glucose ?? sample.sgv, sample.dateString <= fetchEnd else { return nil }
+                return PostMealGlucoseReading(mgdl: mgdl, date: sample.dateString)
+            }
+            var summaries: [UUID: FoodFinderPostMealSummary] = [:]
+            for meal in meals {
+                summaries[meal.id] = FoodFinderPostMealSummary.make(
+                    mealTime: meal.time,
+                    readings: readings,
+                    limits: limits,
+                    now: now,
+                    carbEntries: carbs,
+                    mealCarbs: meal.carbs
+                )
+            }
+            postMealSummaries = summaries
         }
 
         func saveRecentResults() {
@@ -724,6 +769,9 @@ extension AIInsights {
             recentResults.insert(result, at: 0)
             saveRecentResults()
             promoteIfFrequent(result)
+            Task { @MainActor in
+                await refreshPostMealSummaries()
+            }
             foodDescription = ""
             capturedImages.removeAll()
         }
