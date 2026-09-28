@@ -389,6 +389,10 @@ extension AIInsights {
                     mealIdentityCard(result)
                 }
 
+                if let comparison = result.photoComparison {
+                    photoComparisonCard(comparison)
+                }
+
                 macroSummaryCard(result)
             }
 
@@ -499,6 +503,157 @@ extension AIInsights {
                 RoundedRectangle(cornerRadius: 14)
                     .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white)
             )
+        }
+
+        private func photoComparisonCard(_ comparison: FoodFinderPhotoComparison) -> some View {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(String(localized: "Agreement", comment: "FoodFinder photo agreement label"))
+                        .font(.subheadline.bold())
+                    Spacer()
+                    Text(agreementText(comparison.agreementPercent))
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundStyle(agreementColor(comparison.agreementPercent))
+                }
+                Text(loggedMealNote(comparison))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack(alignment: .top, spacing: 8) {
+                    photoSideColumn(comparison.onDevice, engine: .onDevice, adopted: comparison.adoptedEngine)
+                    photoSideColumn(comparison.gemini, engine: .gemini, adopted: comparison.adoptedEngine)
+                }
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white)
+            )
+        }
+
+        private func agreementText(_ percent: Int?) -> String {
+            guard let percent else {
+                return String(localized: "n/a", comment: "FoodFinder photo agreement not available")
+            }
+            return "\(percent)%"
+        }
+
+        private func agreementColor(_ percent: Int?) -> Color {
+            guard let percent else { return .secondary }
+            if percent >= 80 { return .green }
+            if percent >= 50 { return .orange }
+            return .red
+        }
+
+        private func loggedMealNote(_ comparison: FoodFinderPhotoComparison) -> String {
+            let other = comparison.adoptedEngine == .gemini ? comparison.onDevice : comparison.gemini
+            if other.outcome == .ready {
+                return comparison.adoptedEngine == .gemini
+                    ? String(
+                        localized: "Logged meal uses Gemini. Tap On-device to switch, then edit the numbers.",
+                        comment: "FoodFinder comparison uses Gemini"
+                    )
+                    : String(
+                        localized: "Logged meal uses On-device. Tap Gemini to switch, then edit the numbers.",
+                        comment: "FoodFinder comparison uses on-device"
+                    )
+            }
+            return comparison.adoptedEngine == .gemini
+                ? String(
+                    localized: """
+                    Logged meal uses Gemini. The on-device estimate is not available. \
+                    Edit the numbers before you use them.
+                    """,
+                    comment: "FoodFinder comparison Gemini only"
+                )
+                : String(
+                    localized: """
+                    Logged meal uses On-device. Gemini is not available. \
+                    Edit the numbers before you use them.
+                    """,
+                    comment: "FoodFinder comparison on-device only"
+                )
+        }
+
+        private func photoSideColumn(
+            _ side: FoodFinderPhotoSide,
+            engine: FoodFinderPhotoEngine,
+            adopted: FoodFinderPhotoEngine
+        ) -> some View {
+            let selected = adopted == engine && side.outcome == .ready
+            return Button {
+                state.adoptPhotoEngine(engine)
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Text(engine.columnTitle)
+                            .font(.caption.weight(.semibold))
+                        if selected {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.caption2)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    if side.outcome == .ready {
+                        Text(
+                            side.mealName?.trimmingCharacters(in: .whitespacesAndNewlines).aiInsightsNilIfEmpty
+                                ?? String(localized: "Meal", comment: "Generic meal title")
+                        )
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(2)
+                        Text(
+                            String(
+                                format: String(localized: "%.0f g carbs", comment: "FoodFinder comparison carbs"),
+                                side.carbs
+                            )
+                        )
+                        .font(.caption)
+                        Text(
+                            String(
+                                format: String(
+                                    localized: "%.0f g fat · %.0f g protein",
+                                    comment: "FoodFinder comparison fat and protein"
+                                ),
+                                side.fat,
+                                side.protein
+                            )
+                        )
+                        .font(.caption2)
+                        Text(
+                            String(
+                                format: String(localized: "%.0f kcal", comment: "FoodFinder comparison calories"),
+                                side.calories
+                            )
+                        )
+                        .font(.caption2)
+                    } else {
+                        Text(
+                            side.outcome == .unavailable
+                                ? String(localized: "Unavailable", comment: "FoodFinder photo side unavailable")
+                                : String(localized: "Didn't finish", comment: "FoodFinder photo side failed")
+                        )
+                        .font(.caption.weight(.semibold))
+                        if let message = side.message, !message.isEmpty {
+                            Text(message)
+                                .font(.caption2)
+                                .lineLimit(4)
+                        }
+                    }
+                }
+                .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.primary.opacity(selected ? 0.08 : 0.04))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(selected ? Color.accentColor : Color.clear, lineWidth: 1.5)
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(side.outcome != .ready)
+            .accessibilityLabel(engine.columnTitle)
         }
 
         private func macroSummaryCard(_ result: FoodAnalysisResult) -> some View {
@@ -760,7 +915,7 @@ extension AIInsights {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
-                if let engine = result.photoEngine {
+                if result.photoComparison == nil, let engine = result.photoEngine {
                     Text(engine.localizedCaption)
                         .font(.caption)
                         .foregroundColor(.secondary)

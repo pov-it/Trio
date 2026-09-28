@@ -13,6 +13,15 @@ extension AIInsights {
         case gemini
         case onDevice
 
+        var columnTitle: String {
+            switch self {
+            case .gemini:
+                return String(localized: "Gemini", comment: "FoodFinder Gemini column title")
+            case .onDevice:
+                return String(localized: "On-device", comment: "FoodFinder on-device column title")
+            }
+        }
+
         var localizedCaption: String {
             switch self {
             case .gemini:
@@ -29,8 +38,8 @@ extension AIInsights {
         }
     }
 
-    /// Automatic tries the on-device model first and uses Gemini when that model
-    /// is missing or the generation fails. Cloud keeps today's Gemini path.
+    /// Kept so older settings still decode. Meal photos always run both engines
+    /// when they can; this value no longer hides a column.
     enum FoodFinderPhotoEnginePreference: String, CaseIterable, Identifiable, Codable, JSON, Sendable {
         case automatic
         case cloud
@@ -76,7 +85,7 @@ extension AIInsights {
                 )
             case .modelNotReady:
                 return String(
-                    localized: "The on-device model is still downloading. Try again when it finishes, or use Gemini.",
+                    localized: "The on-device model is still downloading.",
                     comment: "FoodFinder on-device model not ready"
                 )
             case .operatingSystem:
@@ -98,47 +107,181 @@ extension AIInsights {
         }
     }
 
-    enum FoodFinderPhotoRoute: Equatable, Sendable {
-        case blocked(FoodFinderPhotoRouteBlock)
-        case gemini
-        case onDevice
-    }
-
-    enum FoodFinderPhotoRouteBlock: Equatable, Sendable {
-        case geminiNotConfigured
-        case neitherAvailable
-        case onDeviceUnavailable
-    }
-
-    /// Picks the meal-photo engine. Generation failures are a separate step:
-    /// `fallsBackToGemini` decides whether a failed on-device attempt may call Gemini.
-    enum FoodFinderPhotoRouter {
-        static func route(
-            preference: FoodFinderPhotoEnginePreference,
-            onDeviceAvailable: Bool,
-            geminiConfigured: Bool
-        ) -> FoodFinderPhotoRoute {
-            switch preference {
-            case .automatic:
-                if onDeviceAvailable {
-                    return .onDevice
-                }
-                if geminiConfigured {
-                    return .gemini
-                }
-                return .blocked(.neitherAvailable)
-            case .cloud:
-                return geminiConfigured ? .gemini : .blocked(.geminiNotConfigured)
-            case .onDevice:
-                return onDeviceAvailable ? .onDevice : .blocked(.onDeviceUnavailable)
-            }
+    /// One engine's meal-photo estimate, including a visible failure.
+    struct FoodFinderPhotoSide: Codable, Sendable {
+        enum Outcome: String, Codable, Sendable {
+            case failed
+            case ready
+            case unavailable
         }
 
-        static func fallsBackToGemini(
-            preference: FoodFinderPhotoEnginePreference,
-            geminiConfigured: Bool
-        ) -> Bool {
-            preference != .onDevice && geminiConfigured
+        var outcome: Outcome
+        var message: String?
+        var mealName: String?
+        var mealPortion: String?
+        var items: [FoodItem]
+        var carbs: Double
+        var fat: Double
+        var protein: Double
+        var fiber: Double
+        var calories: Double
+
+        var macros: FoodFinderPhotoAgreement.Macros {
+            FoodFinderPhotoAgreement.Macros(
+                name: mealName ?? "",
+                carbs: carbs,
+                fat: fat,
+                protein: protein,
+                calories: calories
+            )
+        }
+
+        static func ready(mealName: String?, mealPortion: String?, items: [FoodItem]) -> Self {
+            Self(
+                outcome: .ready,
+                message: nil,
+                mealName: mealName,
+                mealPortion: mealPortion,
+                items: items,
+                carbs: items.reduce(0) { $0 + $1.adjustedCarbs },
+                fat: items.reduce(0) { $0 + $1.adjustedFat },
+                protein: items.reduce(0) { $0 + $1.adjustedProtein },
+                fiber: items.reduce(0) { $0 + $1.adjustedFiber },
+                calories: items.reduce(0) { $0 + $1.adjustedCalories }
+            )
+        }
+
+        static func unavailable(_ message: String) -> Self {
+            Self(
+                outcome: .unavailable,
+                message: message,
+                mealName: nil,
+                mealPortion: nil,
+                items: [],
+                carbs: 0,
+                fat: 0,
+                protein: 0,
+                fiber: 0,
+                calories: 0
+            )
+        }
+
+        static func failed(_ message: String) -> Self {
+            Self(
+                outcome: .failed,
+                message: message,
+                mealName: nil,
+                mealPortion: nil,
+                items: [],
+                carbs: 0,
+                fat: 0,
+                protein: 0,
+                fiber: 0,
+                calories: 0
+            )
+        }
+    }
+
+    /// Both photo estimates plus the agreement of their macros.
+    /// The logged meal starts as Gemini when that side succeeded.
+    struct FoodFinderPhotoComparison: Codable, Sendable {
+        var onDevice: FoodFinderPhotoSide
+        var gemini: FoodFinderPhotoSide
+        /// 0...100 when both sides are ready. Nil means agreement is not available.
+        var agreementPercent: Int?
+        var adoptedEngine: FoodFinderPhotoEngine
+        var geminiLowerBound: Double?
+        var geminiUpperBound: Double?
+        var geminiUncertaintyUnits: Double?
+        var geminiCandidateCount: Int?
+        var geminiDoseGuardApplied: Bool?
+
+        static func make(onDevice: FoodFinderPhotoSide, gemini: FoodFinderPhotoSide) -> Self? {
+            let adopted: FoodFinderPhotoEngine
+            if gemini.outcome == .ready {
+                adopted = .gemini
+            } else if onDevice.outcome == .ready {
+                adopted = .onDevice
+            } else {
+                return nil
+            }
+            let agreement: Int?
+            if onDevice.outcome == .ready, gemini.outcome == .ready {
+                agreement = FoodFinderPhotoAgreement.percent(onDevice.macros, gemini.macros)
+            } else {
+                agreement = nil
+            }
+            return Self(
+                onDevice: onDevice,
+                gemini: gemini,
+                agreementPercent: agreement,
+                adoptedEngine: adopted,
+                geminiLowerBound: nil,
+                geminiUpperBound: nil,
+                geminiUncertaintyUnits: nil,
+                geminiCandidateCount: nil,
+                geminiDoseGuardApplied: nil
+            )
+        }
+    }
+
+    /// How close two meal-photo estimates are. This is not a confidence the model reports about itself.
+    ///
+    /// For each macro, closeness is 1 when the numbers match and 0 when the relative gap is total:
+    ///   gap = |a - b| / max(a, b, floor)
+    ///   closeness = 1 - min(1, gap)
+    /// Both values at or below the floor (1 g, or 10 kcal) count as a match, so two zeros agree.
+    ///
+    /// Name similarity is the Jaccard overlap of lowercase word tokens.
+    /// When either name has no tokens, that 0.10 weight moves onto carbs.
+    ///
+    /// With both names: 0.40 carbs + 0.20 fat + 0.20 protein + 0.10 kcal + 0.10 name.
+    /// The result is that weighted sum times 100, rounded, clamped to 0...100.
+    enum FoodFinderPhotoAgreement {
+        static let gramFloor = 1.0
+        static let calorieFloor = 10.0
+
+        struct Macros: Equatable, Sendable {
+            var name: String
+            var carbs: Double
+            var fat: Double
+            var protein: Double
+            var calories: Double
+        }
+
+        static func percent(_ lhs: Macros, _ rhs: Macros) -> Int {
+            let carbs = closeness(lhs.carbs, rhs.carbs, floor: gramFloor)
+            let fat = closeness(lhs.fat, rhs.fat, floor: gramFloor)
+            let protein = closeness(lhs.protein, rhs.protein, floor: gramFloor)
+            let calories = closeness(lhs.calories, rhs.calories, floor: calorieFloor)
+            let weighted: Double
+            if let name = nameSimilarity(lhs.name, rhs.name) {
+                weighted = (0.40 * carbs) + (0.20 * fat) + (0.20 * protein) + (0.10 * calories) + (0.10 * name)
+            } else {
+                weighted = (0.50 * carbs) + (0.20 * fat) + (0.20 * protein) + (0.10 * calories)
+            }
+            return min(100, max(0, Int((weighted * 100).rounded())))
+        }
+
+        static func closeness(_ lhs: Double, _ rhs: Double, floor: Double) -> Double {
+            let left = lhs.isFinite ? max(0, lhs) : 0
+            let right = rhs.isFinite ? max(0, rhs) : 0
+            if left <= floor, right <= floor { return 1 }
+            let gap = abs(left - right) / max(left, right, floor)
+            return 1 - min(1, gap)
+        }
+
+        static func nameSimilarity(_ lhs: String, _ rhs: String) -> Double? {
+            let left = tokens(lhs)
+            let right = tokens(rhs)
+            if left.isEmpty || right.isEmpty { return nil }
+            let union = left.union(right)
+            guard !union.isEmpty else { return nil }
+            return Double(left.intersection(right).count) / Double(union.count)
+        }
+
+        static func tokens(_ text: String) -> Set<String> {
+            Set(text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init))
         }
     }
 

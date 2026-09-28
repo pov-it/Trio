@@ -91,7 +91,7 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var foodFinderPreferredSource: AIInsights.FoodSourceID = .openFoodFacts
     var foodFinderDoseGuardEnabled: Bool = true
     var foodFinderDoseGuardSamples: Int = 2
-    /// Meal photos: try on-device Apple Intelligence first, then Gemini. Cloud forces Gemini.
+    /// Kept so older settings decode. Meal photos always compare both engines; this no longer hides a column.
     var foodFinderPhotoEngine: AIInsights.FoodFinderPhotoEnginePreference = .automatic
     /// Inject reverse-geocoded venue/locality into AI chat prompt. Off by default; first use triggers iOS Location permission prompt.
     var aiLocationContextEnabled: Bool = false

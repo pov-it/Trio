@@ -3,106 +3,137 @@ import Testing
 
 @testable import Trio
 
-@Suite("FoodFinder meal-photo routing")
+@Suite("FoodFinder meal-photo comparison")
 struct FoodFinderPhotoRouteTests {
-    @Test("Automatic uses on-device when Apple Intelligence is ready")
-    func automaticPrefersOnDevice() {
-        let route = AIInsights.FoodFinderPhotoRouter.route(
-            preference: .automatic,
-            onDeviceAvailable: true,
-            geminiConfigured: true
+    @Test("Identical macros and the same name agree completely")
+    func identicalEstimates() {
+        let macros = AIInsights.FoodFinderPhotoAgreement.Macros(
+            name: "Rice",
+            carbs: 40,
+            fat: 2,
+            protein: 4,
+            calories: 200
         )
-        #expect(route == .onDevice)
+        #expect(AIInsights.FoodFinderPhotoAgreement.percent(macros, macros) == 100)
     }
 
-    @Test("Automatic keeps Gemini when the on-device model is missing")
-    func automaticFallsThroughToGemini() {
-        let unavailable = AIInsights.FoodFinderPhotoRouter.route(
-            preference: .automatic,
-            onDeviceAvailable: false,
-            geminiConfigured: true
+    @Test("A 40 g versus 50 g carb gap with the rest equal scores 92")
+    func carbGapExample() {
+        let onDevice = AIInsights.FoodFinderPhotoAgreement.Macros(
+            name: "Rice",
+            carbs: 40,
+            fat: 2,
+            protein: 4,
+            calories: 200
         )
-        #expect(unavailable == .gemini)
+        let gemini = AIInsights.FoodFinderPhotoAgreement.Macros(
+            name: "Rice",
+            carbs: 50,
+            fat: 2,
+            protein: 4,
+            calories: 200
+        )
+        #expect(AIInsights.FoodFinderPhotoAgreement.percent(onDevice, gemini) == 92)
     }
 
-    @Test("Automatic still tries on-device when Gemini is not configured")
-    func automaticWithoutGeminiKey() {
-        let route = AIInsights.FoodFinderPhotoRouter.route(
-            preference: .automatic,
-            onDeviceAvailable: true,
-            geminiConfigured: false
+    @Test("Carbs of 0 g versus 40 g with the rest equal scores 60")
+    func totalCarbDisagreement() {
+        let onDevice = AIInsights.FoodFinderPhotoAgreement.Macros(
+            name: "Rice",
+            carbs: 0,
+            fat: 2,
+            protein: 4,
+            calories: 200
         )
-        #expect(route == .onDevice)
-        #expect(
-            AIInsights.FoodFinderPhotoRouter.fallsBackToGemini(
-                preference: .automatic,
-                geminiConfigured: false
-            ) == false
+        let gemini = AIInsights.FoodFinderPhotoAgreement.Macros(
+            name: "Rice",
+            carbs: 40,
+            fat: 2,
+            protein: 4,
+            calories: 200
         )
+        #expect(AIInsights.FoodFinderPhotoAgreement.percent(onDevice, gemini) == 60)
     }
 
-    @Test("Automatic with neither engine reports both missing")
-    func automaticWithNothing() {
-        let route = AIInsights.FoodFinderPhotoRouter.route(
-            preference: .automatic,
-            onDeviceAvailable: false,
-            geminiConfigured: false
+    @Test("Values inside the gram and calorie floors count as a match")
+    func nearZeroMacrosAgree() {
+        let onDevice = AIInsights.FoodFinderPhotoAgreement.Macros(
+            name: "Water",
+            carbs: 0,
+            fat: 0,
+            protein: 0,
+            calories: 0
         )
-        #expect(route == .blocked(.neitherAvailable))
+        let gemini = AIInsights.FoodFinderPhotoAgreement.Macros(
+            name: "Water",
+            carbs: 0.5,
+            fat: 1,
+            protein: 1,
+            calories: 10
+        )
+        #expect(AIInsights.FoodFinderPhotoAgreement.percent(onDevice, gemini) == 100)
     }
 
-    @Test("Gemini preference ignores a ready on-device model")
-    func cloudPreference() {
-        let ready = AIInsights.FoodFinderPhotoRouter.route(
-            preference: .cloud,
-            onDeviceAvailable: true,
-            geminiConfigured: true
+    @Test("A missing meal name moves the name weight onto carbs")
+    func emptyNameShiftsWeight() {
+        let onDevice = AIInsights.FoodFinderPhotoAgreement.Macros(
+            name: "",
+            carbs: 40,
+            fat: 2,
+            protein: 4,
+            calories: 200
         )
-        let missingKey = AIInsights.FoodFinderPhotoRouter.route(
-            preference: .cloud,
-            onDeviceAvailable: true,
-            geminiConfigured: false
+        let gemini = AIInsights.FoodFinderPhotoAgreement.Macros(
+            name: "Rice",
+            carbs: 50,
+            fat: 2,
+            protein: 4,
+            calories: 200
         )
-        #expect(ready == .gemini)
-        #expect(missingKey == .blocked(.geminiNotConfigured))
+        #expect(AIInsights.FoodFinderPhotoAgreement.percent(onDevice, gemini) == 90)
     }
 
-    @Test("On this iPhone does not call Gemini when the model is missing")
-    func onDevicePreference() {
-        let ready = AIInsights.FoodFinderPhotoRouter.route(
-            preference: .onDevice,
-            onDeviceAvailable: true,
-            geminiConfigured: true
+    @Test("Both ready estimates log Gemini and publish agreement")
+    func bothReadyAdoptsGemini() {
+        let comparison = AIInsights.FoodFinderPhotoComparison.make(
+            onDevice: side(name: "Rice", carbs: 40),
+            gemini: side(name: "Rice", carbs: 50)
         )
-        let missing = AIInsights.FoodFinderPhotoRouter.route(
-            preference: .onDevice,
-            onDeviceAvailable: false,
-            geminiConfigured: true
-        )
-        #expect(ready == .onDevice)
-        #expect(missing == .blocked(.onDeviceUnavailable))
-        #expect(
-            AIInsights.FoodFinderPhotoRouter.fallsBackToGemini(
-                preference: .onDevice,
-                geminiConfigured: true
-            ) == false
-        )
+        #expect(comparison?.adoptedEngine == .gemini)
+        #expect(comparison?.agreementPercent == 92)
+        #expect(comparison?.onDevice.outcome == .ready)
+        #expect(comparison?.gemini.outcome == .ready)
     }
 
-    @Test("A failed on-device attempt may use Gemini in automatic mode")
-    func generationFailureFallsBack() {
-        #expect(
-            AIInsights.FoodFinderPhotoRouter.fallsBackToGemini(
-                preference: .automatic,
-                geminiConfigured: true
-            )
+    @Test("A missing Gemini estimate logs the on-device side and leaves agreement unset")
+    func geminiUnavailable() {
+        let comparison = AIInsights.FoodFinderPhotoComparison.make(
+            onDevice: side(name: "Rice", carbs: 40),
+            gemini: .unavailable("API Key is missing. Configure it in AI Settings.")
         )
-        #expect(
-            AIInsights.FoodFinderPhotoRouter.fallsBackToGemini(
-                preference: .cloud,
-                geminiConfigured: true
-            )
+        #expect(comparison?.adoptedEngine == .onDevice)
+        #expect(comparison?.agreementPercent == nil)
+        #expect(comparison?.gemini.outcome == .unavailable)
+    }
+
+    @Test("A missing on-device model still logs Gemini")
+    func onDeviceUnavailable() {
+        let comparison = AIInsights.FoodFinderPhotoComparison.make(
+            onDevice: .unavailable("The on-device model is still downloading."),
+            gemini: side(name: "Rice", carbs: 50)
         )
+        #expect(comparison?.adoptedEngine == .gemini)
+        #expect(comparison?.agreementPercent == nil)
+        #expect(comparison?.onDevice.outcome == .unavailable)
+    }
+
+    @Test("Two failed estimates do not produce a meal comparison")
+    func bothFailed() {
+        let comparison = AIInsights.FoodFinderPhotoComparison.make(
+            onDevice: .failed("On-device meal analysis failed."),
+            gemini: .failed("Gemini did not return an estimate.")
+        )
+        #expect(comparison == nil)
     }
 
     @Test("On-device JSON matches the FoodFinder meal schema")
@@ -183,9 +214,29 @@ struct FoodFinderPhotoRouteTests {
         let data = try JSONEncoder().encode(result)
         var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         object.removeValue(forKey: "photoEngine")
+        object.removeValue(forKey: "photoComparison")
         let stripped = try JSONSerialization.data(withJSONObject: object)
         let decoded = try JSONDecoder().decode(AIInsights.FoodAnalysisResult.self, from: stripped)
         #expect(decoded.photoEngine == nil)
+        #expect(decoded.photoComparison == nil)
         #expect(decoded.source == .aiCamera)
+    }
+
+    private func side(name: String, carbs: Double) -> AIInsights.FoodFinderPhotoSide {
+        .ready(
+            mealName: name,
+            mealPortion: "1 serving",
+            items: [
+                AIInsights.FoodItem(
+                    name: name,
+                    portion: "1 serving",
+                    carbs: carbs,
+                    fat: 2,
+                    protein: 4,
+                    fiber: 0,
+                    calories: 200
+                )
+            ]
+        )
     }
 }
