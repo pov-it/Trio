@@ -513,6 +513,36 @@ extension AIInsights {
             }
         }
 
+        /// Carb rows since `date`, including Warsaw `isFPU` equivalents.
+        /// `fetchCarbs` drops those equivalents because AI meal context should not treat them as new meals.
+        func fetchCarbEntriesIncludingFPU(since date: Date) async -> [PostMealCarbEntry] {
+            do {
+                let predicate = NSPredicate(format: "date >= %@", date as NSDate)
+                let results = try await CoreDataStack.shared.fetchEntitiesAsync(
+                    ofType: CarbEntryStored.self,
+                    onContext: coreDataContext,
+                    predicate: predicate,
+                    key: "date",
+                    ascending: true
+                )
+                return await coreDataContext.perform {
+                    guard let carbObjects = results as? [CarbEntryStored] else { return [] }
+                    return carbObjects.compactMap { stored -> PostMealCarbEntry? in
+                        guard let date = stored.date else { return nil }
+                        return PostMealCarbEntry(
+                            date: date,
+                            carbs: stored.carbs,
+                            isFPU: stored.isFPU,
+                            fpuID: stored.fpuID?.uuidString
+                        )
+                    }
+                }
+            } catch {
+                debug(.default, "AI Provider: failed to fetch FPU carb entries: \(error)")
+                return []
+            }
+        }
+
         /// Fetches carbs from CoreData first, falls back to Nightscout.
         func fetchCarbs(since date: Date? = nil) async -> [CarbsEntry] {
             // Try CoreData first

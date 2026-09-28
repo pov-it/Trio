@@ -312,6 +312,7 @@ extension AIInsights {
                 }
                 .onAppear {
                     scrollToLastAddedItem(with: proxy)
+                    Task { await state.refreshPostMealSummaries() }
                 }
             }
         }
@@ -389,6 +390,10 @@ extension AIInsights {
                 }
 
                 macroSummaryCard(result)
+            }
+
+            if let summary = state.postMealSummaries[result.id] {
+                postMealSection(summary)
             }
 
             Section {
@@ -1086,6 +1091,12 @@ extension AIInsights {
                                 Text(relativeMinutesText(from: result.timestamp))
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
+                                if let caption = postMealCaption(for: result) {
+                                    Text(caption)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
                             }
                             Spacer()
                             Text(String(format: "%.0fg", result.totalCarbs))
@@ -1111,6 +1122,142 @@ extension AIInsights {
             } header: {
                 Text(String(localized: "Recent Meals", comment: "Recent results section header"))
             }
+        }
+
+        private func postMealSection(_ summary: FoodFinderPostMealSummary) -> some View {
+            Section {
+                postMealWindowRow(summary.twoHour)
+                postMealWindowRow(summary.fourHour)
+                if let fpu = summary.fpu {
+                    Text(postMealFPUNote(fpu))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text(String(localized: "After this meal", comment: "FoodFinder post-meal section"))
+            } footer: {
+                Text(postMealLimitsFooter(summary.limits))
+            }
+        }
+
+        private func postMealWindowRow(_ window: FoodFinderPostMealWindow) -> some View {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(postMealWindowTitle(window.hours))
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text(postMealStatus(window))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(postMealStatusColor(window))
+                }
+                Text(postMealDetail(window))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 4)
+        }
+
+        private func postMealWindowTitle(_ hours: Int) -> String {
+            if hours == 4 {
+                return String(localized: "4 hours", comment: "FoodFinder 4 hour post-meal window")
+            }
+            return String(localized: "2 hours", comment: "FoodFinder 2 hour post-meal window")
+        }
+
+        private func postMealStatus(_ window: FoodFinderPostMealWindow) -> String {
+            guard window.readingCount > 0 else {
+                return window.isComplete
+                    ? String(localized: "No glucose", comment: "FoodFinder post-meal window with no glucose")
+                    : String(localized: "Waiting", comment: "FoodFinder post-meal window still collecting glucose")
+            }
+            switch (window.hadHypo, window.hadHyper) {
+            case (true, true):
+                return String(localized: "Low and high", comment: "FoodFinder post-meal hypo and hyper")
+            case (true, false):
+                return String(localized: "Low", comment: "FoodFinder post-meal hypo")
+            case (false, true):
+                return String(localized: "High", comment: "FoodFinder post-meal hyper")
+            default:
+                return String(localized: "In range", comment: "FoodFinder post-meal in range")
+            }
+        }
+
+        private func postMealStatusColor(_ window: FoodFinderPostMealWindow) -> Color {
+            guard window.readingCount > 0 else { return .secondary }
+            if window.hadHypo { return .red }
+            if window.hadHyper { return .orange }
+            return .green
+        }
+
+        private func postMealDetail(_ window: FoodFinderPostMealWindow) -> String {
+            guard let percent = window.timeInRangePercent else {
+                return window.isComplete
+                    ? String(localized: "No glucose in this window", comment: "FoodFinder completed window without glucose")
+                    : String(localized: "No glucose yet", comment: "FoodFinder open window without glucose")
+            }
+            let label = window.isComplete
+                ? String(localized: "Time in range", comment: "FoodFinder completed time in range")
+                : String(localized: "Time in range so far", comment: "FoodFinder partial time in range")
+            return String(
+                format: String(localized: "%@ %d%% · %d readings", comment: "FoodFinder post-meal time in range and reading count"),
+                label,
+                percent,
+                window.readingCount
+            )
+        }
+
+        private func postMealFPUNote(_ fpu: FoodFinderPostMealFPU) -> String {
+            switch fpu {
+            case let .insideFourHourWindow(until):
+                return String(
+                    format: String(
+                        localized: "Fat and protein equivalents are logged through %@.",
+                        comment: "FoodFinder Warsaw equivalents inside the 4 hour window"
+                    ),
+                    until.formatted(date: .omitted, time: .shortened)
+                )
+            case let .afterFourHourWindow(until):
+                return String(
+                    format: String(
+                        localized: "Fat and protein equivalents continue past 4 hours, through %@.",
+                        comment: "FoodFinder Warsaw equivalents past the 4 hour window"
+                    ),
+                    until.formatted(date: .omitted, time: .shortened)
+                )
+            }
+        }
+
+        private func postMealLimitsFooter(_ limits: FoodFinderPostMealLimits) -> String {
+            let units = state.settingsManager.settings.units
+            return String(
+                format: String(
+                    localized: "Low is below %@. High is above %@.",
+                    comment: "FoodFinder post-meal limit footer"
+                ),
+                limits.lowMgdl.formatted(withUnits: units),
+                limits.highMgdl.formatted(withUnits: units)
+            )
+        }
+
+        private func postMealCaption(for result: FoodAnalysisResult) -> String? {
+            guard let summary = state.postMealSummaries[result.id] else { return nil }
+            let window = summary.fourHour.readingCount > 0 ? summary.fourHour : summary.twoHour
+            guard window.readingCount > 0, let percent = window.timeInRangePercent else { return nil }
+            let status = postMealStatus(window).lowercased()
+            if window.isComplete {
+                return String(
+                    format: String(localized: "%dh %d%% · %@", comment: "FoodFinder recent meal post-meal caption"),
+                    window.hours,
+                    percent,
+                    status
+                )
+            }
+            return String(
+                format: String(localized: "%dh %d%% so far · %@", comment: "FoodFinder recent meal partial post-meal caption"),
+                window.hours,
+                percent,
+                status
+            )
         }
 
         private func resultFromPreset(_ preset: MealPresetStored) -> FoodAnalysisResult {

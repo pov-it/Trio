@@ -121,6 +121,8 @@ final class GlucoseAlertCoordinator: Injectable {
                 Task { [weak self] in await self?.evaluateGlucoseAlarms() }
             }
             .store(in: &subscriptions)
+        // Libre's glucose notifications default on and are not wired to the home bell.
+        LibreGlucoseAlarmSuppression.apply()
     }
 
     // MARK: - Reading-based evaluation
@@ -148,6 +150,9 @@ final class GlucoseAlertCoordinator: Injectable {
     /// Two-stage: async-fetch the latest value (Core Data perform), then hop
     /// onto `evaluationQueue` to mutate `firingAlertIDs` safely.
     private func evaluateGlucoseAlarms() async {
+        // Re-assert before Trio issues its own alarm so a CGM-menu toggle cannot
+        // become a second siren on the following readings.
+        LibreGlucoseAlarmSuppression.apply()
         guard !isInLaunchQuietWindow else { return }
         guard let latestValue = await fetchLatestReadingMgDL() else { return }
         let snapshot = alertsSnapshot

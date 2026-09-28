@@ -72,17 +72,6 @@ extension AIInsights {
                         )
 
                         HubMenuCard(
-                            icon: "fork.knife.circle.fill",
-                            title: String(localized: "FoodFinder", comment: "FoodFinder feature name"),
-                            description: String(localized: "Identify meals and estimate carbs using AI.", comment: "FoodFinder description"),
-                            gradientColors: [
-                                Color(red: 0.3411764706, green: 0.6666666667, blue: 0.9254901961),
-                                Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
-                            ],
-                            destination: AnyView(AIInsights.FoodFinderView(resolver: resolver))
-                        )
-
-                        HubMenuCard(
                             icon: "cup.and.saucer.fill",
                             title: String(localized: "Caffeine Tracker", comment: "Caffeine tracker feature name"),
                             description: String(localized: "Log intake; AI uses it for glucose context.", comment: "Caffeine tracker description"),

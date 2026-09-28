@@ -63,6 +63,24 @@ final class BaseTrioAlertManager: TrioAlertManager, Injectable {
     /// off the main actor so `issueAlert` can decide synchronously whether
     /// AlarmKit will sound this alert.
     private var alarmKitAvailable = false
+    /// Mirror of `UNNotificationSettings.criticalAlertSetting == .enabled`.
+    /// When true, the critical user notification is the only audible channel.
+    private let criticalAuthLock = NSLock()
+    private var _criticalAlertsAuthorized = false
+    private var criticalAlertsAuthorized: Bool {
+        get {
+            criticalAuthLock.lock()
+            defer { criticalAuthLock.unlock() }
+            return _criticalAlertsAuthorized
+        }
+        set {
+            criticalAuthLock.lock()
+            defer { criticalAuthLock.unlock() }
+            _criticalAlertsAuthorized = newValue
+        }
+    }
+
+    private let fallbackAudio = FallbackAudioOwnership()
 
     let modalScheduler: TrioModalAlertScheduler
     private let userNotificationScheduler: TrioUserNotificationAlertScheduler
@@ -96,13 +114,15 @@ final class BaseTrioAlertManager: TrioAlertManager, Injectable {
             muter.mute(for: until.timeIntervalSinceNow)
         }
 
-        // Seed AlarmKit availability now; `didBecomeActive` refreshes it later.
-        // Without this an alarm firing before the first foreground would get
-        // both the notification sound and the AlarmKit alarm.
+        // Seed AlarmKit availability and Critical Alerts authorization now;
+        // `didBecomeActive` refreshes them later. Without this an alarm firing
+        // before the first foreground can stack the notification sound with
+        // AlarmKit or the in-process player.
         Task { @MainActor [weak self] in
             guard let self else { return }
             if alarmScheduler == nil { alarmScheduler = CriticalAlertAlarmScheduler() }
             alarmKitAvailable = alarmScheduler?.isAuthorizedAndAvailable ?? false
+            await self.refreshCriticalAlertAuthorization()
         }
 
         // AlarmKit's Stop button runs an AppIntent in a fresh process slice
@@ -131,6 +151,7 @@ final class BaseTrioAlertManager: TrioAlertManager, Injectable {
             guard let self else { return }
             if alarmScheduler == nil { alarmScheduler = CriticalAlertAlarmScheduler() }
             alarmKitAvailable = alarmScheduler?.isAuthorizedAndAvailable ?? false
+            await self.refreshCriticalAlertAuthorization()
         }
 
         let center = UNUserNotificationCenter.current()
@@ -170,34 +191,100 @@ final class BaseTrioAlertManager: TrioAlertManager, Injectable {
         }
     }
 
-    /// Falls back to in-process AVAudioPlayer for `.critical` alerts on
-    /// builds without the Critical Alerts entitlement. iOS silently
-    /// downgrades `.criticalSoundNamed` and `.defaultCritical` to a regular
-    /// notification without the entitlement, which DnD / silent switch /
-    /// Focus modes then mute — dangerous for an overnight urgent-low.
-    /// `.playback` audio session bypasses those.
-    ///
-    /// Only fires for immediate-trigger alerts; delayed/repeating go
-    /// through UNNotification at fire time. Critical alerts pierce the
-    /// snooze/mute window by design — otherwise a pre-bed snooze of highs
-    /// would leave an overnight urgent-low silent on builds without the
-    /// Critical Alerts entitlement. Non-critical already returned earlier.
-    private func playCriticalAudioFallbackIfNeeded(_ alert: Alert, muted: Bool) {
-        guard alert.interruptionLevel == .critical else { return }
-        _ = muted
-        // Honor `playsSound: false` (alert was issued with sound: nil) —
-        // user explicitly opted out of audio on this alarm.
+    /// Refreshes whether iOS will actually play a critical notification sound.
+    /// The entitlement can be present while the user has denied Critical Alerts;
+    /// only `.enabled` counts. Anything else must use AlarmKit or the audio player.
+    private func refreshCriticalAlertAuthorization() async {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        criticalAlertsAuthorized = settings.criticalAlertSetting == .enabled
+    }
+
+    /// AlarmKit, or the in-process player when AlarmKit cannot schedule.
+    /// Caller has already confirmed Critical Alerts are not authorized and
+    /// that `generation` still owns `alert`.
+    @MainActor private func playFallbackNow(_ alert: Alert, soundName: String, generation: Int) {
+        guard fallbackAudio.isCurrent(generation: generation, identifier: alert.identifier) else { return }
+        if alarmScheduler == nil { alarmScheduler = CriticalAlertAlarmScheduler() }
+        let scheduled = alarmScheduler?.scheduleAlarm(for: alert) { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                guard self.fallbackAudio.isCurrent(generation: generation, identifier: alert.identifier) else { return }
+                self.playAudioFallback(soundNamed: soundName)
+            }
+        } ?? false
+        guard !scheduled else { return }
+        guard fallbackAudio.isCurrent(generation: generation, identifier: alert.identifier) else { return }
+        playAudioFallback(soundNamed: soundName)
+    }
+
+    /// Confirms Critical Alerts authorization, then either leaves the critical
+    /// user notification as the only sound or starts AlarmKit / the audio player
+    /// with the notification silenced.
+    @MainActor private func finishCriticalChannel(
+        _ alert: Alert,
+        generation: Int,
+        believedAuthorized: Bool
+    ) async {
+        await refreshCriticalAlertAuthorization()
+        guard fallbackAudio.isCurrent(generation: generation, identifier: alert.identifier) else { return }
         guard let soundName = alert.sound?.filename else { return }
-        Task { @MainActor in
-            // AlarmKit pierces silent/Focus and survives app suspension.
+        if criticalAlertsAuthorized {
+            // Drop any looping player left by an earlier fallback so it cannot
+            // stack on the critical notification.
+            criticalAudioPlayer?.stop()
             if alarmScheduler == nil { alarmScheduler = CriticalAlertAlarmScheduler() }
-            let scheduled = alarmScheduler?.scheduleAlarm(for: alert) { [weak self] in
-                Task { @MainActor in self?.playAudioFallback(soundNamed: soundName) }
-            } ?? false
-            guard !scheduled else { return }
-            // Fallback: in-process audio. Only sounds while Trio is running.
-            playAudioFallback(soundNamed: soundName)
+            alarmScheduler?.cancelAlarm(for: alert.identifier)
+            if !believedAuthorized {
+                userNotificationScheduler.schedule(
+                    alert,
+                    muted: false,
+                    soundURL: soundLoader.url(for: alert),
+                    silenced: false
+                )
+            }
+            _ = fallbackAudio.cancel(alert.identifier)
+            return
         }
+        if believedAuthorized {
+            userNotificationScheduler.schedule(
+                alert,
+                muted: false,
+                soundURL: soundLoader.url(for: alert),
+                silenced: true
+            )
+        }
+        guard fallbackAudio.isCurrent(generation: generation, identifier: alert.identifier) else { return }
+        playFallbackNow(alert, soundName: soundName, generation: generation)
+    }
+
+    /// Stops AlarmKit / the looping player when this alert owns them.
+    /// A different owner (for example an urgent-low still outside bulk snooze)
+    /// is left running.
+    private func stopFallbackAudio(for identifier: Alert.Identifier) {
+        guard fallbackAudio.cancel(identifier) else {
+            Task { @MainActor in
+                if self.alarmScheduler == nil { self.alarmScheduler = CriticalAlertAlarmScheduler() }
+                self.alarmScheduler?.cancelAlarm(for: identifier)
+            }
+            return
+        }
+        Task { @MainActor in
+            self.criticalAudioPlayer?.stop()
+            if self.alarmScheduler == nil { self.alarmScheduler = CriticalAlertAlarmScheduler() }
+            self.alarmScheduler?.cancelAlarm(for: identifier)
+        }
+    }
+
+    /// Home-bell snooze. Stops a looping fallback for glucose types the bell
+    /// covers. Urgent-low is not bulk-snoozed and keeps sounding.
+    @MainActor private func stopBulkSnoozedFallbackAudio() {
+        guard let owner = fallbackAudio.currentOwner,
+              FallbackAudioOwnership.shouldStopForBulkSnooze(owner: owner),
+              fallbackAudio.cancel(owner)
+        else { return }
+        criticalAudioPlayer?.stop()
+        if alarmScheduler == nil { alarmScheduler = CriticalAlertAlarmScheduler() }
+        alarmScheduler?.cancelAlarm(for: owner)
     }
 
     @MainActor private func playAudioFallback(soundNamed soundName: String) {
@@ -263,23 +350,38 @@ final class BaseTrioAlertManager: TrioAlertManager, Injectable {
         recordIssued(effective)
         let muted = muter.shouldMute(at: now)
         modalScheduler.schedule(effective)
-        // AlarmKit sounds critical alerts itself; posting the notification with
-        // a sound too would play the tone twice, at once.
-        let alarmKitWillSound = alarmKitAvailable
-            && effective.interruptionLevel == .critical
-            && effective.sound?.filename != nil
-            && !muted
+        let plan = TrioAlertAudiblePlan.make(
+            interruptionLevel: effective.interruptionLevel,
+            soundFilename: effective.sound?.filename,
+            muted: muted,
+            criticalAlertsAuthorized: criticalAlertsAuthorized
+        )
+        // Critical tones ignore the global mute flag inside the scheduler so
+        // urgent-low still pierces Focus. `silenceNotification` is only set
+        // when the fallback owns the tone.
         userNotificationScheduler.schedule(
             effective,
             muted: muted,
             soundURL: soundLoader.url(for: effective),
-            silenced: alarmKitWillSound
+            silenced: plan.silenceNotification
         )
-        // `.delayed`/`.repeating` alerts start their audio when the timer
-        // fires (`alertDidFire`), not now — this is only their arm time.
-        // Critical still plays through mute (PR #5 / overnight hypo wakes).
-        if case .immediate = effective.trigger {
-            playCriticalAudioFallbackIfNeeded(effective, muted: muted)
+        // Confirm authorization before any fallback starts. Delayed alerts do
+        // this in `alertDidFire`, when the notification actually fires.
+        guard effective.interruptionLevel == .critical, effective.sound?.filename != nil else { return }
+        guard case .immediate = effective.trigger else { return }
+        let ticket = fallbackAudio.begin(effective.identifier)
+        let believedAuthorized = criticalAlertsAuthorized
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if let replaced = ticket.replaced {
+                if self.alarmScheduler == nil { self.alarmScheduler = CriticalAlertAlarmScheduler() }
+                self.alarmScheduler?.cancelAlarm(for: replaced)
+            }
+            await self.finishCriticalChannel(
+                effective,
+                generation: ticket.generation,
+                believedAuthorized: believedAuthorized
+            )
         }
     }
 
@@ -314,10 +416,7 @@ final class BaseTrioAlertManager: TrioAlertManager, Injectable {
         modalScheduler.unschedule(identifier: identifier)
         userNotificationScheduler.unschedule(identifier: identifier)
         throttler.reset(identifier: identifier)
-        Task { @MainActor in
-            criticalAudioPlayer?.stop()
-            alarmScheduler?.cancelAlarm(for: identifier)
-        }
+        stopFallbackAudio(for: identifier)
         alertHistoryStorage.removeAlert(identifier: identifier.alertIdentifier)
     }
 
@@ -355,10 +454,7 @@ final class BaseTrioAlertManager: TrioAlertManager, Injectable {
     func handleAcknowledgement(identifier: Alert.Identifier) {
         modalScheduler.unschedule(identifier: identifier)
         userNotificationScheduler.unschedule(identifier: identifier)
-        Task { @MainActor in
-            criticalAudioPlayer?.stop()
-            alarmScheduler?.cancelAlarm(for: identifier)
-        }
+        stopFallbackAudio(for: identifier)
         // All matching entries — replay + a genuine re-issue can coexist.
         alertHistoryStorage.acknowledgeAllEntries(
             managerIdentifier: identifier.managerIdentifier,
@@ -453,6 +549,12 @@ final class BaseTrioAlertManager: TrioAlertManager, Injectable {
             muter.mute(for: duration)
             clearPendingNonCriticalNotifications()
             modalScheduler.clearNonCriticalBanners()
+            // Stop a looping fallback for glucose types this snooze covers.
+            // Urgent-low stays outside the bulk snooze and keeps its channel.
+            stopBulkSnoozedFallbackAudio()
+            // Libre's own glucose notifications are a second siren the home
+            // bell does not otherwise reach. Sensor/battery alerts stay.
+            LibreGlucoseAlarmSuppression.apply()
         } else {
             muter.unmute()
         }
@@ -554,7 +656,25 @@ extension BaseTrioAlertManager: TrioModalAlertResponder, TrioUserNotificationAle
     }
 
     func alertDidFire(_ alert: Alert) {
-        playCriticalAudioFallbackIfNeeded(alert, muted: muter.shouldMute(at: Date()))
+        // Authorized critical alerts already carry `criticalSoundNamed` on the
+        // user notification armed at issue time. Re-check here so a denial
+        // still gets AlarmKit or the audio player, and an approval does not
+        // also start that fallback.
+        guard alert.interruptionLevel == .critical, alert.sound?.filename != nil else { return }
+        let ticket = fallbackAudio.begin(alert.identifier)
+        let believedAuthorized = criticalAlertsAuthorized
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if let replaced = ticket.replaced {
+                if self.alarmScheduler == nil { self.alarmScheduler = CriticalAlertAlarmScheduler() }
+                self.alarmScheduler?.cancelAlarm(for: replaced)
+            }
+            await self.finishCriticalChannel(
+                alert,
+                generation: ticket.generation,
+                believedAuthorized: believedAuthorized
+            )
+        }
     }
 
     func isAlertActive(identifier: Alert.Identifier) -> Bool {
