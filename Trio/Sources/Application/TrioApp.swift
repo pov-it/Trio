@@ -85,6 +85,8 @@ extension Notification.Name {
         }
         _ = resolver.resolve(IOBService.self)!
         _ = resolver.resolve(GlucoseAlertCoordinator.self)!
+        // Libre glucose notifications default to "always" and ignore the home bell.
+        LibreGlucoseAlarmSuppression.apply()
         _ = resolver.resolve(NotLoopingMonitor.self)!
         _ = DeviceAlertsStore.shared
         // Last: needs the pump manager's AlertResponder registration and the
@@ -409,6 +411,7 @@ extension Notification.Name {
             }
 
             if newScenePhase == .active {
+                LibreGlucoseAlarmSuppression.apply()
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                    let rootVC = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController
                 {
