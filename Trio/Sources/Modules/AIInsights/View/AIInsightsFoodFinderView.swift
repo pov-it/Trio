@@ -103,7 +103,8 @@ extension AIInsights {
                     onUseInBolusCalculator: { result in
                         pendingGalleryBolus = result
                         showMealGallery = false
-                    }
+                    },
+                    units: state.settingsManager.settings.units
                 )
             }
             .simultaneousGesture(swipeBackGesture)

@@ -22,6 +22,10 @@ extension AIInsights {
         var loop: MealEventLoopSnapshot?
         /// First loop run after the meal and its bolus were saved: the first prediction that includes them.
         var firstLoopAfter: MealEventDetermination?
+        /// Glucose around the meal, kept once the whole curve is in the past so it outlives Trio's glucose purge.
+        var curve: MealEventCurve? = nil
+        /// What happened after the meal, computed together with `curve`.
+        var outcome: MealOutcome? = nil
     }
 
     struct MealEventMeal: Codable, Equatable, Sendable {
