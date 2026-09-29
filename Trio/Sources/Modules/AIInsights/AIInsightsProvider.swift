@@ -543,6 +543,50 @@ extension AIInsights {
             }
         }
 
+        /// Glucose inside `intervals` for FoodFinder post-meal windows, oldest first.
+        /// Only those spans are read, so meals eaten weeks apart stay cheap to pool.
+        /// Like `fetchGlucose`, falls back to Nightscout when CoreData has nothing, but only for the last day.
+        func fetchPostMealGlucose(in intervals: [DateInterval], now: Date) async -> [PostMealGlucoseReading] {
+            guard let earliest = intervals.map(\.start).min() else { return [] }
+            do {
+                let spans = intervals.map { interval in
+                    NSPredicate(format: "date >= %@ AND date <= %@", interval.start as NSDate, interval.end as NSDate)
+                }
+                let results = try await CoreDataStack.shared.fetchEntitiesAsync(
+                    ofType: GlucoseStored.self,
+                    onContext: coreDataContext,
+                    predicate: NSCompoundPredicate(orPredicateWithSubpredicates: spans),
+                    key: "date",
+                    ascending: true,
+                    batchSize: 100
+                )
+                let readings: [PostMealGlucoseReading] = await coreDataContext.perform {
+                    guard let glucoseObjects = results as? [GlucoseStored] else { return [] }
+                    return glucoseObjects.compactMap { stored -> PostMealGlucoseReading? in
+                        guard let date = stored.date, stored.glucose > 0 else { return nil }
+                        return PostMealGlucoseReading(mgdl: Int(stored.glucose), date: date)
+                    }
+                }
+                if !readings.isEmpty {
+                    return readings
+                }
+            } catch {
+                debug(.default, "AI Provider: failed to fetch post-meal glucose: \(error)")
+            }
+
+            let since = max(earliest, now.addingTimeInterval(-24 * 60 * 60))
+            guard since < now else { return [] }
+            let remote = await nightscoutManager.fetchGlucose(since: since)
+            return remote
+                .compactMap { sample -> PostMealGlucoseReading? in
+                    guard let mgdl = sample.glucose ?? sample.sgv, mgdl > 0,
+                          intervals.contains(where: { $0.contains(sample.dateString) })
+                    else { return nil }
+                    return PostMealGlucoseReading(mgdl: mgdl, date: sample.dateString)
+                }
+                .sorted { $0.date < $1.date }
+        }
+
         /// Fetches carbs from CoreData first, falls back to Nightscout.
         func fetchCarbs(since date: Date? = nil) async -> [CarbsEntry] {
             // Try CoreData first
