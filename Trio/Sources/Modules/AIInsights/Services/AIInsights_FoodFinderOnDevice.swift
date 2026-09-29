@@ -100,7 +100,7 @@ extension AIInsights {
                 )
             case .sdk:
                 return String(
-                    localized: "This build uses Gemini for meal photos.",
+                    localized: "This build was made with an older Xcode, so meal photos use Gemini.",
                     comment: "FoodFinder on-device SDK unavailable"
                 )
             }

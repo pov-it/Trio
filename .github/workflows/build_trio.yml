@@ -2,6 +2,12 @@ name: 4. Build Trio
 run-name: Build Trio (${{ github.ref_name }})
 on:
   workflow_dispatch:
+    inputs:
+      skip_upload:
+        description: "Build and archive only; skip the TestFlight upload"
+        type: boolean
+        required: false
+        default: false
   schedule:
     # Check for updates every Sunday
     #   Later logic builds if there are updates or if it is the 2nd Sunday of the month
@@ -189,7 +195,9 @@ jobs:
   build:
     name: Build
     needs: [check_certs, check_status]
-    runs-on: macos-26
+    # Xcode 27 (Swift 6.4, iOS 27 SDK) is needed to compile the on-device
+    # Foundation Models path. The xcode-27 label is a GitHub public preview image.
+    runs-on: xcode-27
     permissions:
       contents: write
     if:
@@ -199,7 +207,10 @@ jobs:
         (vars.SCHEDULED_SYNC != 'false' && needs.check_status.outputs.NEW_COMMITS == 'true' )
     steps:
       - name: Select Xcode version
-        run: "sudo xcode-select --switch /Applications/Xcode_26.5.app/Contents/Developer"
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_27.0.app/Contents/Developer
+          xcodebuild -version
+          swift --version
       
       - name: Checkout Repo for building
         uses: actions/checkout@v5
@@ -284,6 +295,7 @@ jobs:
 
       # Upload to TestFlight
       - name: Fastlane upload to TestFlight
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.skip_upload) }}
         run: bundle exec fastlane release
         env:
           TEAMID: ${{ secrets.TEAMID }}
