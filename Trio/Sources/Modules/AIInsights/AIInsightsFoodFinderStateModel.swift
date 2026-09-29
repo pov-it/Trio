@@ -221,6 +221,17 @@ extension AIInsights {
         let note: String
         let createdAt: Date
         let useReducedBolus: Bool?
+        /// The analysis the meal came from, kept for `AIInsights.MealEvent`.
+        var foodResultID: UUID? = nil
+        var mealKey: String? = nil
+        var mealName: String? = nil
+        var analysisAt: Date? = nil
+        var source: String? = nil
+        var photoEngine: String? = nil
+        var fiber: Double? = nil
+        var calories: Double? = nil
+        var carbLowerRatio: Double? = nil
+        var carbUpperRatio: Double? = nil
 
         static func store(_ handoff: FoodBolusHandoff) {
             if let data = try? JSONEncoder().encode(handoff) {
@@ -429,41 +440,65 @@ extension AIInsights {
             }
         }
 
-        /// Loads glucose and any Warsaw equivalents for the open meal and the recent list.
-        /// Limits are `TrioSettings.low` / `TrioSettings.high` (home chart low and high).
+        private struct PostMealPlan {
+            var resultID: UUID
+            var basis: FoodFinderPostMealSummary.Basis
+            var occurrences: [FoodFinderPostMealOccurrence]
+        }
+
+        /// Loads glucose and any Warsaw equivalents for the open meal and the recent list,
+        /// measured against the 70–180 mg/dL consensus range (`FoodFinderPostMealLimits.standard`).
+        /// Each meal is pooled over the times it was saved from the bolus calculator (`MealEvent`).
         @MainActor func refreshPostMealSummaries(now: Date = Date()) async {
-            var meals: [(id: UUID, time: Date, carbs: Double)] = recentResults.prefix(5).map {
-                ($0.id, $0.timestamp, $0.totalCarbs)
-            }
+            var meals = Array(recentResults.prefix(5))
             if let current = currentResult, !meals.contains(where: { $0.id == current.id }) {
-                meals.append((current.id, current.timestamp, current.totalCarbs))
+                meals.append(current)
             }
-            guard let earliest = meals.map(\.time).min() else {
+            let recorder = AIInsights.MealEventRecorder.shared
+            recorder.refresh()
+            await recorder.waitUntilIdle()
+            let since = now.addingTimeInterval(-TimeInterval(FoodFinderPostMealSummary.savedMealLookbackDays) * 24 * 60 * 60)
+            var plans: [PostMealPlan] = []
+            for meal in meals {
+                let mealKey = AIInsights.MealEventIdentity.mealKey(
+                    mealName: meal.mealName,
+                    itemNames: meal.items.map(\.name),
+                    resultID: meal.id
+                )
+                let saved = await recorder.occurrences(
+                    mealID: AIInsights.MealEventIdentity.mealID(forKey: mealKey),
+                    foodResultID: meal.id,
+                    since: since,
+                    limit: FoodFinderPostMealSummary.savedMealLimit
+                )
+                let plan = FoodFinderPostMealSummary.occurrences(
+                    saved: saved,
+                    analysisTime: meal.timestamp,
+                    analysisCarbs: meal.totalCarbs
+                )
+                plans.append(PostMealPlan(resultID: meal.id, basis: plan.basis, occurrences: plan.occurrences))
+            }
+            let occurrences = plans.flatMap(\.occurrences)
+            let latestMealTimes = plans.compactMap { $0.occurrences.map(\.mealTime).max() }
+            guard let fpuSince = latestMealTimes.min() else {
                 postMealSummaries = [:]
                 return
             }
-            let latestWindowEnd = meals.map { $0.time.addingTimeInterval(FoodFinderPostMealSummary.fourHourDuration) }.max() ?? now
-            let fetchEnd = min(now, latestWindowEnd)
-            let low = NSDecimalNumber(decimal: settingsManager.settings.low).intValue
-            let high = NSDecimalNumber(decimal: settingsManager.settings.high).intValue
-            let limits = FoodFinderPostMealLimits.resolved(lowMgdl: low, highMgdl: high)
-            let glucose = await provider.fetchGlucose(since: earliest)
-            let carbs = await provider.fetchCarbEntriesIncludingFPU(
-                since: earliest.addingTimeInterval(-FoodFinderPostMealSummary.carbMatchWindow)
+            let readings = await provider.fetchPostMealGlucose(
+                in: FoodFinderPostMealSummary.glucoseIntervals(for: occurrences, now: now),
+                now: now
             )
-            let readings = glucose.compactMap { sample -> PostMealGlucoseReading? in
-                guard let mgdl = sample.glucose ?? sample.sgv, sample.dateString <= fetchEnd else { return nil }
-                return PostMealGlucoseReading(mgdl: mgdl, date: sample.dateString)
-            }
+            let carbs = await provider.fetchCarbEntriesIncludingFPU(
+                since: fpuSince.addingTimeInterval(-FoodFinderPostMealSummary.carbMatchWindow)
+            )
             var summaries: [UUID: FoodFinderPostMealSummary] = [:]
-            for meal in meals {
-                summaries[meal.id] = FoodFinderPostMealSummary.make(
-                    mealTime: meal.time,
+            for plan in plans {
+                summaries[plan.resultID] = FoodFinderPostMealSummary.make(
+                    occurrences: plan.occurrences,
+                    basis: plan.basis,
                     readings: readings,
-                    limits: limits,
                     now: now,
-                    carbEntries: carbs,
-                    mealCarbs: meal.carbs
+                    carbEntries: carbs
                 )
             }
             postMealSummaries = summaries
@@ -1614,13 +1649,28 @@ extension AIInsights {
         func sendToBolusCalculator(result: FoodAnalysisResult?, openBolusCalculator: Bool = true) {
             guard let result else { return }
             let itemNames = result.items.map(\.name).joined(separator: ", ")
+            let mealName = result.mealName?.trimmingCharacters(in: .whitespacesAndNewlines)
             let handoff = FoodBolusHandoff(
                 carbs: result.totalCarbs,
                 fat: result.totalFat,
                 protein: result.totalProtein,
                 note: itemNames.isEmpty ? "FoodFinder" : itemNames,
                 createdAt: Date(),
-                useReducedBolus: AIInsights.foodFinderReducedBolusRecommended(fat: result.totalFat, protein: result.totalProtein)
+                useReducedBolus: AIInsights.foodFinderReducedBolusRecommended(fat: result.totalFat, protein: result.totalProtein),
+                foodResultID: result.id,
+                mealKey: AIInsights.MealEventIdentity.mealKey(
+                    mealName: result.mealName,
+                    itemNames: result.items.map(\.name),
+                    resultID: result.id
+                ),
+                mealName: mealName?.isEmpty == false ? mealName : nil,
+                analysisAt: result.timestamp,
+                source: result.source.rawValue,
+                photoEngine: result.photoEngine?.rawValue,
+                fiber: result.totalFiber,
+                calories: result.totalCalories,
+                carbLowerRatio: result.carbEstimateLowerRatio,
+                carbUpperRatio: result.carbEstimateUpperRatio
             )
             FoodBolusHandoff.store(handoff)
             guard openBolusCalculator else { return }

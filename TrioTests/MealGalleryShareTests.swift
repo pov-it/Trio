@@ -217,6 +217,50 @@ struct MealGalleryShareTests {
         #expect(handoff.note == "Stokbrood")
     }
 
+    @Test("A bolus handoff saved by an earlier version still decodes")
+    func legacyHandoffDecodes() throws {
+        let json = #"{"carbs":60,"fat":8,"protein":16,"note":"Stokbrood","createdAt":0,"useReducedBolus":false}"#
+        let handoff = try JSONDecoder().decode(AIInsights.FoodBolusHandoff.self, from: Data(json.utf8))
+        #expect(handoff.carbs == 60)
+        #expect(handoff.note == "Stokbrood")
+        #expect(handoff.useReducedBolus == false)
+        #expect(handoff.foodResultID == nil)
+        #expect(handoff.mealKey == nil)
+        #expect(handoff.mealName == nil)
+        #expect(handoff.fiber == nil)
+    }
+
+    @Test("A bolus handoff keeps the analysis it came from")
+    func handoffKeepsAnalysis() throws {
+        let resultID = UUID()
+        let handoff = AIInsights.FoodBolusHandoff(
+            carbs: 60,
+            fat: 8,
+            protein: 16,
+            note: "Stokbrood",
+            createdAt: Date(timeIntervalSinceReferenceDate: 0),
+            useReducedBolus: nil,
+            foodResultID: resultID,
+            mealKey: "halve stokbroodjes",
+            mealName: "Halve stokbroodjes",
+            analysisAt: Date(timeIntervalSinceReferenceDate: -60),
+            source: "aiCamera",
+            photoEngine: "onDevice",
+            fiber: 2,
+            calories: 180,
+            carbLowerRatio: 0.8,
+            carbUpperRatio: 1.4
+        )
+        let decoded = try JSONDecoder().decode(AIInsights.FoodBolusHandoff.self, from: JSONEncoder().encode(handoff))
+        #expect(decoded.foodResultID == resultID)
+        #expect(decoded.mealKey == "halve stokbroodjes")
+        #expect(decoded.mealName == "Halve stokbroodjes")
+        #expect(decoded.analysisAt == Date(timeIntervalSinceReferenceDate: -60))
+        #expect(decoded.photoEngine == "onDevice")
+        #expect(decoded.calories == 180)
+        #expect(decoded.carbUpperRatio == 1.4)
+    }
+
     @Test("Manual group names de-duplicate case-insensitively")
     func groupNameCatalog() {
         let suite = "MealGalleryShareTests.groups.\(UUID().uuidString)"

@@ -396,10 +396,6 @@ extension AIInsights {
                 macroSummaryCard(result)
             }
 
-            if let summary = state.postMealSummaries[result.id] {
-                postMealSection(summary)
-            }
-
             Section {
                 ForEach(result.items) { item in
                     foodItemRow(item)
@@ -459,6 +455,10 @@ extension AIInsights {
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
+            }
+
+            if let summary = state.postMealSummaries[result.id] {
+                postMealSection(summary)
             }
         }
 
@@ -1286,8 +1286,8 @@ extension AIInsights {
 
         private func postMealSection(_ summary: FoodFinderPostMealSummary) -> some View {
             Section {
-                postMealWindowRow(summary.twoHour)
-                postMealWindowRow(summary.fourHour)
+                postMealWindowRow(summary.zeroToTwoHours)
+                postMealWindowRow(summary.twoToFourHours)
                 if let fpu = summary.fpu {
                     Text(postMealFPUNote(fpu))
                         .font(.caption)
@@ -1296,73 +1296,85 @@ extension AIInsights {
             } header: {
                 Text(String(localized: "After this meal", comment: "FoodFinder post-meal section"))
             } footer: {
-                Text(postMealLimitsFooter(summary.limits))
+                Text(postMealFooter(summary))
             }
         }
 
         private func postMealWindowRow(_ window: FoodFinderPostMealWindow) -> some View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
-                    Text(postMealWindowTitle(window.hours))
+                    Text(postMealWindowTitle(window))
                         .font(.subheadline.weight(.semibold))
                     Spacer()
-                    Text(postMealStatus(window))
+                    Text(postMealHeadline(window))
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(postMealStatusColor(window))
+                        .foregroundStyle(window.timeInRangePercent == nil ? Color.secondary : Color.primary)
                 }
-                Text(postMealDetail(window))
+                if let detail = postMealDetail(window) {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text(postMealOccurrences(window))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .padding(.vertical, 4)
         }
 
-        private func postMealWindowTitle(_ hours: Int) -> String {
-            if hours == 4 {
-                return String(localized: "4 hours", comment: "FoodFinder 4 hour post-meal window")
-            }
-            return String(localized: "2 hours", comment: "FoodFinder 2 hour post-meal window")
+        private func postMealWindowTitle(_ window: FoodFinderPostMealWindow) -> String {
+            String(
+                format: String(localized: "%d–%d h", comment: "FoodFinder post-meal window, hours after the meal"),
+                window.startHour,
+                window.endHour
+            )
         }
 
-        private func postMealStatus(_ window: FoodFinderPostMealWindow) -> String {
-            guard window.readingCount > 0 else {
+        private func postMealHeadline(_ window: FoodFinderPostMealWindow) -> String {
+            guard let percent = window.timeInRangePercent else {
                 return window.isComplete
                     ? String(localized: "No glucose", comment: "FoodFinder post-meal window with no glucose")
                     : String(localized: "Waiting", comment: "FoodFinder post-meal window still collecting glucose")
             }
-            switch (window.hadHypo, window.hadHyper) {
-            case (true, true):
-                return String(localized: "Low and high", comment: "FoodFinder post-meal hypo and hyper")
-            case (true, false):
-                return String(localized: "Low", comment: "FoodFinder post-meal hypo")
-            case (false, true):
-                return String(localized: "High", comment: "FoodFinder post-meal hyper")
-            default:
-                return String(localized: "In range", comment: "FoodFinder post-meal in range")
+            if window.isComplete {
+                return String(
+                    format: String(localized: "%d%% in range", comment: "FoodFinder post-meal time in range"),
+                    percent
+                )
             }
-        }
-
-        private func postMealStatusColor(_ window: FoodFinderPostMealWindow) -> Color {
-            guard window.readingCount > 0 else { return .secondary }
-            if window.hadHypo { return .red }
-            if window.hadHyper { return .orange }
-            return .green
-        }
-
-        private func postMealDetail(_ window: FoodFinderPostMealWindow) -> String {
-            guard let percent = window.timeInRangePercent else {
-                return window.isComplete
-                    ? String(localized: "No glucose in this window", comment: "FoodFinder completed window without glucose")
-                    : String(localized: "No glucose yet", comment: "FoodFinder open window without glucose")
-            }
-            let label = window.isComplete
-                ? String(localized: "Time in range", comment: "FoodFinder completed time in range")
-                : String(localized: "Time in range so far", comment: "FoodFinder partial time in range")
             return String(
-                format: String(localized: "%@ %d%% · %d readings", comment: "FoodFinder post-meal time in range and reading count"),
-                label,
-                percent,
-                window.readingCount
+                format: String(
+                    localized: "%d%% in range so far",
+                    comment: "FoodFinder post-meal time in range while the window is open"
+                ),
+                percent
+            )
+        }
+
+        private func postMealDetail(_ window: FoodFinderPostMealWindow) -> String? {
+            guard let below = window.timeBelowRangePercent, let above = window.timeAboveRangePercent else { return nil }
+            return String(
+                format: String(
+                    localized: "Below range %d%% · above range %d%%",
+                    comment: "FoodFinder post-meal time below and above range"
+                ),
+                below,
+                above
+            )
+        }
+
+        private func postMealOccurrences(_ window: FoodFinderPostMealWindow) -> String {
+            guard window.occurrenceCount > 0 else {
+                return String(localized: "n = 0", comment: "FoodFinder post-meal window without meals that have glucose")
+            }
+            return String(
+                format: String(
+                    localized: "n = %d · below range in %d · above range in %d",
+                    comment: "FoodFinder post-meal meals with glucose in the window and how many went below or above range"
+                ),
+                window.occurrenceCount,
+                window.lowOccurrenceCount,
+                window.highOccurrenceCount
             )
         }
 
@@ -1387,36 +1399,60 @@ extension AIInsights {
             }
         }
 
-        private func postMealLimitsFooter(_ limits: FoodFinderPostMealLimits) -> String {
+        private func postMealFooter(_ summary: FoodFinderPostMealSummary) -> String {
             let units = state.settingsManager.settings.units
-            return String(
+            let low = summary.limits.lowMgdl.formatted(for: units)
+            let high = summary.limits.highMgdl.formatted(for: units)
+            let range = "\(low)–\(high) \(units.rawValue)"
+            let basis: String
+            switch summary.basis {
+            case .loggedMeals:
+                basis = String(
+                    format: String(
+                        localized: "Pooled over the latest times this meal was saved in the bolus calculator, up to %d in the last %d days, each timed from the saved meal.",
+                        comment: "FoodFinder post-meal footer for saved meals: the most meals pooled, then the days looked back"
+                    ),
+                    FoodFinderPostMealSummary.savedMealLimit,
+                    FoodFinderPostMealSummary.savedMealLookbackDays
+                )
+            case .analysisTime:
+                basis = String(
+                    localized: "Timed from this FoodFinder analysis. Once the meal is saved in the bolus calculator, it is timed from the saved meal.",
+                    comment: "FoodFinder post-meal footer for a meal not logged yet"
+                )
+            }
+            let method = String(
                 format: String(
-                    localized: "Low is below %@. High is above %@.",
-                    comment: "FoodFinder post-meal limit footer"
+                    localized: "Share of time in range (%@), weighted by the time between readings. n is the number of meals with glucose in that window.",
+                    comment: "FoodFinder post-meal footer explaining time in range and n"
                 ),
-                limits.lowMgdl.formatted(withUnits: units),
-                limits.highMgdl.formatted(withUnits: units)
+                range
             )
+            let disclaimer = String(
+                localized: "This describes past glucose; it is not dosing advice.",
+                comment: "FoodFinder post-meal footer disclaimer"
+            )
+            return "\(basis) \(method) \(disclaimer)"
         }
 
         private func postMealCaption(for result: FoodAnalysisResult) -> String? {
             guard let summary = state.postMealSummaries[result.id] else { return nil }
-            let window = summary.fourHour.readingCount > 0 ? summary.fourHour : summary.twoHour
-            guard window.readingCount > 0, let percent = window.timeInRangePercent else { return nil }
-            let status = postMealStatus(window).lowercased()
-            if window.isComplete {
-                return String(
-                    format: String(localized: "%dh %d%% · %@", comment: "FoodFinder recent meal post-meal caption"),
-                    window.hours,
-                    percent,
-                    status
-                )
+            let parts = summary.windows.compactMap { window -> String? in
+                guard let percent = window.timeInRangePercent else { return nil }
+                let format = window.isComplete
+                    ? String(localized: "%@ %d%%", comment: "FoodFinder recent meal caption part: window and time in range")
+                    : String(
+                        localized: "%@ %d%% so far",
+                        comment: "FoodFinder recent meal caption part: open window and time in range"
+                    )
+                return String(format: format, postMealWindowTitle(window), percent)
             }
+            guard !parts.isEmpty else { return nil }
+            let count = summary.windows.map(\.occurrenceCount).max() ?? 0
             return String(
-                format: String(localized: "%dh %d%% so far · %@", comment: "FoodFinder recent meal partial post-meal caption"),
-                window.hours,
-                percent,
-                status
+                format: String(localized: "In range %@ · n = %d", comment: "FoodFinder recent meal post-meal caption"),
+                parts.joined(separator: " · "),
+                count
             )
         }
 
