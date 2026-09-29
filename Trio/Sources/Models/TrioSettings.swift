@@ -91,6 +91,8 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var foodFinderPreferredSource: AIInsights.FoodSourceID = .openFoodFacts
     var foodFinderDoseGuardEnabled: Bool = true
     var foodFinderDoseGuardSamples: Int = 2
+    /// Kept so older settings decode. Meal photos always compare both engines; this no longer hides a column.
+    var foodFinderPhotoEngine: AIInsights.FoodFinderPhotoEnginePreference = .automatic
     /// Inject reverse-geocoded venue/locality into AI chat prompt. Off by default; first use triggers iOS Location permission prompt.
     var aiLocationContextEnabled: Bool = false
     /// Read dietaryCaffeine from Apple Health and merge with manual caffeine entries.
@@ -503,6 +505,13 @@ extension TrioSettings: Decodable {
             forKey: .foodFinderDoseGuardSamples
         ) {
             settings.foodFinderDoseGuardSamples = min(3, max(1, foodFinderDoseGuardSamples))
+        }
+
+        if let foodFinderPhotoEngine = try? container.decode(
+            AIInsights.FoodFinderPhotoEnginePreference.self,
+            forKey: .foodFinderPhotoEngine
+        ) {
+            settings.foodFinderPhotoEngine = foodFinderPhotoEngine
         }
 
         if let aiLocationContextEnabled = try? container.decode(Bool.self, forKey: .aiLocationContextEnabled) {

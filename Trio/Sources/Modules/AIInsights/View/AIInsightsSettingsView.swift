@@ -285,6 +285,22 @@ extension AIInsights {
                 }
                 .listRowBackground(Color.chart)
 
+                Section(
+                    header: Text("Meal photos", comment: "FoodFinder photo engine section header"),
+                    footer: Text(
+                        """
+                        Each photo asks Gemini and, when Apple Intelligence is ready, the on-device model. \
+                        Both estimates stay on screen. Tap one to log it, then edit the numbers.
+                        """,
+                        comment: "FoodFinder photo comparison settings footer"
+                    )
+                ) {
+                    Text(FoodFinderOnDeviceAnalyzer.statusText)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .listRowBackground(Color.chart)
+
                 CompanionShareSettingsForm(
                     isEnabled: Binding(
                         get: { MealCompanionPublisher.shared.isShareEnabled },

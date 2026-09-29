@@ -40,6 +40,7 @@ Hub surfaces: AI Chat, Therapy Insights, Recap, FoodFinder, Caffeine tracker, Al
 **FoodFinder**
 
 - Camera / Library / Barcode / Dictate composer (purple accents preserved).
+- Meal photos run Gemini and, on iOS 27 with Apple Intelligence ready, on-device Foundation Models (`LanguageModelSession` + image `Attachment`, guided `@Generable` macros) in parallel. Both estimates stay on screen. Agreement is the closeness of carbs, fat, protein, kcal, and meal name (0–100), not a model-reported confidence. The logged meal starts as Gemini when that side succeeded; tap the other column to switch. AI Settings → Meal photos shows on-device status only.
 - Composer flushes to the keyboard (no gap); expanded card does not leave a white panel when dragged down.
 - Barcode scanner **dismisses after a successful scan**.
 - Scanned packaged-food data is attached to the draft and included in the LLM context.

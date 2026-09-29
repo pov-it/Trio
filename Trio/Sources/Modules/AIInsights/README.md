@@ -20,7 +20,7 @@ Trio/Sources/Modules/AIInsights/
   AIInsightsFoodFinderStateModel.swift
   AIInsightsTherapyInsightsStateModel.swift
   ZGlucoParser.swift
-  Services/                          LLM adapter, gallery, companion share, recap, trackers
+  Services/                          LLM adapter, on-device meal photos, gallery, companion share, recap, trackers
   View/                              Hub, FoodFinder, gallery, chat, settings, camera/barcode
 ```
 
@@ -51,3 +51,16 @@ Glucose alerts / critical-alert policy is **not** in this folder; it lives under
 - **In this folder:** UI + FoodFinder/LLM + local meal gallery + opt-in meal-only CloudKit publisher.
 - **Not in this folder:** oref/looping, pump/CGM drivers, glucose time series UI, Nightscout tokens.
 - **Never on the companion path:** glucose, IOB, COB, Nightscout URL/token, pump fields, Trio therapy App Group.
+
+## Meal photo comparison
+
+Each meal photo runs both predictors and keeps both estimates on screen:
+
+1. Existing Gemini photo request.
+2. On-device Apple Intelligence when `SystemLanguageModel.default.availability == .available` on iOS 27, and this build was made with the iOS 27 SDK (Xcode 27 / Swift 6.4). `LanguageModelSession` plus an image `Attachment`, guided by `@Generable` into the same meal fields Gemini already returns (name, portion, carbs, fat, protein, fiber, calories).
+
+The logged meal starts as the Gemini estimate when that side succeeded. Tap the other column to switch, then use Edit. If only one side succeeds, that side is logged and the other is marked unavailable or failed. Agreement is n/a unless both succeed. If both fail, the existing error is shown and no meal is saved.
+
+Agreement is how close the two macro totals are, not a confidence the model reports. For each of carbs, fat, protein, and kcal, closeness is `1 - min(1, |a-b| / max(a, b, floor))` with a floor of 1 g or 10 kcal. Name overlap is Jaccard of word tokens. Weights are 0.40 carbs, 0.20 fat, 0.20 protein, 0.10 kcal, 0.10 name (the name weight moves onto carbs when a name is empty). The score is that sum times 100.
+
+`foodFinderPhotoEngine` is still stored so older settings decode. It no longer chooses a single engine. Builds made with Xcode 26 mark on-device unavailable and still show Gemini. Numbers stay estimates.
