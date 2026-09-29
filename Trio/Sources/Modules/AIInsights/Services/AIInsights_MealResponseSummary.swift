@@ -87,6 +87,8 @@ extension AIInsights {
             var tempBasalExtra: Double?
             var correction: Double
             var recommended: Double?
+            /// Estimated insulin the meal took (`MealOutcomeNeed`).
+            var needed: Double?
             var hadLow: Bool
             var hadRescueCarbs: Bool
             var isIncluded: Bool
@@ -119,6 +121,23 @@ extension AIInsights {
         var medianMealBolus: Double?
         var medianSMB: Double?
         var medianTempBasalExtra: Double?
+
+        /// Included meals with an estimate of the insulin they took.
+        var needCount: Int = 0
+        var medianNeeded: Double?
+        var neededP25: Double?
+        var neededP75: Double?
+        var medianMealFactor: Double?
+        var medianUnitsPer10g: Double?
+
+        /// The estimate for `carbs` grams at the median units per 10 g; nil below `needMinimum` meals.
+        func neededEstimate(forCarbs carbs: Double) -> Double? {
+            guard needCount >= Self.needMinimum, let perTen = medianUnitsPer10g, carbs > 0 else { return nil }
+            return perTen * carbs / 10
+        }
+
+        /// Meals needed before an estimate for a new portion is shown.
+        static let needMinimum = 5
 
         static func make(
             analyses: [MealEventAnalysis],
@@ -193,6 +212,7 @@ extension AIInsights {
                     tempBasalExtra: insulin.tempBasalExtraUnits,
                     correction: insulin.correctionUnits,
                     recommended: insulin.recommendedUnits,
+                    needed: analysis.outcome.need?.neededUnits,
                     hadLow: analysis.outcome.hadLow,
                     hadRescueCarbs: analysis.outcome.hadRescueCarbs,
                     isIncluded: includedIDs.contains(analysis.id)
@@ -205,6 +225,8 @@ extension AIInsights {
             let inRange: [Double] = outcomes.compactMap { $0.window(0, 240)?.inRangePercent.map { Double($0) } }
             let medianPeak: Int? = median(peakMinutes).map { Int($0.rounded()) }
             let medianInRange: Int? = median(inRange).map { Int($0.rounded()) }
+            let needs: [MealOutcomeNeed] = outcomes.compactMap(\.need)
+            let neededSorted: [Double] = needs.map(\.neededUnits).sorted()
 
             return MealResponseSummary(
                 scale: scale,
@@ -226,7 +248,13 @@ extension AIInsights {
                 medianCorrectionUnits: median(corrections.map(\.insulin.correctionUnits)),
                 medianMealBolus: median(outcomes.map(\.insulin.mealBolusUnits)),
                 medianSMB: median(outcomes.map(\.insulin.smbUnits)),
-                medianTempBasalExtra: median(outcomes.compactMap(\.insulin.tempBasalExtraUnits))
+                medianTempBasalExtra: median(outcomes.compactMap(\.insulin.tempBasalExtraUnits)),
+                needCount: needs.count,
+                medianNeeded: median(neededSorted),
+                neededP25: neededSorted.isEmpty ? nil : percentile(neededSorted, 0.25),
+                neededP75: neededSorted.isEmpty ? nil : percentile(neededSorted, 0.75),
+                medianMealFactor: median(needs.compactMap(\.mealFactor)),
+                medianUnitsPer10g: median(needs.compactMap(\.unitsPer10g))
             )
         }
 

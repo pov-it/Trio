@@ -11,6 +11,8 @@ extension AIInsights {
         let foodResultIDs: Set<UUID>
         var units: GlucoseUnits = .mgdL
         var cardFill: Color = Color(UIColor.secondarySystemGroupedBackground)
+        /// Carbs of the portion being looked at, for the estimate at this portion size.
+        var currentCarbs: Double? = nil
 
         @State private var analyses: [MealEventAnalysis] = []
         @State private var isLoading = true
@@ -65,6 +67,10 @@ extension AIInsights {
                 Text(insulinLine)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            if let needLine = needLine(summary) {
+                Text(needLine)
+                    .font(.caption.weight(.semibold))
             }
 
             Picker(String(localized: "Scale", comment: "Meal response scale picker"), selection: $scale) {
@@ -170,6 +176,56 @@ extension AIInsights {
             return parts.joined(separator: " · ")
         }
 
+        private func needLine(_ summary: MealResponseSummary) -> String? {
+            guard let needed = summary.medianNeeded else { return nil }
+            var parts: [String] = []
+            if let low = summary.neededP25, let high = summary.neededP75, summary.needCount >= 4 {
+                parts.append(String(
+                    format: String(
+                        localized: "Took about %@ U (middle half %@–%@ U, n = %d)",
+                        comment: "Meal response: median estimated insulin the meal took, with the interquartile range"
+                    ),
+                    unitsText(needed),
+                    unitsText(low),
+                    unitsText(high),
+                    summary.needCount
+                ))
+            } else {
+                parts.append(String(
+                    format: String(
+                        localized: "Took about %@ U (n = %d)",
+                        comment: "Meal response: median estimated insulin the meal took"
+                    ),
+                    unitsText(needed),
+                    summary.needCount
+                ))
+            }
+            if let factor = summary.medianMealFactor {
+                parts.append(String(
+                    format: String(localized: "×%@ of the carb ratio", comment: "Meal response: needed insulin relative to carbs at the carb ratio"),
+                    String(format: "%.2f", factor)
+                ))
+            }
+            if let perTen = summary.medianUnitsPer10g {
+                parts.append(String(
+                    format: String(localized: "%@ U per 10 g", comment: "Meal response: needed insulin per 10 g carbs"),
+                    String(format: "%.2f", perTen)
+                ))
+            }
+            var line = parts.joined(separator: " · ")
+            if let currentCarbs, let estimate = summary.neededEstimate(forCarbs: currentCarbs) {
+                line += " " + String(
+                    format: String(
+                        localized: "At this portion (%d g carbs) past meals took about %@ U.",
+                        comment: "Meal response: estimated insulin for the current portion from past meals"
+                    ),
+                    Int(currentCarbs.rounded()),
+                    unitsText(estimate)
+                )
+            }
+            return line
+        }
+
         private func footer(_ summary: MealResponseSummary) -> String {
             var lines: [String] = []
             let left = summary.leftOut
@@ -219,9 +275,15 @@ extension AIInsights {
                 break
             }
             lines.append(String(
-                localized: "Insulin: meal bolus, SMB and temp basal above the scheduled rate in the 4 h after the meal, and manual corrections from 30 min on. ◆ is what the bolus calculator recommended; ▲ marks a low or rescue carbs.",
+                localized: "Insulin: meal bolus, SMB and temp basal above the scheduled rate in the 4 h after the meal, and manual corrections from 30 min on. ◆ is what the bolus calculator recommended, ● the estimated insulin the meal took and ▲ marks a low or rescue carbs.",
                 comment: "Meal response: insulin chart explanation"
             ))
+            if summary.medianNeeded != nil {
+                lines.append(String(
+                    localized: "Took: insulin on board at the meal plus everything delivered in 4 h, minus what was still on board, corrected for where glucose ended (via ISF) and for rescue carbs (via the carb ratio). Fat and protein absorbing after 4 h and a basal that is off are not separated out.",
+                    comment: "Meal response: how the needed insulin is estimated"
+                ))
+            }
             lines.append(String(
                 localized: "The loop reacts to the curve itself, so read glucose together with the insulin. A higher curve can come from the carb estimate as well as from settings. This describes past meals; it is not dosing advice.",
                 comment: "Meal response: disclaimer"
@@ -460,6 +522,14 @@ extension AIInsights {
             }
         }
 
+        private var needs: [Marker] {
+            let labels = self.labels
+            return bars.compactMap { bar -> Marker? in
+                guard let needed = bar.needed else { return nil }
+                return Marker(id: "\(bar.id)-needed", label: labels[bar.id] ?? "", units: needed)
+            }
+        }
+
         private var lows: [Marker] {
             let labels = self.labels
             return bars.compactMap { bar -> Marker? in
@@ -485,6 +555,14 @@ extension AIInsights {
                     )
                     .symbol(.diamond)
                     .foregroundStyle(Color.primary)
+                }
+                ForEach(needs) { marker in
+                    PointMark(
+                        x: .value("Meal", marker.label),
+                        y: .value("Units", marker.units)
+                    )
+                    .symbol(.circle)
+                    .foregroundStyle(Color.green)
                 }
                 ForEach(lows) { marker in
                     PointMark(
