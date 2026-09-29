@@ -269,31 +269,41 @@ extension AIInsights {
         // MARK: - Root content (default FoodFinder page)
 
         private var rootContent: some View {
-            List {
-                Section {
-                    VStack {
-                        emptyStateView
+            let saved = savedMealEntries
+            let recent = state.recentResults
+            return ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    emptyStateView(compact: !saved.isEmpty || !recent.isEmpty)
+                        .frame(maxWidth: .infinity)
+
+                    if !saved.isEmpty {
+                        FoodFinderMealGridSection(
+                            title: String(localized: "Saved Meals", comment: "Saved meal presets section header"),
+                            count: saved.count
+                        ) {
+                            ForEach(saved) { entry in
+                                savedMealTile(entry)
+                            }
+                        }
                     }
-                    .frame(maxWidth: .infinity)
-                    .listRowBackground(Color.clear)
-                }
 
-                if !state.frequentMeals.isEmpty {
-                    frequentMealsSection
+                    if !recent.isEmpty {
+                        FoodFinderMealGridSection(
+                            title: String(localized: "Recent Meals", comment: "Recent results section header"),
+                            count: recent.count
+                        ) {
+                            ForEach(recent) { result in
+                                recentMealTile(result)
+                            }
+                        }
+                    }
                 }
-
-                if !savedMealPresets.isEmpty {
-                    savedMealsSection
-                }
-
-                if !state.recentResults.isEmpty {
-                    recentResultsSection
-                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
             }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(appState.trioBackgroundColor(for: colorScheme))
             .scrollDismissesKeyboard(.interactively)
+            .background(appState.trioBackgroundColor(for: colorScheme))
         }
 
         // MARK: - Meal detail screen (in-place swap, not nav push)
@@ -320,31 +330,12 @@ extension AIInsights {
 
         // MARK: - Empty State
 
-        private var emptyStateView: some View {
+        /// `compact` leaves out the introduction once there are meals on the page, keeping the notices.
+        private func emptyStateView(compact: Bool) -> some View {
             VStack(spacing: 16) {
-                Image(systemName: "fork.knife.circle.fill")
-                    .font(.system(size: 56))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.3411764706, green: 0.6666666667, blue: 0.9254901961),
-                                Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .padding(.top, 60)
-
-                Text(String(localized: "Describe your meal", comment: "FoodFinder empty state title"))
-                    .font(.title3.bold())
-                    .multilineTextAlignment(.center)
-
-                Text(String(localized: "Type what you're eating and AI will estimate the carbs, protein, fat, and calories for each item.", comment: "FoodFinder empty state description"))
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
+                if !compact {
+                    emptyStateIntroduction
+                }
 
                 if !state.aiEnabled {
                     VStack(spacing: 8) {
@@ -377,6 +368,34 @@ extension AIInsights {
                     )
                     .padding(.horizontal, 24)
                 }
+            }
+        }
+
+        private var emptyStateIntroduction: some View {
+            VStack(spacing: 16) {
+                Image(systemName: "fork.knife.circle.fill")
+                    .font(.system(size: 56))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.3411764706, green: 0.6666666667, blue: 0.9254901961),
+                                Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .padding(.top, 60)
+
+                Text(String(localized: "Describe your meal", comment: "FoodFinder empty state title"))
+                    .font(.title3.bold())
+                    .multilineTextAlignment(.center)
+
+                Text(String(localized: "Type what you're eating and AI will estimate the carbs, protein, fat, and calories for each item.", comment: "FoodFinder empty state description"))
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
             }
         }
 
@@ -460,6 +479,20 @@ extension AIInsights {
 
             if let summary = state.postMealSummaries[result.id] {
                 postMealSection(summary)
+            }
+
+            Section {
+                let keys = MealResponseKeys(results: [result])
+                MealResponseCard(
+                    title: String(localized: "Glucose after this meal", comment: "Meal detail response card title"),
+                    mealIDs: keys.mealIDs,
+                    foodResultIDs: keys.foodResultIDs,
+                    units: state.settingsManager.settings.units,
+                    cardFill: colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white,
+                    currentCarbs: result.totalCarbs
+                )
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
             }
         }
 
@@ -743,6 +776,8 @@ extension AIInsights {
                     carbsHeroView(result)
                     secondaryMacroSummary(result)
                         .padding(.top, 8)
+                    mealPortionControl(result)
+                        .padding(.top, 10)
                         .padding(.bottom, 12)
                 }
             }
@@ -751,6 +786,45 @@ extension AIInsights {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white)
             )
+        }
+
+        /// Scales the whole meal at once, so a bigger or smaller plate of the same dish is one tap.
+        private func mealPortionControl(_ result: FoodAnalysisResult) -> some View {
+            let multiplier = result.mealPortionMultiplier ?? 1
+            let range = FoodFinderStateModel.mealPortionRange
+            let step = FoodFinderStateModel.mealPortionStep
+            return HStack(spacing: 10) {
+                Text(String(localized: "Portion", comment: "FoodFinder whole-meal portion label"))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Button {
+                    state.updateMealPortion(multiplier: multiplier - step)
+                } label: {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.title3)
+                }
+                .buttonStyle(.borderless)
+                .disabled(multiplier <= range.lowerBound)
+                .accessibilityLabel(String(localized: "Smaller portion", comment: "FoodFinder whole-meal portion minus"))
+
+                EditableMultiplierField(
+                    multiplier: multiplier,
+                    onCommit: { newValue in
+                        state.updateMealPortion(multiplier: newValue)
+                    }
+                )
+
+                Button {
+                    state.updateMealPortion(multiplier: multiplier + step)
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title3)
+                }
+                .buttonStyle(.borderless)
+                .disabled(multiplier >= range.upperBound)
+                .accessibilityLabel(String(localized: "Larger portion", comment: "FoodFinder whole-meal portion plus"))
+            }
         }
 
         private func totalsRow(
@@ -1145,82 +1219,122 @@ extension AIInsights {
                 ?? (result.items.count == 1 ? result.items.first?.portion : nil)
         }
 
-        // MARK: - Frequent Meals (auto-promoted from usage frequency)
+        // MARK: - Saved and recent meals (start page grid)
 
-        private var frequentMealsSection: some View {
-            Section {
-                ForEach(state.frequentMeals.prefix(5)) { result in
-                    Button {
-                        state.currentResult = result
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(mealTitle(for: result))
-                                    .font(.subheadline)
-                                    .lineLimit(1)
-                                    .foregroundStyle(colorScheme == .dark ? .white : .primary)
-                                Text(String(localized: "Often eaten", comment: "Frequent meals subtitle"))
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                            Spacer()
-                            HStack(spacing: 6) {
-                                Text(String(format: "%.0fg", result.totalCarbs))
-                                    .font(.subheadline.bold())
-                                    .foregroundStyle(.blue)
-                                Image(systemName: "star.fill")
-                                    .font(.caption2)
-                                    .foregroundStyle(.yellow)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button(String(localized: "Remove", comment: "Remove frequent meal"), systemImage: "trash", role: .destructive) {
-                            state.deleteFrequentMeal(result)
-                        }
-                    }
+        /// One saved meal: a FoodFinder meal kept with its photo and ingredients (often eaten, or saved from the
+        /// recent meals), or a Trio meal preset. A preset with the same name as a kept meal is shown once, as that meal.
+        private struct SavedMealEntry: Identifiable {
+            let id: String
+            let result: FoodAnalysisResult
+            let isKept: Bool
+            let presets: [MealPresetStored]
+        }
+
+        private var savedMealEntries: [SavedMealEntry] {
+            var entries: [SavedMealEntry] = []
+            var shownPresets = Set<NSManagedObjectID>()
+            for result in state.frequentMeals {
+                let key = MealEventIdentity.normalized(mealTitle(for: result))
+                let matching = savedMealPresets.filter { preset in
+                    !shownPresets.contains(preset.objectID) && MealEventIdentity.normalized(preset.dish ?? "") == key
                 }
-            } header: {
-                Text(String(localized: "Frequent Meals", comment: "Frequent meals section header"))
+                for preset in matching {
+                    shownPresets.insert(preset.objectID)
+                }
+                entries.append(SavedMealEntry(
+                    id: "kept-" + result.id.uuidString,
+                    result: result,
+                    isKept: true,
+                    presets: matching
+                ))
+            }
+            for preset in savedMealPresets where !shownPresets.contains(preset.objectID) {
+                entries.append(SavedMealEntry(
+                    id: preset.objectID.uriRepresentation().absoluteString,
+                    result: resultFromPreset(preset),
+                    isKept: false,
+                    presets: [preset]
+                ))
+            }
+            return entries
+        }
+
+        private func isSavedMeal(_ result: FoodAnalysisResult) -> Bool {
+            if state.frequentMeals.contains(where: { $0.id == result.id }) { return true }
+            let key = MealEventIdentity.normalized(mealTitle(for: result))
+            return !key.isEmpty && savedMealEntries.contains { MealEventIdentity.normalized(mealTitle(for: $0.result)) == key }
+        }
+
+        private func savedMealTile(_ entry: SavedMealEntry) -> some View {
+            Button {
+                state.currentResult = entry.result
+            } label: {
+                FoodFinderMealTile(
+                    title: mealTitle(for: entry.result),
+                    carbs: entry.result.totalCarbs,
+                    photoID: entry.isKept ? entry.result.id : nil,
+                    inlineImage: entry.result.imageData
+                )
+            }
+            .buttonStyle(.plain)
+            .contextMenu {
+                Button(role: .destructive) {
+                    removeSavedMeal(entry)
+                } label: {
+                    Label(
+                        String(localized: "Remove from saved meals", comment: "Remove a meal from the FoodFinder saved meals"),
+                        systemImage: "trash"
+                    )
+                }
             }
         }
 
-        // MARK: - Saved Meals (MealPresets)
-
-        private var savedMealsSection: some View {
-            Section {
-                ForEach(savedMealPresets) { preset in
+        private func recentMealTile(_ result: FoodAnalysisResult) -> some View {
+            let saved = isSavedMeal(result)
+            return Button {
+                state.currentResult = result
+            } label: {
+                FoodFinderMealTile(
+                    title: mealTitle(for: result),
+                    carbs: result.totalCarbs,
+                    subtitle: relativeMinutesText(from: result.timestamp),
+                    photoID: result.id,
+                    inlineImage: result.imageData,
+                    badgeSystemImage: saved ? "bookmark.fill" : nil
+                )
+            }
+            .buttonStyle(.plain)
+            .contextMenu {
+                if !saved {
                     Button {
-                        state.currentResult = resultFromPreset(preset)
+                        saveMeal(result)
                     } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(preset.dish ?? "")
-                                    .font(.subheadline)
-                                    .lineLimit(1)
-                                    .foregroundStyle(colorScheme == .dark ? .white : .primary)
-                            }
-                            Spacer()
-                            HStack(spacing: 6) {
-                                Text(String(format: "%.0fg", preset.carbs?.doubleValue ?? 0))
-                                    .font(.subheadline.bold())
-                                    .foregroundStyle(.blue)
-                                Image(systemName: "bookmark.fill")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button(String(localized: "Delete", comment: "Delete saved meal"), systemImage: "trash", role: .destructive) {
-                            deleteSavedMealPreset(preset)
-                        }
+                        Label(String(localized: "Save", comment: "Save as meal preset"), systemImage: "bookmark")
                     }
                 }
-            } header: {
-                Text(String(localized: "Saved Meals", comment: "Saved meal presets section header"))
+                Button(role: .destructive) {
+                    state.deleteRecentResult(result)
+                } label: {
+                    Label(String(localized: "Delete", comment: "Delete recent meal"), systemImage: "trash")
+                }
+            }
+        }
+
+        /// Keeps the meal with its photo and ingredients, and adds it to Trio's meal presets if it is not there yet.
+        private func saveMeal(_ result: FoodAnalysisResult) {
+            state.keepMeal(result)
+            let key = MealEventIdentity.normalized(mealTitle(for: result))
+            if !savedMealPresets.contains(where: { MealEventIdentity.normalized($0.dish ?? "") == key }) {
+                saveRecentResultAsPreset(result)
+            }
+        }
+
+        private func removeSavedMeal(_ entry: SavedMealEntry) {
+            if entry.isKept {
+                state.deleteFrequentMeal(entry.result)
+            }
+            for preset in entry.presets {
+                deleteSavedMealPreset(preset)
             }
         }
 
@@ -1232,56 +1346,6 @@ extension AIInsights {
                 }
             } catch {
                 debugPrint("Failed to delete meal preset: \(error)")
-            }
-        }
-
-        // MARK: - Recent Results
-
-        private var recentResultsSection: some View {
-            Section {
-                ForEach(state.recentResults.prefix(5)) { result in
-                    Button {
-                        state.currentResult = result
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(result.items.map(\.name).joined(separator: ", "))
-                                    .font(.subheadline)
-                                    .lineLimit(1)
-                                    .foregroundStyle(colorScheme == .dark ? .white : .primary)
-                                Text(relativeMinutesText(from: result.timestamp))
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                if let caption = postMealCaption(for: result) {
-                                    Text(caption)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
-                            Spacer()
-                            Text(String(format: "%.0fg", result.totalCarbs))
-                                .font(.subheadline.bold())
-                                .foregroundStyle(.blue)
-                        }
-                        .padding(.vertical, 6)
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button(String(localized: "Delete", comment: "Delete recent meal"), systemImage: "trash", role: .destructive) {
-                            state.deleteRecentResult(result)
-                        }
-                    }
-                    .swipeActions(edge: .leading) {
-                        Button {
-                            saveRecentResultAsPreset(result)
-                        } label: {
-                            Label(String(localized: "Save", comment: "Save as meal preset"), systemImage: "bookmark")
-                        }
-                        .tint(.blue)
-                    }
-                }
-            } header: {
-                Text(String(localized: "Recent Meals", comment: "Recent results section header"))
             }
         }
 
@@ -1434,27 +1498,6 @@ extension AIInsights {
                 comment: "FoodFinder post-meal footer disclaimer"
             )
             return "\(basis) \(method) \(disclaimer)"
-        }
-
-        private func postMealCaption(for result: FoodAnalysisResult) -> String? {
-            guard let summary = state.postMealSummaries[result.id] else { return nil }
-            let parts = summary.windows.compactMap { window -> String? in
-                guard let percent = window.timeInRangePercent else { return nil }
-                let format = window.isComplete
-                    ? String(localized: "%@ %d%%", comment: "FoodFinder recent meal caption part: window and time in range")
-                    : String(
-                        localized: "%@ %d%% so far",
-                        comment: "FoodFinder recent meal caption part: open window and time in range"
-                    )
-                return String(format: format, postMealWindowTitle(window), percent)
-            }
-            guard !parts.isEmpty else { return nil }
-            let count = summary.windows.map(\.occurrenceCount).max() ?? 0
-            return String(
-                format: String(localized: "In range %@ · n = %d", comment: "FoodFinder recent meal post-meal caption"),
-                parts.joined(separator: " · "),
-                count
-            )
         }
 
         private func resultFromPreset(_ preset: MealPresetStored) -> FoodAnalysisResult {

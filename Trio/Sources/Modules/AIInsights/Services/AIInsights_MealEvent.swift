@@ -42,6 +42,8 @@ extension AIInsights {
         var source: String?
         /// `FoodFinderPhotoEngine` raw value for meal photos.
         var photoEngine: String?
+        /// Whole-meal portion chosen in FoodFinder (1 when not changed).
+        var portionMultiplier: Double? = nil
     }
 
     struct MealEventNutrition: Codable, Equatable, Sendable {

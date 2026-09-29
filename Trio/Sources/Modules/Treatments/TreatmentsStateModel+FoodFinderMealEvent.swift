@@ -55,7 +55,8 @@ extension Treatments.StateModel {
                 foodResultID: handoff.foodResultID,
                 analysisAt: handoff.analysisAt,
                 source: handoff.source,
-                photoEngine: handoff.photoEngine
+                photoEngine: handoff.photoEngine,
+                portionMultiplier: handoff.portionMultiplier
             ),
             nutrition: AIInsights.MealEventNutrition(
                 carbs: carbs,
