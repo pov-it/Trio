@@ -433,6 +433,31 @@ extension AIInsights.MealEvent {
     }
 }
 
+extension FoodFinderPostMealOccurrence {
+    /// A meal saved from the bolus calculator, timed from its carb entry.
+    init(event: AIInsights.MealEvent) {
+        self.init(mealTime: event.mealTime, carbs: event.nutrition.carbs, fpuID: event.carbLink.fpuID?.uuidString)
+    }
+}
+
+extension FoodFinderPostMealSummary {
+    /// Trio keeps glucose for 90 days, so older saved meals have nothing to show.
+    static let savedMealLookbackDays = 90
+    static let savedMealLimit = 20
+
+    /// The saved meals to pool, or the FoodFinder analysis itself for a meal never saved from the bolus calculator.
+    static func occurrences(
+        saved events: [AIInsights.MealEvent],
+        analysisTime: Date,
+        analysisCarbs: Double?
+    ) -> (basis: Basis, occurrences: [FoodFinderPostMealOccurrence]) {
+        guard !events.isEmpty else {
+            return (.analysisTime, [FoodFinderPostMealOccurrence(mealTime: analysisTime, carbs: analysisCarbs, fpuID: nil)])
+        }
+        return (.loggedMeals, events.map(FoodFinderPostMealOccurrence.init(event:)))
+    }
+}
+
 extension AIInsights {
     /// Stable identity of a FoodFinder meal across repeats.
     enum MealEventIdentity {

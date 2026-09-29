@@ -1408,8 +1408,12 @@ extension AIInsights {
             switch summary.basis {
             case .loggedMeals:
                 basis = String(
-                    localized: "Pooled over the times this meal was saved in the bolus calculator in the last 90 days, timed from each saved meal.",
-                    comment: "FoodFinder post-meal footer for meals logged from the bolus calculator"
+                    format: String(
+                        localized: "Pooled over the latest times this meal was saved in the bolus calculator, up to %d in the last %d days, each timed from the saved meal.",
+                        comment: "FoodFinder post-meal footer for saved meals: the most meals pooled, then the days looked back"
+                    ),
+                    FoodFinderPostMealSummary.savedMealLimit,
+                    FoodFinderPostMealSummary.savedMealLookbackDays
                 )
             case .analysisTime:
                 basis = String(

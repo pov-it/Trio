@@ -664,6 +664,47 @@ extension AIInsights.MealEventDetermination {
         #expect(byResult.map(\.id) == [other.id])
     }
 
+    @Test("A meal never saved from the bolus calculator is timed from its analysis")
+    func unsavedMealUsesAnalysisTime() {
+        let plan = FoodFinderPostMealSummary.occurrences(saved: [], analysisTime: t0, analysisCarbs: 45)
+        #expect(plan.basis == .analysisTime)
+        #expect(plan.occurrences == [FoodFinderPostMealOccurrence(mealTime: t0, carbs: 45, fpuID: nil)])
+    }
+
+    @Test("Saved meals are pooled from their carb entry times, with the equivalents of the latest one")
+    func savedMealsArePooled() {
+        let fpuID = UUID()
+        let earlier = MealEvent(draft: makeDraft(mealTime: minutes(-2 * 24 * 60), carbs: 50, fpuID: nil))
+        let latest = MealEvent(draft: makeDraft(mealTime: minutes(-5 * 60), carbs: 60, fpuID: fpuID))
+        let plan = FoodFinderPostMealSummary.occurrences(saved: [latest, earlier], analysisTime: t0, analysisCarbs: 45)
+        #expect(plan.basis == .loggedMeals)
+        #expect(plan.occurrences.map(\.mealTime) == [latest.mealTime, earlier.mealTime])
+        #expect(plan.occurrences.map(\.carbs) == [60, 50])
+        #expect(plan.occurrences.first?.fpuID == fpuID.uuidString)
+
+        func readings(_ mgdl: Int, after start: Date) -> [PostMealGlucoseReading] {
+            stride(from: 0, through: 240, by: 5).map {
+                PostMealGlucoseReading(mgdl: mgdl, date: minutes(Double($0), from: start))
+            }
+        }
+        let equivalentsUntil = minutes(150, from: latest.mealTime)
+        let summary = FoodFinderPostMealSummary.make(
+            occurrences: plan.occurrences,
+            basis: plan.basis,
+            readings: readings(120, after: earlier.mealTime) + readings(200, after: latest.mealTime),
+            now: t0,
+            carbEntries: [PostMealCarbEntry(date: equivalentsUntil, carbs: 10, isFPU: true, fpuID: fpuID.uuidString)]
+        )
+        #expect(summary.basis == .loggedMeals)
+        #expect(summary.occurrenceCount == 2)
+        #expect(summary.zeroToTwoHours.occurrenceCount == 2)
+        #expect(summary.zeroToTwoHours.timeInRangePercent == 50)
+        #expect(summary.zeroToTwoHours.timeAboveRangePercent == 50)
+        #expect(summary.zeroToTwoHours.highOccurrenceCount == 1)
+        #expect(summary.latestMealTime == latest.mealTime)
+        #expect(summary.fpu == .insideFourHourWindow(until: equivalentsUntil))
+    }
+
     @Test("A pump bolus that was never accepted does not hold back the first loop run forever")
     func firstLoopWaitsForEnact() async throws {
         let data = FakeMealEventData()

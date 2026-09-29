@@ -448,12 +448,36 @@ extension AIInsights {
 
         /// Loads glucose and any Warsaw equivalents for the open meal and the recent list,
         /// measured against the 70–180 mg/dL consensus range (`FoodFinderPostMealLimits.standard`).
+        /// Each meal is pooled over the times it was saved from the bolus calculator (`MealEvent`).
         @MainActor func refreshPostMealSummaries(now: Date = Date()) async {
             var meals = Array(recentResults.prefix(5))
             if let current = currentResult, !meals.contains(where: { $0.id == current.id }) {
                 meals.append(current)
             }
-            let plans = meals.map { postMealPlan(for: $0) }
+            let recorder = AIInsights.MealEventRecorder.shared
+            recorder.refresh()
+            await recorder.waitUntilIdle()
+            let since = now.addingTimeInterval(-TimeInterval(FoodFinderPostMealSummary.savedMealLookbackDays) * 24 * 60 * 60)
+            var plans: [PostMealPlan] = []
+            for meal in meals {
+                let mealKey = AIInsights.MealEventIdentity.mealKey(
+                    mealName: meal.mealName,
+                    itemNames: meal.items.map(\.name),
+                    resultID: meal.id
+                )
+                let saved = await recorder.occurrences(
+                    mealID: AIInsights.MealEventIdentity.mealID(forKey: mealKey),
+                    foodResultID: meal.id,
+                    since: since,
+                    limit: FoodFinderPostMealSummary.savedMealLimit
+                )
+                let plan = FoodFinderPostMealSummary.occurrences(
+                    saved: saved,
+                    analysisTime: meal.timestamp,
+                    analysisCarbs: meal.totalCarbs
+                )
+                plans.append(PostMealPlan(resultID: meal.id, basis: plan.basis, occurrences: plan.occurrences))
+            }
             let occurrences = plans.flatMap(\.occurrences)
             let latestMealTimes = plans.compactMap { $0.occurrences.map(\.mealTime).max() }
             guard let fpuSince = latestMealTimes.min() else {
@@ -478,14 +502,6 @@ extension AIInsights {
                 )
             }
             postMealSummaries = summaries
-        }
-
-        private func postMealPlan(for result: FoodAnalysisResult) -> PostMealPlan {
-            PostMealPlan(
-                resultID: result.id,
-                basis: .analysisTime,
-                occurrences: [FoodFinderPostMealOccurrence(mealTime: result.timestamp, carbs: result.totalCarbs, fpuID: nil)]
-            )
         }
 
         func saveRecentResults() {
