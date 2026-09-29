@@ -26,6 +26,8 @@ extension AIInsights {
         let fallbackResults: [FoodAnalysisResult]
         var onOpenInFoodFinder: ((FoodAnalysisResult) -> Void)? = nil
         var onUseInBolusCalculator: ((FoodAnalysisResult) -> Void)? = nil
+        /// Glucose units for the meal response charts.
+        var units: GlucoseUnits = .mgdL
 
         @Environment(\.dismiss) private var dismiss
 
@@ -194,6 +196,7 @@ extension AIInsights {
                     result: preferredResult(for: meal),
                     knownGroups: groupNames,
                     shareEnabled: shareEnabled,
+                    units: units,
                     onOpenInFoodFinder: { result in
                         selectedMeal = nil
                         onOpenInFoodFinder?(result)
@@ -266,8 +269,11 @@ extension AIInsights {
                             meal.tags.contains { $0.compare(name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }
                         }
                         NavigationLink {
-                            mealGrid(grouped)
-                                .navigationTitle(name)
+                            mealGrid(grouped, responseTitle: String(
+                                localized: "Glucose after meals in this group",
+                                comment: "Meal gallery group response card title"
+                            ))
+                            .navigationTitle(name)
                         } label: {
                             Label {
                                 HStack {
@@ -323,7 +329,8 @@ extension AIInsights {
             .listStyle(.insetGrouped)
         }
 
-        private func mealGrid(_ items: [DisplayMeal]) -> some View {
+        /// `responseTitle` adds a response card for all the meals in `items` above the grid.
+        private func mealGrid(_ items: [DisplayMeal], responseTitle: String? = nil) -> some View {
             Group {
                 if items.isEmpty {
                     ContentUnavailableView(
@@ -336,6 +343,16 @@ extension AIInsights {
                     )
                 } else {
                     ScrollView {
+                        if let responseTitle {
+                            let keys = MealResponseKeys(results: items.map { preferredResult(for: $0) })
+                            MealResponseCard(
+                                title: responseTitle,
+                                mealIDs: keys.mealIDs,
+                                foodResultIDs: keys.foodResultIDs,
+                                units: units
+                            )
+                            .padding([.horizontal, .top], 16)
+                        }
                         LazyVGrid(columns: columns, spacing: 12) {
                             ForEach(items) { meal in
                                 Button {
@@ -597,6 +614,7 @@ extension AIInsights {
         let result: FoodAnalysisResult
         var knownGroups: [String] = []
         var shareEnabled: Bool = false
+        var units: GlucoseUnits = .mgdL
         var onOpenInFoodFinder: ((FoodAnalysisResult) -> Void)? = nil
         var onUseInBolusCalculator: ((FoodAnalysisResult) -> Void)? = nil
         var onTagsChanged: ((UUID, [String]) -> Void)? = nil
@@ -611,6 +629,7 @@ extension AIInsights {
             result: FoodAnalysisResult,
             knownGroups: [String] = [],
             shareEnabled: Bool = false,
+            units: GlucoseUnits = .mgdL,
             onOpenInFoodFinder: ((FoodAnalysisResult) -> Void)? = nil,
             onUseInBolusCalculator: ((FoodAnalysisResult) -> Void)? = nil,
             onTagsChanged: ((UUID, [String]) -> Void)? = nil
@@ -619,6 +638,7 @@ extension AIInsights {
             self.result = result
             self.knownGroups = knownGroups
             self.shareEnabled = shareEnabled
+            self.units = units
             self.onOpenInFoodFinder = onOpenInFoodFinder
             self.onUseInBolusCalculator = onUseInBolusCalculator
             self.onTagsChanged = onTagsChanged
@@ -647,6 +667,8 @@ extension AIInsights {
                         if !meal.items.isEmpty {
                             itemsCard
                         }
+
+                        responseCard
 
                         tagsCard
 
@@ -782,6 +804,17 @@ extension AIInsights {
             }
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 12).fill(cardFill))
+        }
+
+        private var responseCard: some View {
+            let keys = MealResponseKeys(results: [result])
+            return MealResponseCard(
+                title: String(localized: "Glucose after this meal", comment: "Meal detail response card title"),
+                mealIDs: keys.mealIDs,
+                foodResultIDs: keys.foodResultIDs,
+                units: units,
+                cardFill: cardFill
+            )
         }
 
         private var tagsCard: some View {

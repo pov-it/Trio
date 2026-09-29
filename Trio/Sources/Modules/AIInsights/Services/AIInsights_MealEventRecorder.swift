@@ -25,6 +25,7 @@ extension AIInsights {
             case requestBolus(eventID: UUID, units: Double, kind: MealEventBolus.Kind, at: Date)
             case bolusEnactFinished(eventID: UUID, success: Bool, at: Date)
             case observe([MealEventBolusObservation])
+            case storeAnalyses([MealEventAnalysis])
             case refresh
             case save
             case barrier(CheckedContinuation<Void, Never>)
@@ -101,6 +102,13 @@ extension AIInsights {
             send(.refresh)
         }
 
+        /// Keeps the curve and outcome of meals whose analysis no longer changes.
+        nonisolated func storeAnalyses(_ analyses: [MealEventAnalysis]) {
+            let finished = analyses.filter(\.isFinal)
+            guard !finished.isEmpty else { return }
+            send(.storeAnalyses(finished))
+        }
+
         private nonisolated func send(_ command: Command) {
             continuation.yield(command)
         }
@@ -156,6 +164,13 @@ extension AIInsights {
                 ensureLoaded()
                 if !MealEventLinker.apply(observations, to: &events).isEmpty {
                     markChanged()
+                }
+            case let .storeAnalyses(analyses):
+                for analysis in analyses {
+                    mutate(analysis.id) { event in
+                        event.curve = analysis.curve
+                        event.outcome = analysis.outcome
+                    }
                 }
             case .refresh:
                 await refreshEvents()
