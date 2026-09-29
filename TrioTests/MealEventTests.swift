@@ -429,6 +429,10 @@ private actor FakeMealEventData: MealEventDataSource {
         bolusRowsByID[observation.pumpEventID] = observation
     }
 
+    func removeBolusRow(_ id: String) {
+        bolusRowsByID[id] = nil
+    }
+
     func setFailLookups(_ value: Bool) {
         failLookups = value
     }
@@ -554,6 +558,7 @@ extension AIInsights.MealEventDetermination {
         recorder.observe([row("bolus", at: minutes(0.2), amount: 4)])
         recorder.bolusEnactFinished(eventID: draft.id, success: true, at: minutes(0.3))
         recorder.observe([row("bolus", .updated, at: minutes(0.2), amount: 4, mutable: false)])
+        await data.setBolusRow(row("bolus", .updated, at: minutes(0.2), amount: 4, mutable: false))
         await data.addDetermination(at: minutes(0.1), eventualBG: 200)
         await data.addDetermination(at: minutes(0.5), eventualBG: 150)
         recorder.refresh()
@@ -678,6 +683,55 @@ extension AIInsights.MealEventDetermination {
         recorder.refresh()
         await recorder.waitUntilIdle()
         #expect(await recorder.allEvents().first?.firstLoopAfter?.eventualBG == 140)
+        await recorder.finish()
+    }
+
+    @Test("The first loop run is still found when the next refresh comes hours later")
+    func firstLoopFoundLate() async throws {
+        let data = FakeMealEventData()
+        let clock = TestClock(t0)
+        let recorder = makeRecorder(data: data, clock: clock)
+        let draft = makeDraft()
+        await data.addDetermination(at: minutes(4), eventualBG: 160)
+        await data.addDetermination(at: minutes(9), eventualBG: 150)
+
+        recorder.record(draft)
+        recorder.requestBolus(eventID: draft.id, units: 3, kind: .external, at: t0)
+        clock.advance(minutes: 3 * 60)
+        recorder.refresh()
+        await recorder.waitUntilIdle()
+        #expect(await recorder.allEvents().first?.firstLoopAfter?.eventualBG == 160)
+        await recorder.finish()
+    }
+
+    @Test("A bolus deleted from the treatment history no longer counts as given")
+    func deletedBolusIsReleased() async throws {
+        let data = FakeMealEventData()
+        let clock = TestClock(t0)
+        let recorder = makeRecorder(data: data, clock: clock)
+        let draft = makeDraft()
+
+        recorder.record(draft)
+        recorder.requestBolus(eventID: draft.id, units: 3, kind: .external, at: t0)
+        recorder.observe([row("pen", at: t0, programmed: 3, amount: 3, mutable: false, external: true)])
+        await data.setBolusRow(row("pen", .updated, at: t0, programmed: 3, amount: 3, mutable: false, external: true))
+        recorder.refresh()
+        await recorder.waitUntilIdle()
+        #expect(await recorder.allEvents().first?.bolus.deliveredUnits == 3)
+
+        await data.removeBolusRow("pen")
+        clock.advance(minutes: 5)
+        recorder.refresh()
+        await recorder.waitUntilIdle()
+        #expect(await recorder.allEvents().first?.bolus.status == .linked)
+
+        clock.advance(minutes: 6 * 60)
+        recorder.refresh()
+        await recorder.waitUntilIdle()
+        let bolus = try #require(await recorder.allEvents().first?.bolus)
+        #expect(bolus.records.isEmpty)
+        #expect(bolus.deliveredUnits == nil)
+        #expect(bolus.status == .notFound)
         await recorder.finish()
     }
 

@@ -275,7 +275,9 @@ extension AIInsights {
 
             func delta(minutes: Double) -> Int? {
                 let target = latest.date.addingTimeInterval(-minutes * 60)
-                let earlier = sorted.dropLast().min { abs($0.date.timeIntervalSince(target)) < abs($1.date.timeIntervalSince(target)) }
+                let earlier = sorted.dropLast().min {
+                    abs($0.date.timeIntervalSince(target)) < abs($1.date.timeIntervalSince(target))
+                }
                 guard let earlier, abs(earlier.date.timeIntervalSince(target)) <= deltaTolerance else { return nil }
                 return latest.mgdl - earlier.mgdl
             }
@@ -519,8 +521,10 @@ extension AIInsights {
 
         /// Applies one save's worth of pump history changes and returns the ids of the events that changed.
         /// Deletions go first so that a row replacing a purged one can claim the freed request.
-        @discardableResult
-        static func apply(_ observations: [MealEventBolusObservation], to events: inout [MealEvent]) -> Set<UUID> {
+        @discardableResult static func apply(
+            _ observations: [MealEventBolusObservation],
+            to events: inout [MealEvent]
+        ) -> Set<UUID> {
             var changed = Set<UUID>()
             for observation in observations where observation.change == .deleted {
                 if let id = release(observation.pumpEventID, in: &events) { changed.insert(id) }
@@ -536,8 +540,7 @@ extension AIInsights {
         }
 
         /// Pending requests without a row after `pendingLifetime` become `notFound`.
-        @discardableResult
-        static func expire(_ events: inout [MealEvent], now: Date) -> Set<UUID> {
+        @discardableResult static func expire(_ events: inout [MealEvent], now: Date) -> Set<UUID> {
             var changed = Set<UUID>()
             for index in events.indices {
                 let bolus = events[index].bolus

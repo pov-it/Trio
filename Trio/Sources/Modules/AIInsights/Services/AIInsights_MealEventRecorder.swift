@@ -38,10 +38,12 @@ extension AIInsights {
 
         static let defaultFollowUpDelays: [TimeInterval] = [3 * 60, 12 * 60, 35 * 60]
         static let carbLinkTimeout: TimeInterval = 60 * 60
+        /// `firstLoopAfter` is the first loop run within this long after the bolus.
         static let firstLoopTimeout: TimeInterval = 2 * 60 * 60
         /// A pump bolus that is neither accepted nor failed after this long no longer holds back `firstLoopAfter`.
         static let enactWait: TimeInterval = 30 * 60
-        static let bolusRefreshWindow: TimeInterval = 24 * 60 * 60
+        /// Meals recorded within this long are still followed up: their first loop run and unfinished bolus rows.
+        static let followUpWindow: TimeInterval = 24 * 60 * 60
         static let deletionCheckWindow: TimeInterval = 7 * 24 * 60 * 60
         static let deletionCheckInterval: TimeInterval = 10 * 60
 
@@ -197,14 +199,15 @@ extension AIInsights {
         private func refreshEvents() async {
             guard ensureLoaded() else { return }
             let now = clock()
-            var changed = !MealEventLinker.expire(&events, now: now).isEmpty
+            var changed = false
 
             for event in events where event.carbLink.status == .pending {
                 if await linkCarbs(eventID: event.id) { changed = true }
             }
-            if await markDeletedCarbs(now: now) { changed = true }
             if await captureFirstLoops(now: now) { changed = true }
             if await refreshBolusRows(now: now) { changed = true }
+            if await checkDeletions(now: now) { changed = true }
+            if !MealEventLinker.expire(&events, now: now).isEmpty { changed = true }
 
             if changed {
                 markChanged()
@@ -230,22 +233,36 @@ extension AIInsights {
             return true
         }
 
-        /// Trio edits a carb entry by replacing it, so a linked entry that disappears means the meal changed.
-        private func markDeletedCarbs(now: Date) async -> Bool {
+        /// Trio edits a carb entry by replacing it, so a linked entry that disappears means the meal changed. A bolus
+        /// deleted from the treatment history no longer counts as given.
+        private func checkDeletions(now: Date) async -> Bool {
             if let last = lastDeletionCheck, now.timeIntervalSince(last) < Self.deletionCheckInterval { return false }
-            let linked = events.filter {
-                $0.carbLink.status == .linked && !$0.carbLink.carbEntryIDs.isEmpty
-                    && now.timeIntervalSince($0.mealTime) < Self.deletionCheckWindow
-            }
-            let ids = linked.flatMap(\.carbLink.carbEntryIDs)
-            guard !ids.isEmpty, let existing = await dataSource.existingCarbEntryIDs(among: ids) else { return false }
-            lastDeletionCheck = now
-
+            let recent = events.filter { now.timeIntervalSince($0.mealTime) < Self.deletionCheckWindow }
+            let linked = recent.filter { $0.carbLink.status == .linked && !$0.carbLink.carbEntryIDs.isEmpty }
+            let carbIDs = linked.flatMap(\.carbLink.carbEntryIDs)
             var changed = false
-            for event in linked where event.carbLink.carbEntryIDs.allSatisfy({ !existing.contains($0) }) {
-                guard let index = index(of: event.id), events[index].carbLink.status == .linked else { continue }
-                events[index].carbLink.status = .deleted
-                changed = true
+            var isComplete = true
+
+            if !carbIDs.isEmpty {
+                if let existing = await dataSource.existingCarbEntryIDs(among: carbIDs) {
+                    for event in linked where event.carbLink.carbEntryIDs.allSatisfy({ !existing.contains($0) }) {
+                        guard let index = index(of: event.id), events[index].carbLink.status == .linked else { continue }
+                        events[index].carbLink.status = .deleted
+                        changed = true
+                    }
+                } else {
+                    isComplete = false
+                }
+            }
+
+            if let bolusChanged = await reconcileBolusRows(recent.flatMap { $0.bolus.records.map(\.pumpEventID) }) {
+                changed = changed || bolusChanged
+            } else {
+                isComplete = false
+            }
+
+            if isComplete {
+                lastDeletionCheck = now
             }
             return changed
         }
@@ -253,7 +270,7 @@ extension AIInsights {
         private func captureFirstLoops(now: Date) async -> Bool {
             var changed = false
             let waiting = events.filter {
-                $0.firstLoopAfter == nil && now.timeIntervalSince($0.recordedAt) < Self.firstLoopTimeout
+                $0.firstLoopAfter == nil && now.timeIntervalSince($0.recordedAt) < Self.followUpWindow
             }
             for event in waiting {
                 guard let after = firstLoopReference(for: event, now: now) else { continue }
@@ -278,11 +295,19 @@ extension AIInsights {
             return now.timeIntervalSince(requestedAt) < Self.enactWait ? nil : requestedAt
         }
 
+        /// Unfinished bolus rows of recent meals, until the pump reports what was delivered.
         private func refreshBolusRows(now: Date) async -> Bool {
             let ids = events
-                .filter { now.timeIntervalSince($0.recordedAt) < Self.bolusRefreshWindow }
+                .filter { now.timeIntervalSince($0.recordedAt) < Self.followUpWindow }
                 .flatMap { $0.bolus.records.filter { !$0.isFinal }.map(\.pumpEventID) }
-            guard !ids.isEmpty, let rows = await dataSource.bolusRows(pumpEventIDs: ids) else { return false }
+            return await reconcileBolusRows(ids) ?? false
+        }
+
+        /// Applies the current state of the given bolus rows; rows that no longer exist are released. Returns
+        /// whether an event changed, or nil when the rows could not be read.
+        private func reconcileBolusRows(_ ids: [String]) async -> Bool? {
+            guard !ids.isEmpty else { return false }
+            guard let rows = await dataSource.bolusRows(pumpEventIDs: ids) else { return nil }
             let found = Set(rows.map(\.pumpEventID))
             let missing = ids.filter { !found.contains($0) }.map { MealEventBolusObservation.deleted($0) }
             return !MealEventLinker.apply(rows + missing, to: &events).isEmpty
@@ -290,8 +315,7 @@ extension AIInsights {
 
         // MARK: - Storage
 
-        @discardableResult
-        private func ensureLoaded() -> Bool {
+        @discardableResult private func ensureLoaded() -> Bool {
             guard loadState == .notLoaded else { return true }
             do {
                 let loaded = try store.load()
