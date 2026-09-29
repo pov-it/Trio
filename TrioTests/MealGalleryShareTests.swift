@@ -591,6 +591,21 @@ struct MealGalleryShareTests {
         #expect(abs(largeImage.size.height - 320) < 1)
     }
 
+    @Test("Shared meal photos keep their aspect ratio and are capped at 2048 px")
+    @MainActor
+    func mealPhotoIsHD() throws {
+        let large = try #require(Self.jpeg(width: 3000, height: 4000))
+        let photo = try #require(AIInsights.MealGalleryStore.makePhotoJPEG(from: large))
+        let image = try #require(UIImage(data: photo))
+        #expect(abs(image.size.height - 2048) < 1)
+        #expect(abs(image.size.width - 1536) < 1)
+
+        let small = try #require(Self.jpeg(width: 800, height: 600))
+        let kept = try #require(UIImage(data: try #require(AIInsights.MealGalleryStore.makePhotoJPEG(from: small))))
+        #expect(abs(kept.size.width - 800) < 1)
+        #expect(abs(kept.size.height - 600) < 1)
+    }
+
     private static func jpeg(width: CGFloat, height: CGFloat) -> Data? {
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 1

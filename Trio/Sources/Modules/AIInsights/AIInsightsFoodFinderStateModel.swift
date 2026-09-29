@@ -183,6 +183,8 @@ extension AIInsights {
         /// portion or adds/removes an ingredient, so the interval tracks the meal.
         var carbEstimateLowerRatio: Double? = nil
         var carbEstimateUpperRatio: Double? = nil
+        /// Whole-meal portion set with the meal's own − / + control; every ingredient is already scaled by it.
+        var mealPortionMultiplier: Double? = nil
 
         var totalCarbs: Double { manualMacroOverride?.carbs ?? items.reduce(0) { $0 + $1.adjustedCarbs } }
         var totalFat: Double { manualMacroOverride?.fat ?? items.reduce(0) { $0 + $1.adjustedFat } }
@@ -232,6 +234,8 @@ extension AIInsights {
         var calories: Double? = nil
         var carbLowerRatio: Double? = nil
         var carbUpperRatio: Double? = nil
+        /// `FoodAnalysisResult.mealPortionMultiplier`.
+        var portionMultiplier: Double? = nil
 
         static func store(_ handoff: FoodBolusHandoff) {
             if let data = try? JSONEncoder().encode(handoff) {
@@ -428,7 +432,7 @@ extension AIInsights {
         private static let portionLearningKey = "ai_foodfinder_portion_learning"
         private static let draftDescriptionKey = "ai_foodfinder_draft_description"
         private static let frequentThreshold = 3
-        private static let frequentMealsMax = 10
+        private static let frequentMealsMax = 16
         private static let portionLearningMinSamples = 2
         private static let portionLearningMinDeviation = 0.10
 
@@ -1296,6 +1300,32 @@ extension AIInsights {
             recordPortionLearning(itemName: result.items[idx].name, multiplier: clamped)
         }
 
+        static let mealPortionRange: ClosedRange<Double> = 0.25 ... 10
+        static let mealPortionStep = 0.25
+
+        /// Scales the whole meal: every ingredient and any edited totals, by the new portion over the current one.
+        /// Per-ingredient portion learning is left alone, since this changes how much was eaten, not an ingredient.
+        func updateMealPortion(multiplier: Double) {
+            guard var result = currentResult else { return }
+            let current = result.mealPortionMultiplier ?? 1
+            let clamped = min(Self.mealPortionRange.upperBound, max(Self.mealPortionRange.lowerBound, multiplier))
+            guard current > 0, abs(clamped - current) > 0.0001 else { return }
+            let ratio = clamped / current
+            for index in result.items.indices {
+                result.items[index].portionMultiplier = max(0.01, result.items[index].portionMultiplier * ratio)
+            }
+            if var override = result.manualMacroOverride {
+                override.carbs = override.carbs.map { $0 * ratio }
+                override.fat = override.fat.map { $0 * ratio }
+                override.protein = override.protein.map { $0 * ratio }
+                override.fiber = override.fiber.map { $0 * ratio }
+                override.calories = override.calories.map { $0 * ratio }
+                result.manualMacroOverride = override
+            }
+            result.mealPortionMultiplier = abs(clamped - 1) < 0.0001 ? nil : clamped
+            storeUpdatedResult(result)
+        }
+
         /// Set an ingredient's portion by absolute weight in grams.
         ///
         /// If the portion description already carries a gram anchor (e.g.
@@ -1577,6 +1607,17 @@ extension AIInsights {
             saveRecentResults()
         }
 
+        /// Keeps a meal among the saved meals on the start page, with its photo and ingredients. Replaces an earlier
+        /// snapshot of the same meal.
+        func keepMeal(_ result: FoodAnalysisResult) {
+            let key = Self.normalizeMealKey(result.mealName ?? "")
+            frequentMeals.removeAll { meal in
+                meal.id == result.id || (!key.isEmpty && Self.normalizeMealKey(meal.mealName ?? "") == key)
+            }
+            frequentMeals.insert(result, at: 0)
+            saveFrequentMeals()
+        }
+
         /// Remove a meal from the "Frequent Meals" list and also reset its
         /// usage counter so we don't immediately re-promote it.
         func deleteFrequentMeal(_ result: FoodAnalysisResult) {
@@ -1670,7 +1711,8 @@ extension AIInsights {
                 fiber: result.totalFiber,
                 calories: result.totalCalories,
                 carbLowerRatio: result.carbEstimateLowerRatio,
-                carbUpperRatio: result.carbEstimateUpperRatio
+                carbUpperRatio: result.carbEstimateUpperRatio,
+                portionMultiplier: result.mealPortionMultiplier
             )
             FoodBolusHandoff.store(handoff)
             guard openBolusCalculator else { return }

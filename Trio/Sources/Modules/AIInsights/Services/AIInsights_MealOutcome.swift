@@ -100,7 +100,7 @@ extension AIInsights {
     /// Descriptive only; nothing here says what a dose should have been.
     struct MealOutcome: Codable, Equatable, Sendable {
         /// Bumped when the calculation changes, so cached outcomes are recomputed while Trio still has the data.
-        static let currentVersion = 1
+        static let currentVersion = 2
 
         var version: Int
         var computedAt: Date
@@ -131,6 +131,8 @@ extension AIInsights {
         /// Carbs logged 15 minutes to 4 hours after the meal that are not part of it.
         var laterCarbs: [MealOutcomeCarbs]
         var flags: MealOutcomeFlags
+        /// Estimate of the insulin the meal took; nil when IOB, ISF or glucose at 4 h is missing.
+        var need: MealOutcomeNeed? = nil
 
         var hadLow: Bool { firstLowMinute != nil }
         var hadCorrection: Bool { insulin.correctionUnits > 0 }
@@ -167,6 +169,28 @@ extension AIInsights {
         var totalUnits: Double {
             mealBolusUnits + smbUnits + (tempBasalExtraUnits ?? 0) + correctionUnits
         }
+    }
+
+    /// The insulin a meal took, estimated from what acted in the four hours after it and where glucose ended:
+    ///
+    ///     needed = IOB at the meal + delivered - IOB at 4 h + (glucose at 4 h - baseline) / ISF - rescue carbs / CR
+    ///
+    /// oref's IOB is net of the scheduled basal, so a basal that is off shows up here as well. Fat and protein that
+    /// are still absorbing after 4 h are not in it.
+    struct MealOutcomeNeed: Codable, Equatable, Sendable {
+        /// IOB at the loop run before the meal, plus boluses and temp basal above scheduled until the loop run at
+        /// 4 h, minus the IOB then.
+        var actedUnits: Double
+        /// Positive when glucose ended above the baseline: more insulin would have been needed.
+        var glucoseUnits: Double
+        /// Insulin the rescue carbs made up for.
+        var rescueUnits: Double
+        var neededUnits: Double
+        /// `neededUnits` divided by the meal carbs at the carb ratio; above 1 means the meal took more.
+        var mealFactor: Double?
+        var unitsPer10g: Double?
+        var isfMgdl: Double
+        var carbRatio: Double?
     }
 
     struct MealOutcomeCarbs: Codable, Equatable, Sendable {
@@ -221,11 +245,18 @@ extension AIInsights {
             var isFPU: Bool
         }
 
+        /// Insulin on board as a loop run reported it.
+        struct IOB: Equatable, Sendable {
+            var date: Date
+            var units: Double
+        }
+
         var readings: [PostMealGlucoseReading]
         var boluses: [Bolus]
         var tempBasals: [TempBasal]
         var scheduledBasals: [ScheduledBasal]
         var carbs: [Carbs]
+        var iob: [IOB] = []
 
         static let empty = MealOutcomeInputs(readings: [], boluses: [], tempBasals: [], scheduledBasals: [], carbs: [])
     }
@@ -318,6 +349,8 @@ extension AIInsights {
                 adjustmentActive: isAdjustmentActive(event.loop)
             )
             let glucoseValues: [Double] = fourHours.map { Double($0.mgdl) }
+            let insulinSplit = insulin(for: event, inputs: inputs)
+            let need = Self.need(for: event, curve: curve, baseline: baseline, inputs: inputs, laterCarbs: later)
 
             return MealOutcome(
                 version: MealOutcome.currentVersion,
@@ -337,9 +370,10 @@ extension AIInsights {
                 firstLowMinute: firstLow,
                 hadVeryLow: fourHours.contains { $0.mgdl < veryLowMgdl },
                 coverage0to4h: coverage,
-                insulin: insulin(for: event, inputs: inputs),
+                insulin: insulinSplit,
                 laterCarbs: later,
-                flags: flags
+                flags: flags,
+                need: need
             )
         }
 
@@ -463,6 +497,99 @@ extension AIInsights {
                 return before.rate
             }
             return schedule.first { $0.date > date && $0.date.timeIntervalSince(date) <= hour }?.rate
+        }
+
+        // MARK: - Insulin needed
+
+        /// How far from the meal and from 4 h a loop run's IOB may be.
+        static let iobTolerance: TimeInterval = 15 * 60
+        /// oref reports ISF in the user's units; values this low are mmol/L per unit.
+        static let mmolISFLimit = 15.0
+        static let mgdlPerMmol = 18.0182
+
+        static func need(
+            for event: MealEvent,
+            curve: MealEventCurve,
+            baseline: Double?,
+            inputs: MealOutcomeInputs,
+            laterCarbs: [MealOutcomeCarbs]
+        ) -> MealOutcomeNeed? {
+            let end = event.mealTime.addingTimeInterval(4 * 60 * 60)
+            guard let baseline, let endGlucose = glucoseAtFourHours(curve), let isf = isfMgdl(event) else { return nil }
+            guard let start = iob(in: inputs.iob, at: event.mealTime, latestBefore: true),
+                  let finish = iob(in: inputs.iob, at: end, latestBefore: false),
+                  finish.date > start.date
+            else { return nil }
+            guard let tempExtra = tempBasalExtra(from: start.date, to: finish.date, inputs: inputs) else { return nil }
+
+            var delivered = 0.0
+            for bolus in inputs.boluses where bolus.date > start.date && bolus.date <= finish.date && bolus.units > 0 {
+                delivered += bolus.units
+            }
+            let acted = start.units + delivered + tempExtra - finish.units
+            let glucoseUnits = (endGlucose - baseline) / isf
+            let ratio = carbRatio(event)
+            var rescueGrams = 0.0
+            for carbs in laterCarbs where carbs.isRescue {
+                rescueGrams += carbs.grams
+            }
+            var rescueUnits = 0.0
+            if rescueGrams > 0 {
+                guard let ratio else { return nil }
+                rescueUnits = rescueGrams / ratio
+            }
+            let needed = acted + glucoseUnits - rescueUnits
+            let carbs = event.nutrition.carbs
+            var factor: Double?
+            if let ratio, carbs > 0 {
+                factor = rounded(needed / (carbs / ratio))
+            }
+            var per10g: Double?
+            if carbs > 0 {
+                per10g = rounded(needed / carbs * 10)
+            }
+            return MealOutcomeNeed(
+                actedUnits: rounded(acted),
+                glucoseUnits: rounded(glucoseUnits),
+                rescueUnits: rounded(rescueUnits),
+                neededUnits: rounded(needed),
+                mealFactor: factor,
+                unitsPer10g: per10g,
+                isfMgdl: rounded(isf),
+                carbRatio: ratio
+            )
+        }
+
+        /// Glucose at 4 h, or the mean of the last 15 minutes before it.
+        static func glucoseAtFourHours(_ curve: MealEventCurve) -> Double? {
+            if let value = curve.value(atMinute: 240) { return Double(value) }
+            return mean(curve.points(from: 225, through: 240).map { Double($0.mgdl) })
+        }
+
+        /// The loop run closest to `date` within `iobTolerance`; for the meal, the latest one at or before it.
+        static func iob(
+            in samples: [MealOutcomeInputs.IOB],
+            at date: Date,
+            latestBefore: Bool
+        ) -> MealOutcomeInputs.IOB? {
+            let near = samples.filter { abs($0.date.timeIntervalSince(date)) <= iobTolerance }
+            if latestBefore {
+                return near.filter { $0.date <= date }.max { $0.date < $1.date }
+            }
+            return near.min { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) }
+        }
+
+        /// ISF in mg/dL per unit from the loop run at the meal, else the one after it, else the bolus calculator.
+        static func isfMgdl(_ event: MealEvent) -> Double? {
+            let raw = event.loop?.determination?.isf ?? event.firstLoopAfter?.isf ?? event.calculator.isf
+            guard let raw, raw > 0 else { return nil }
+            return raw < mmolISFLimit ? raw * mgdlPerMmol : raw
+        }
+
+        static func carbRatio(_ event: MealEvent) -> Double? {
+            let raw = event.loop?.determination?.carbRatio ?? event.firstLoopAfter?.carbRatio ?? event.calculator.carbRatio
+            guard let raw, raw > 0 else { return nil }
+            return raw
         }
 
         // MARK: - Carbs and flags

@@ -90,12 +90,14 @@ struct CoreDataMealOutcomeDataSource {
         to end: Date,
         in context: NSManagedObjectContext
     ) throws -> AIInsights.MealOutcomeInputs {
-        AIInsights.MealOutcomeInputs(
+        let runs = try loopRuns(from: start, to: end, in: context)
+        return AIInsights.MealOutcomeInputs(
             readings: try glucose(from: start, to: end, in: context),
             boluses: try boluses(from: start, to: end, in: context),
             tempBasals: try tempBasals(from: start, to: end, in: context),
-            scheduledBasals: try scheduledBasals(from: start, to: end, in: context),
-            carbs: try carbs(from: start, to: end, in: context)
+            scheduledBasals: runs.scheduledBasals,
+            carbs: try carbs(from: start, to: end, in: context),
+            iob: runs.iob
         )
     }
 
@@ -167,18 +169,27 @@ struct CoreDataMealOutcomeDataSource {
         }
     }
 
-    private static func scheduledBasals(
+    /// Scheduled basal rates and IOB as the loop runs reported them.
+    private static func loopRuns(
         from start: Date,
         to end: Date,
         in context: NSManagedObjectContext
-    ) throws -> [AIInsights.MealOutcomeInputs.ScheduledBasal] {
+    ) throws -> (scheduledBasals: [AIInsights.MealOutcomeInputs.ScheduledBasal], iob: [AIInsights.MealOutcomeInputs.IOB]) {
         let request = NSFetchRequest<OrefDetermination>(entityName: "OrefDetermination")
         request.predicate = NSPredicate(format: "deliverAt >= %@ AND deliverAt <= %@", start as NSDate, end as NSDate)
         request.sortDescriptors = [NSSortDescriptor(key: "deliverAt", ascending: true)]
-        return try context.fetch(request).compactMap { determination -> AIInsights.MealOutcomeInputs.ScheduledBasal? in
-            guard let date = determination.deliverAt, let rate = determination.scheduledBasal?.doubleValue else { return nil }
-            return AIInsights.MealOutcomeInputs.ScheduledBasal(date: date, rate: rate)
+        var scheduledBasals: [AIInsights.MealOutcomeInputs.ScheduledBasal] = []
+        var iob: [AIInsights.MealOutcomeInputs.IOB] = []
+        for determination in try context.fetch(request) {
+            guard let date = determination.deliverAt else { continue }
+            if let rate = determination.scheduledBasal?.doubleValue {
+                scheduledBasals.append(AIInsights.MealOutcomeInputs.ScheduledBasal(date: date, rate: rate))
+            }
+            if let units = determination.iob?.doubleValue {
+                iob.append(AIInsights.MealOutcomeInputs.IOB(date: date, units: units))
+            }
         }
+        return (scheduledBasals, iob)
     }
 
     private static func carbs(

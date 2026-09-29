@@ -137,9 +137,26 @@ private func inputs(
     boluses: [Inputs.Bolus] = [],
     tempBasals: [Inputs.TempBasal] = [],
     scheduledBasals: [Inputs.ScheduledBasal] = [],
-    carbs: [Inputs.Carbs] = []
+    carbs: [Inputs.Carbs] = [],
+    iob: [Inputs.IOB] = []
 ) -> Inputs {
-    Inputs(readings: readings, boluses: boluses, tempBasals: tempBasals, scheduledBasals: scheduledBasals, carbs: carbs)
+    Inputs(
+        readings: readings,
+        boluses: boluses,
+        tempBasals: tempBasals,
+        scheduledBasals: scheduledBasals,
+        carbs: carbs,
+        iob: iob
+    )
+}
+
+/// `event` with a loop run at the meal reporting `isf` and `carbRatio`.
+private func withLoop(_ event: AIInsights.MealEvent, isf: Double = 50, carbRatio: Double = 10) -> AIInsights.MealEvent {
+    var event = event
+    var loop = AIInsights.MealEventLoopSnapshot(reference: event.mealTime)
+    loop.determination = AIInsights.MealEventDetermination(date: event.mealTime, isf: isf, carbRatio: carbRatio)
+    event.loop = loop
+    return event
 }
 
 private func bolus(_ id: String, _ minute: Double, _ units: Double, smb: Bool = false, external: Bool = false) -> Inputs.Bolus {
@@ -355,6 +372,102 @@ private func bolus(_ id: String, _ minute: Double, _ units: Double, smb: Bool = 
         let plain = try decoder.decode(AIInsights.MealEvent.self, from: encoder.encode(analysis.event))
         #expect(plain.curve == nil)
         #expect(plain.outcome == nil)
+    }
+}
+
+@Suite("FoodFinder insulin a meal took") struct MealOutcomeNeedTests {
+    private let iob = [
+        Inputs.IOB(date: at(-4), units: 1),
+        Inputs.IOB(date: at(120), units: 3),
+        Inputs.IOB(date: at(241), units: 0.8)
+    ]
+
+    @Test("Needed insulin is what acted in the four hours when glucose ends where it started")
+    func actedInsulin() {
+        let event = withLoop(linkedEvent())
+        let boluses = [bolus("meal-bolus", 1, 4), bolus("smb", 60, 0.5, smb: true)]
+        let need = Engine.analyze(event, inputs: inputs(boluses: boluses, iob: iob), now: later).outcome.need
+
+        #expect(need?.actedUnits == 4.7)
+        #expect(need?.glucoseUnits == 0)
+        #expect(need?.rescueUnits == 0)
+        #expect(need?.neededUnits == 4.7)
+        // 60 g at 10 g/U is 6 U.
+        #expect(need?.mealFactor == 0.783)
+        #expect(need?.unitsPer10g == 0.783)
+    }
+
+    @Test("Ending above the start adds insulin and rescue carbs take it away")
+    func glucoseAndRescue() {
+        // 50 mg/dL above the start at 4 h with an ISF of 50 is one more unit.
+        let high = readings { minute in minute >= 180 ? 150 : triangle(minute) }
+        let event = withLoop(linkedEvent())
+        let boluses = [bolus("meal-bolus", 1, 4)]
+        let raised = Engine.analyze(event, inputs: inputs(readings: high, boluses: boluses, iob: iob), now: later)
+        #expect(raised.outcome.need?.glucoseUnits == 1)
+        #expect(raised.outcome.need?.neededUnits == 5.2)
+
+        // 20 g rescue carbs at 10 g/U made up for 2 units too many.
+        let low = readings { minute in minute >= 150 && minute < 200 ? 65 : triangle(minute) }
+        let rescue = [Inputs.Carbs(id: UUID(), date: at(160), grams: 20, isFPU: false)]
+        let rescued = Engine.analyze(
+            event,
+            inputs: inputs(readings: low, boluses: boluses, carbs: rescue, iob: iob),
+            now: later
+        )
+        #expect(rescued.outcome.need?.rescueUnits == 2)
+        #expect(rescued.outcome.need?.neededUnits == 2.2)
+    }
+
+    @Test("No estimate without IOB around the meal and at four hours, or without an ISF")
+    func missingInputs() {
+        let event = withLoop(linkedEvent())
+        #expect(Engine.analyze(event, inputs: inputs(), now: later).outcome.need == nil)
+        let onlyStart = [Inputs.IOB(date: at(-4), units: 1)]
+        #expect(Engine.analyze(event, inputs: inputs(iob: onlyStart), now: later).outcome.need == nil)
+        #expect(Engine.analyze(linkedEvent(), inputs: inputs(iob: iob), now: later).outcome.need == nil)
+    }
+
+    @Test("An ISF in mmol/L per unit is converted to mg/dL")
+    func mmolISF() {
+        #expect(Engine.isfMgdl(withLoop(makeEvent(), isf: 2.5)) == 2.5 * Engine.mgdlPerMmol)
+        #expect(Engine.isfMgdl(withLoop(makeEvent(), isf: 45)) == 45)
+    }
+
+    @Test("The portion estimate needs enough meals and scales with carbs")
+    func portionEstimate() {
+        var all: [AIInsights.MealEventAnalysis] = []
+        for index in 0 ..< 5 {
+            let day = mealTime.addingTimeInterval(TimeInterval(index) * 24 * 60 * 60)
+            var analysis = Engine.analyze(
+                makeEvent(mealTime: day),
+                inputs: inputs(readings: readings(mealTime: day, triangle)),
+                now: day.addingTimeInterval(8 * 60 * 60)
+            )
+            let needed = 4.0 + Double(index) * 0.5
+            analysis.outcome.need = AIInsights.MealOutcomeNeed(
+                actedUnits: needed,
+                glucoseUnits: 0,
+                rescueUnits: 0,
+                neededUnits: needed,
+                mealFactor: needed / 6,
+                unitsPer10g: needed / 6,
+                isfMgdl: 50,
+                carbRatio: 10
+            )
+            all.append(analysis)
+        }
+
+        let summary = Summary.make(analyses: all, scale: .change, includeDisturbed: false)
+        #expect(summary.needCount == 5)
+        #expect(summary.medianNeeded == 5)
+        #expect(summary.neededP25 == 4.5)
+        #expect(summary.neededP75 == 5.5)
+        #expect(summary.insulin.first?.needed == 4)
+        #expect(abs((summary.neededEstimate(forCarbs: 90) ?? 0) - 7.5) < 0.0001)
+
+        let four = Summary.make(analyses: Array(all.prefix(4)), scale: .change, includeDisturbed: false)
+        #expect(four.neededEstimate(forCarbs: 90) == nil)
     }
 }
 
