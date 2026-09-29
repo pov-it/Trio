@@ -623,6 +623,12 @@ extension AIInsights {
         @Environment(\.colorScheme) private var colorScheme
         @State private var tags: [String]
         @State private var newTag: String = ""
+        /// HD photo from the gallery store, for meals whose capture has left the recent list.
+        @State private var photoData: Data?
+
+        private var displayImageData: Data? {
+            result.imageData ?? photoData ?? meal.fullImageData
+        }
 
         init(
             meal: MealGalleryView.DisplayMeal,
@@ -677,6 +683,13 @@ extension AIInsights {
                     .padding(16)
                 }
                 .background(colorScheme == .dark ? Color.clear : Color(UIColor.systemGroupedBackground))
+                .task {
+                    guard result.imageData == nil else { return }
+                    let id = meal.id
+                    photoData = await Task.detached(priority: .userInitiated) {
+                        MealGalleryStore.shared.photoData(forMealID: id)
+                    }.value
+                }
                 .navigationTitle(String(localized: "Meal", comment: "Meal detail navigation title"))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -692,7 +705,7 @@ extension AIInsights {
         }
 
         @ViewBuilder private var photoOrIdentityCard: some View {
-            if let data = meal.fullImageData, let image = UIImage(data: data) {
+            if let data = displayImageData, let image = UIImage(data: data) {
                 ZStack(alignment: .bottomLeading) {
                     Image(uiImage: image)
                         .resizable()
@@ -813,7 +826,8 @@ extension AIInsights {
                 mealIDs: keys.mealIDs,
                 foodResultIDs: keys.foodResultIDs,
                 units: units,
-                cardFill: cardFill
+                cardFill: cardFill,
+                currentCarbs: result.totalCarbs
             )
         }
 
@@ -855,10 +869,13 @@ extension AIInsights {
 
                 if shareEnabled {
                     Button {
-                        MealCompanionPublisher.shared.publish(
-                            payload: SharedMealPayload(result: result, thumbnailFilename: nil),
-                            thumbnailJPEG: meal.thumbnailData
-                        )
+                        let source = displayImageData
+                        let thumbnail = meal.thumbnailData
+                        let payload = SharedMealPayload(result: result, thumbnailFilename: nil)
+                        Task.detached(priority: .userInitiated) {
+                            let photo = source.flatMap { MealGalleryStore.makePhotoJPEG(from: $0) } ?? thumbnail
+                            MealCompanionPublisher.shared.publish(payload: payload, thumbnailJPEG: photo)
+                        }
                     } label: {
                         Text(String(localized: "Share this meal", comment: "Manually publish one gallery meal to companion outbox"))
                             .frame(maxWidth: .infinity)

@@ -16,8 +16,12 @@
 //  Thumbnails stay on disk; the index stays small. Archiving is local-first
 //  and never waits on companion sync.
 //
-//  Memory stays low: only thumbnails are ever created/held, never the
-//  full-resolution capture. Archiving is idempotent — a meal already in the
+//  Next to the thumbnail it keeps an HD copy (<uuid>-photo.jpg, longest side
+//  at most 2048px, quality 0.85, original aspect ratio). That copy is what the
+//  meal detail shows once the recent list has dropped the capture, and what the
+//  companion receives, so shared meals are not a 320px thumbnail.
+//
+//  Archiving is idempotent — a meal already in the
 //  index is skipped (macros/items may be upgraded in place; tags are kept),
 //  so it is cheap to call on every `saveRecentResults()`.
 //
@@ -41,6 +45,10 @@ extension AIInsights {
         private static let maxThumbnailSide: CGFloat = 320
         /// JPEG compression quality for stored thumbnails.
         private static let thumbnailQuality: CGFloat = 0.5
+        /// Longest side of the stored HD photo, in pixels.
+        static let maxPhotoSide: CGFloat = 2048
+        /// JPEG compression quality for the stored HD photo.
+        static let photoQuality: CGFloat = 0.85
 
         private let defaults: UserDefaults
         private let fileManager: FileManager
@@ -230,6 +238,24 @@ extension AIInsights {
             return try? Data(contentsOf: url)
         }
 
+        /// Thumbnail bytes for a meal id, for callers that only have the FoodFinder result.
+        func thumbnailData(forMealID id: UUID) -> Data? {
+            guard let url = galleryDirectoryURL?.appendingPathComponent("\(id.uuidString).jpg", isDirectory: false)
+            else { return nil }
+            return try? Data(contentsOf: url)
+        }
+
+        static func photoFilename(for id: UUID) -> String {
+            "\(id.uuidString)-photo.jpg"
+        }
+
+        /// The HD photo of a meal (nil for meals archived before HD copies were kept).
+        func photoData(forMealID id: UUID) -> Data? {
+            guard let url = galleryDirectoryURL?.appendingPathComponent(Self.photoFilename(for: id), isDirectory: false)
+            else { return nil }
+            return try? Data(contentsOf: url)
+        }
+
         // MARK: - Index persistence
 
         /// Returns the gallery index sorted newest-first.
@@ -388,6 +414,16 @@ extension AIInsights {
                 var published: [(GalleryItem, Data)] = []
 
                 for candidate in candidates {
+                    let photoURL = dir.appendingPathComponent(Self.photoFilename(for: candidate.id), isDirectory: false)
+                    var photoData: Data?
+                    if !self.fileManager.fileExists(atPath: photoURL.path),
+                       let photo = autoreleasepool(invoking: { Self.makePhotoJPEG(from: candidate.imageData) })
+                    {
+                        // Also fills in the HD copy for meals archived before it was kept.
+                        try? photo.write(to: photoURL, options: .atomic)
+                        photoData = photo
+                    }
+
                     if let existingIndex = index.firstIndex(where: { $0.id == candidate.id }) {
                         var existing = index[existingIndex]
                         let snapshotEmpty = existing.items.isEmpty && !candidate.items.isEmpty
@@ -431,7 +467,7 @@ extension AIInsights {
                     )
                     index.append(item)
                     didChange = true
-                    published.append((item, thumbnailData))
+                    published.append((item, photoData ?? thumbnailData))
                 }
 
                 if didChange {
@@ -446,6 +482,25 @@ extension AIInsights {
         }
 
         // MARK: - Image downscaling
+
+        /// Downscale so the longest side is at most `maxPhotoSide` (never upscaling), keeping the aspect ratio,
+        /// and re-encode at `photoQuality`. Returns nil if the input cannot be decoded as an image.
+        static func makePhotoJPEG(from imageData: Data) -> Data? {
+            guard let image = UIImage(data: imageData) else { return nil }
+            let size = image.size
+            guard size.width > 0, size.height > 0 else { return nil }
+            let scale = min(1, maxPhotoSide / max(size.width, size.height))
+            let target = CGSize(width: (size.width * scale).rounded(), height: (size.height * scale).rounded())
+
+            let format = UIGraphicsImageRendererFormat.default()
+            format.scale = 1 // target size is already in pixels
+            format.opaque = true
+            let renderer = UIGraphicsImageRenderer(size: target, format: format)
+            let resized = renderer.image { _ in
+                image.draw(in: CGRect(origin: .zero, size: target))
+            }
+            return resized.jpegData(compressionQuality: photoQuality)
+        }
 
         /// Center-crop to a square, downscale so the side is at most
         /// `maxThumbnailSide` (never upscaling), and re-encode as a low-quality
