@@ -35,6 +35,8 @@
 		AABBCC00000000000000C0F7 /* AIInsights_MealEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0F7 /* AIInsights_MealEvent.swift */; };
 		AABBCC00000000000000C0F8 /* AIInsights_MealEventStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0F8 /* AIInsights_MealEventStore.swift */; };
 		AABBCC00000000000000C0F9 /* AIInsights_MealEventRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0F9 /* AIInsights_MealEventRecorder.swift */; };
+		AABBCC00000000000000C0FA /* AIInsights_MealEventCoreData.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0FA /* AIInsights_MealEventCoreData.swift */; };
+		AABBCC00000000000000C0FB /* TreatmentsStateModel+FoodFinderMealEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0FB /* TreatmentsStateModel+FoodFinderMealEvent.swift */; };
 		A1F00D01000000000000C0E1 /* AIInsights_FoodFinderOnDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F00D01000000000000B0E1 /* AIInsights_FoodFinderOnDevice.swift */; };
 		A1F00D01000000000000C0E2 /* FoodFinderPhotoRouteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F00D01000000000000B0E2 /* FoodFinderPhotoRouteTests.swift */; };
 		AABBCC00000000000000C0F3 /* AIInsightsMealGalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0F3 /* AIInsightsMealGalleryView.swift */; };
@@ -1184,6 +1186,8 @@
 		AABBCC00000000000000B0F7 /* AIInsights_MealEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_MealEvent.swift; sourceTree = SOURCE_ROOT; };
 		AABBCC00000000000000B0F8 /* AIInsights_MealEventStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_MealEventStore.swift; sourceTree = SOURCE_ROOT; };
 		AABBCC00000000000000B0F9 /* AIInsights_MealEventRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_MealEventRecorder.swift; sourceTree = SOURCE_ROOT; };
+		AABBCC00000000000000B0FA /* AIInsights_MealEventCoreData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_MealEventCoreData.swift; sourceTree = SOURCE_ROOT; };
+		AABBCC00000000000000B0FB /* TreatmentsStateModel+FoodFinderMealEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TreatmentsStateModel+FoodFinderMealEvent.swift"; sourceTree = "<group>"; };
 		A1F00D01000000000000B0E1 /* AIInsights_FoodFinderOnDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_FoodFinderOnDevice.swift; sourceTree = SOURCE_ROOT; };
 		A1F00D01000000000000B0E2 /* FoodFinderPhotoRouteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodFinderPhotoRouteTests.swift; sourceTree = "<group>"; };
 		AABBCC00000000000000B0F3 /* AIInsightsMealGalleryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/View/AIInsightsMealGalleryView.swift; sourceTree = SOURCE_ROOT; };
@@ -4133,6 +4137,7 @@
 				C8D1A7CA8C10C4403D4BBFA7 /* TreatmentsDataFlow.swift */,
 				C19984D62EFC0035A9E9644D /* TreatmentsProvider.swift */,
 				223EC0494F55A91E3EA69EF4 /* TreatmentsStateModel.swift */,
+				AABBCC00000000000000B0FB /* TreatmentsStateModel+FoodFinderMealEvent.swift */,
 				B9488883C59C31550E0B4CEC /* View */,
 			);
 			path = Treatments;
@@ -4959,6 +4964,7 @@
 				AABBCC00000000000000B0B7 /* AIInsights_LocationService.swift */,
 				AABBCC00000000000000B0F5 /* AIInsights_MealCompanionShare.swift */,
 				AABBCC00000000000000B0F7 /* AIInsights_MealEvent.swift */,
+				AABBCC00000000000000B0FA /* AIInsights_MealEventCoreData.swift */,
 				AABBCC00000000000000B0F8 /* AIInsights_MealEventStore.swift */,
 				AABBCC00000000000000B0F9 /* AIInsights_MealEventRecorder.swift */,
 				AABBCC00000000000000B0F4 /* AIInsights_MealGalleryModels.swift */,
@@ -5441,6 +5447,7 @@
 				AABBCC00000000000000C0F7 /* AIInsights_MealEvent.swift in Sources */,
 				AABBCC00000000000000C0F8 /* AIInsights_MealEventStore.swift in Sources */,
 				AABBCC00000000000000C0F9 /* AIInsights_MealEventRecorder.swift in Sources */,
+				AABBCC00000000000000C0FA /* AIInsights_MealEventCoreData.swift in Sources */,
 				AABBCC00000000000000C0F5 /* AIInsights_MealCompanionShare.swift in Sources */,
 				AABBCC00000000000000C0F3 /* AIInsightsMealGalleryView.swift in Sources */,
 				C7C8D8354E63450CA571EC7F /* AIInsightsProvider.swift in Sources */,
@@ -6067,6 +6074,7 @@
 				DD9ECB682CA99F4500AA7C45 /* TrioRemoteControl.swift in Sources */,
 				38569353270B5E350002C50D /* CGMRootView.swift in Sources */,
 				69A31254F2451C20361D172F /* TreatmentsStateModel.swift in Sources */,
+				AABBCC00000000000000C0FB /* TreatmentsStateModel+FoodFinderMealEvent.swift in Sources */,
 				DDF6905C2DA0AFC5008BF16C /* WelcomeStepView.swift in Sources */,
 				1967DFC029D053AC00759F30 /* IconSelection.swift in Sources */,
 				19D4E4EB29FC6A9F00351451 /* Charts.swift in Sources */,

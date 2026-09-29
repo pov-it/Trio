@@ -209,7 +209,9 @@ final class BasePumpHistoryStorage: PumpHistoryStorage, Injectable {
 
             do {
                 guard context.hasChanges else { return purgedUploadedIds }
+                let mealEventChanges = AIInsights.MealEventBolusChanges(before: context)
                 try context.save()
+                mealEventChanges.report()
 
                 self.updateSubject.send(())
                 debug(.coreData, "\(DebuggingIdentifiers.succeeded) stored pump events in Core Data")
@@ -325,7 +327,9 @@ final class BasePumpHistoryStorage: PumpHistoryStorage, Injectable {
 
             do {
                 guard context.hasChanges else { return }
+                let mealEventChanges = AIInsights.MealEventBolusChanges(before: context)
                 try context.save()
+                mealEventChanges.report()
                 debug(.coreData, "External insulin saved")
                 self.updateSubject.send(())
             } catch {

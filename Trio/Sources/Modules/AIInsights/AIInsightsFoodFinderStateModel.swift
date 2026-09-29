@@ -221,6 +221,17 @@ extension AIInsights {
         let note: String
         let createdAt: Date
         let useReducedBolus: Bool?
+        /// The analysis the meal came from, kept for `AIInsights.MealEvent`.
+        var foodResultID: UUID? = nil
+        var mealKey: String? = nil
+        var mealName: String? = nil
+        var analysisAt: Date? = nil
+        var source: String? = nil
+        var photoEngine: String? = nil
+        var fiber: Double? = nil
+        var calories: Double? = nil
+        var carbLowerRatio: Double? = nil
+        var carbUpperRatio: Double? = nil
 
         static func store(_ handoff: FoodBolusHandoff) {
             if let data = try? JSONEncoder().encode(handoff) {
@@ -1622,13 +1633,28 @@ extension AIInsights {
         func sendToBolusCalculator(result: FoodAnalysisResult?, openBolusCalculator: Bool = true) {
             guard let result else { return }
             let itemNames = result.items.map(\.name).joined(separator: ", ")
+            let mealName = result.mealName?.trimmingCharacters(in: .whitespacesAndNewlines)
             let handoff = FoodBolusHandoff(
                 carbs: result.totalCarbs,
                 fat: result.totalFat,
                 protein: result.totalProtein,
                 note: itemNames.isEmpty ? "FoodFinder" : itemNames,
                 createdAt: Date(),
-                useReducedBolus: AIInsights.foodFinderReducedBolusRecommended(fat: result.totalFat, protein: result.totalProtein)
+                useReducedBolus: AIInsights.foodFinderReducedBolusRecommended(fat: result.totalFat, protein: result.totalProtein),
+                foodResultID: result.id,
+                mealKey: AIInsights.MealEventIdentity.mealKey(
+                    mealName: result.mealName,
+                    itemNames: result.items.map(\.name),
+                    resultID: result.id
+                ),
+                mealName: mealName?.isEmpty == false ? mealName : nil,
+                analysisAt: result.timestamp,
+                source: result.source.rawValue,
+                photoEngine: result.photoEngine?.rawValue,
+                fiber: result.totalFiber,
+                calories: result.totalCalories,
+                carbLowerRatio: result.carbEstimateLowerRatio,
+                carbUpperRatio: result.carbEstimateUpperRatio
             )
             FoodBolusHandoff.store(handoff)
             guard openBolusCalculator else { return }
