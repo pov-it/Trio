@@ -377,7 +377,7 @@ extension AIInsights {
             }
         }
 
-        private struct FoodDoseGuardDiagnostics {
+        private struct FoodDoseGuardDiagnostics: Sendable {
             var lowerBound: Double?
             var upperBound: Double?
             var uncertaintyUnits: Double?
@@ -438,9 +438,21 @@ extension AIInsights {
 
         func loadRecentResults() {
             if let data = UserDefaults.standard.data(forKey: "ai_foodfinder_recent"),
-               let saved = try? JSONDecoder().decode([FoodAnalysisResult].self, from: data)
+               var saved = try? JSONDecoder().decode([FoodAnalysisResult].self, from: data)
             {
+                // A photo model still running when the app stopped will not report back.
+                var settled = false
+                for index in saved.indices {
+                    guard var comparison = saved[index].photoComparison else { continue }
+                    if comparison.settleInterruptedSides() {
+                        saved[index].photoComparison = comparison
+                        settled = true
+                    }
+                }
                 recentResults = saved
+                if settled, let data = try? JSONEncoder().encode(Array(saved.prefix(20))) {
+                    UserDefaults.standard.set(data, forKey: "ai_foodfinder_recent")
+                }
             }
         }
 
@@ -543,8 +555,12 @@ extension AIInsights {
 
         func loadFrequentMeals() {
             if let data = UserDefaults.standard.data(forKey: Self.frequentMealsKey),
-               let saved = try? JSONDecoder().decode([FoodAnalysisResult].self, from: data)
+               var saved = try? JSONDecoder().decode([FoodAnalysisResult].self, from: data)
             {
+                for index in saved.indices {
+                    guard var comparison = saved[index].photoComparison, comparison.settleInterruptedSides() else { continue }
+                    saved[index].photoComparison = comparison
+                }
                 frequentMeals = saved
             }
         }
@@ -1736,7 +1752,9 @@ extension AIInsights {
             await analyzeImages([imageData], description: description)
         }
 
-        /// Runs the on-device model and Gemini together and keeps both estimates visible.
+        /// Runs the on-device model and Gemini together and keeps both estimates visible. As soon as Gemini has an
+        /// estimate the meal is shown and usable; the on-device column and the agreement fill in when that model
+        /// finishes. Without a Gemini estimate the on-device one is awaited as before.
         @MainActor
         func analyzeImages(_ images: [Data], description: String = "") async {
             guard !images.isEmpty else { return }
@@ -1750,10 +1768,39 @@ extension AIInsights {
             errorMessage = nil
             defer { isAnalyzing = false }
 
-            async let deviceSnapshot = onDevicePhotoSnapshot(images: images, description: trimmedDescription)
-            async let cloudSnapshot = geminiPhotoSnapshot(images: images, description: trimmedDescription)
-            let device = await deviceSnapshot
-            let cloud = await cloudSnapshot
+            let deviceTask = Task { @MainActor in
+                await self.onDevicePhotoSnapshot(images: images, description: trimmedDescription)
+            }
+            let cloud = await geminiPhotoSnapshot(images: images, description: trimmedDescription)
+
+            if cloud.side.outcome == .ready, let parsed = cloud.parsed,
+               var comparison = FoodFinderPhotoComparison.make(onDevice: .pending, gemini: cloud.side)
+            {
+                comparison.geminiLowerBound = cloud.diagnostics?.lowerBound
+                comparison.geminiUpperBound = cloud.diagnostics?.upperBound
+                comparison.geminiUncertaintyUnits = cloud.diagnostics?.uncertaintyUnits
+                comparison.geminiCandidateCount = cloud.diagnostics?.candidateCount
+                comparison.geminiDoseGuardApplied = cloud.diagnostics?.applied
+                commitPhotoComparison(
+                    comparison,
+                    parsed: parsed,
+                    rawResponse: cloud.rawResponse,
+                    images: images,
+                    description: trimmedDescription,
+                    confidence: cloud.confidence
+                )
+                guard let resultID = currentResult?.id else {
+                    deviceTask.cancel()
+                    return
+                }
+                Task { @MainActor in
+                    let device = await deviceTask.value
+                    self.completeOnDevicePhoto(device.side, resultID: resultID)
+                }
+                return
+            }
+
+            let device = await deviceTask.value
             guard var comparison = FoodFinderPhotoComparison.make(onDevice: device.side, gemini: cloud.side) else {
                 errorMessage = bothPhotoEnginesFailedMessage(onDevice: device.side, gemini: cloud.side)
                 return
@@ -1786,7 +1833,37 @@ extension AIInsights {
             )
         }
 
-        private struct PhotoEngineSnapshot {
+        /// Puts the finished on-device estimate next to the Gemini one of the meal it was started for, wherever that
+        /// meal is now. The logged items stay as they are.
+        @MainActor
+        private func completeOnDevicePhoto(_ side: FoodFinderPhotoSide, resultID: UUID) {
+            func update(_ result: inout FoodAnalysisResult) -> Bool {
+                guard var comparison = result.photoComparison, comparison.onDevice.outcome == .pending else { return false }
+                comparison.completeOnDevice(side)
+                result.photoComparison = comparison
+                return true
+            }
+
+            var changedRecent = false
+            if let index = recentResults.firstIndex(where: { $0.id == resultID }) {
+                changedRecent = update(&recentResults[index])
+            }
+            if var current = currentResult, current.id == resultID, update(&current) {
+                currentResult = current
+            }
+            if let index = frequentMeals.firstIndex(where: { $0.id == resultID }), update(&frequentMeals[index]) {
+                saveFrequentMeals()
+            }
+            if changedRecent {
+                saveRecentResults()
+            }
+            debug(
+                .service,
+                "FoodFinder photo comparison: on-device finished \(side.outcome.rawValue) after Gemini was shown"
+            )
+        }
+
+        private struct PhotoEngineSnapshot: Sendable {
             var side: FoodFinderPhotoSide
             var parsed: ParsedFoodAnalysis? = nil
             var rawResponse: String? = nil

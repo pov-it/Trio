@@ -32,10 +32,16 @@ extension AIInsights {
                 fromMinute: -30,
                 throughMinute: endMinute
             )
-            VStack(alignment: .leading, spacing: 10) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if !isLoading, summary.style != .empty {
+                        InfoButton(title: title, message: explanation(summary))
+                    }
+                }
 
                 if isLoading {
                     ProgressView()
@@ -43,7 +49,7 @@ extension AIInsights {
                         .padding(.vertical, 12)
                 } else if summary.style == .empty {
                     Text(String(
-                        localized: "No saved meals with glucose yet. Once this meal is saved from the bolus calculator, the glucose after it appears here.",
+                        localized: "Appears once this meal is saved from the bolus calculator.",
                         comment: "Meal response card without saved meals"
                     ))
                     .font(.footnote)
@@ -62,49 +68,38 @@ extension AIInsights {
 
         @ViewBuilder private func content(_ summary: MealResponseSummary) -> some View {
             Text(headline(summary))
-                .font(.subheadline)
-            if let insulinLine = insulinLine(summary) {
-                Text(insulinLine)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+                .font(.footnote)
             if let needLine = needLine(summary) {
                 Text(needLine)
-                    .font(.caption.weight(.semibold))
+                    .font(.footnote.weight(.semibold))
             }
 
-            Picker(String(localized: "Scale", comment: "Meal response scale picker"), selection: $scale) {
-                Text(String(localized: "Change", comment: "Meal response scale: change from the start"))
-                    .tag(MealResponseScale.change)
-                Text(String(localized: "Glucose", comment: "Meal response scale: measured glucose"))
-                    .tag(MealResponseScale.absolute)
-            }
-            .pickerStyle(.segmented)
-
-            MealResponseGlucoseChart(summary: summary, units: units, endMinute: endMinute)
-                .frame(height: 200)
-
-            HStack {
+            HStack(spacing: 8) {
+                Picker(String(localized: "Scale", comment: "Meal response scale picker"), selection: $scale) {
+                    Text(String(localized: "Change", comment: "Meal response scale: change from the start"))
+                        .tag(MealResponseScale.change)
+                    Text(String(localized: "Glucose", comment: "Meal response scale: measured glucose"))
+                        .tag(MealResponseScale.absolute)
+                }
+                .pickerStyle(.segmented)
                 Toggle(String(localized: "6 h", comment: "Meal response toggle: show six hours"), isOn: $showsSixHours)
                     .toggleStyle(.button)
+                    .font(.caption)
+            }
+
+            MealResponseGlucoseChart(summary: summary, units: units, endMinute: endMinute)
+                .frame(height: 190)
+
+            MealResponseInsulinChart(bars: summary.insulin)
+                .frame(height: 120)
+
+            if !summary.leftOut.isEmpty || includesDisturbed {
                 Toggle(
-                    String(localized: "Include disturbed", comment: "Meal response toggle: include meals with other carbs or gaps"),
+                    String(localized: "Include disturbed meals", comment: "Meal response toggle: include meals with other carbs or gaps"),
                     isOn: $includesDisturbed
                 )
-                .toggleStyle(.button)
-                Spacer(minLength: 0)
+                .font(.caption)
             }
-            .font(.caption)
-
-            Text(String(localized: "Insulin per meal, 0–4 h", comment: "Meal response insulin chart title"))
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            MealResponseInsulinChart(bars: summary.insulin)
-                .frame(height: 130)
-
-            Text(footer(summary))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
         }
 
         private func load() async {
@@ -120,33 +115,39 @@ extension AIInsights {
             let n = summary.includedCount
             var parts = [String(format: String(localized: "n = %d", comment: "Meal response: meals counted"), n)]
             if let rise = summary.medianRise {
-                parts.append(String(
-                    format: String(localized: "median rise %@", comment: "Meal response: median rise from the start"),
-                    signedGlucose(rise)
-                ))
-            }
-            if let peak = summary.medianPeakMinute {
-                parts.append(String(
-                    format: String(localized: "peak after %d min", comment: "Meal response: median minutes to the peak"),
-                    peak
-                ))
+                if let peak = summary.medianPeakMinute {
+                    parts.append(String(
+                        format: String(localized: "%@ after %d min", comment: "Meal response: median rise and minutes to the peak"),
+                        signedGlucose(rise),
+                        peak
+                    ))
+                } else {
+                    parts.append(signedGlucose(rise))
+                }
             }
             if let inRange = summary.medianInRange0to4h {
                 parts.append(String(
-                    format: String(localized: "in range 0–4 h %d%%", comment: "Meal response: median time in range 0–4 h"),
+                    format: String(localized: "TIR 0–4 h %d%%", comment: "Meal response: median time in range 0–4 h"),
                     inRange
                 ))
             }
             if n > 0 {
                 parts.append(String(
-                    format: String(localized: "low in %d of %d", comment: "Meal response: meals with a low within 4 h"),
+                    format: String(localized: "low %d/%d", comment: "Meal response: meals with a low within 4 h, of n"),
                     summary.lowCount,
                     n
                 ))
                 parts.append(String(
-                    format: String(localized: "correction in %d of %d", comment: "Meal response: meals with a manual correction"),
+                    format: String(localized: "correction %d/%d", comment: "Meal response: meals with a manual correction, of n"),
                     summary.correctionCount,
                     n
+                ))
+            }
+            let leftOut = summary.totalCount - summary.includedCount
+            if leftOut > 0 {
+                parts.append(String(
+                    format: String(localized: "%d left out", comment: "Meal response: meals drawn dashed and not counted"),
+                    leftOut
                 ))
             }
             return parts.joined(separator: " · ")
@@ -173,61 +174,60 @@ extension AIInsights {
                     unitsText(correction)
                 ))
             }
-            return parts.joined(separator: " · ")
+            return parts.joined(separator: " · ") + "."
         }
 
         private func needLine(_ summary: MealResponseSummary) -> String? {
             guard let needed = summary.medianNeeded else { return nil }
-            var parts: [String] = []
+            var line = String(
+                format: String(localized: "Took ≈ %@ U", comment: "Meal response: median estimated insulin the meal took"),
+                unitsText(needed)
+            )
             if let low = summary.neededP25, let high = summary.neededP75, summary.needCount >= 4 {
-                parts.append(String(
-                    format: String(
-                        localized: "Took about %@ U (middle half %@–%@ U, n = %d)",
-                        comment: "Meal response: median estimated insulin the meal took, with the interquartile range"
-                    ),
-                    unitsText(needed),
-                    unitsText(low),
-                    unitsText(high),
-                    summary.needCount
-                ))
-            } else {
-                parts.append(String(
-                    format: String(
-                        localized: "Took about %@ U (n = %d)",
-                        comment: "Meal response: median estimated insulin the meal took"
-                    ),
-                    unitsText(needed),
-                    summary.needCount
-                ))
+                line += " (\(unitsText(low))–\(unitsText(high)))"
             }
             if let factor = summary.medianMealFactor {
-                parts.append(String(
-                    format: String(localized: "×%@ of the carb ratio", comment: "Meal response: needed insulin relative to carbs at the carb ratio"),
-                    String(format: "%.2f", factor)
-                ))
+                line += " · ×" + String(format: "%.2f", factor) + " CR"
             }
             if let perTen = summary.medianUnitsPer10g {
-                parts.append(String(
-                    format: String(localized: "%@ U per 10 g", comment: "Meal response: needed insulin per 10 g carbs"),
+                line += " · " + String(
+                    format: String(localized: "%@ U/10 g", comment: "Meal response: needed insulin per 10 g carbs"),
                     String(format: "%.2f", perTen)
-                ))
+                )
             }
-            var line = parts.joined(separator: " · ")
             if let currentCarbs, let estimate = summary.neededEstimate(forCarbs: currentCarbs) {
-                line += " " + String(
+                line += " · " + String(
                     format: String(
-                        localized: "At this portion (%d g carbs) past meals took about %@ U.",
+                        localized: "this portion ≈ %@ U",
                         comment: "Meal response: estimated insulin for the current portion from past meals"
                     ),
-                    Int(currentCarbs.rounded()),
                     unitsText(estimate)
                 )
             }
             return line
         }
 
-        private func footer(_ summary: MealResponseSummary) -> String {
+        /// Everything the card leaves out to stay short, for the info button.
+        private func explanation(_ summary: MealResponseSummary) -> String {
             var lines: [String] = []
+            lines.append(String(
+                localized: "Glucose after each time this meal was saved from the bolus calculator. Change shows the difference from the 15 minutes before the meal.",
+                comment: "Meal response info: what the chart shows"
+            ))
+            switch summary.style {
+            case .band:
+                lines.append(String(
+                    localized: "Line: median. Band: middle half of the meals; the light band covers 80 % from 10 meals on. Orange: the latest meal.",
+                    comment: "Meal response: band explanation"
+                ))
+            case .lines, .single:
+                lines.append(String(
+                    localized: "Each line is one meal; orange is the latest. A band appears from 5 meals on.",
+                    comment: "Meal response: lines explanation"
+                ))
+            case .empty:
+                break
+            }
             let left = summary.leftOut
             if !left.isEmpty {
                 var reasons: [String] = []
@@ -260,27 +260,16 @@ extension AIInsights {
                     reasons.joined(separator: ", ")
                 ))
             }
-            switch summary.style {
-            case .band:
-                lines.append(String(
-                    localized: "Line: median. Band: middle half of the meals; the light band covers 80 % from 10 meals on.",
-                    comment: "Meal response: band explanation"
-                ))
-            case .lines, .single:
-                lines.append(String(
-                    localized: "Each line is one meal; the latest is highlighted. A band appears from 5 meals on.",
-                    comment: "Meal response: lines explanation"
-                ))
-            case .empty:
-                break
-            }
             lines.append(String(
-                localized: "Insulin: meal bolus, SMB and temp basal above the scheduled rate in the 4 h after the meal, and manual corrections from 30 min on. ◆ is what the bolus calculator recommended, ● the estimated insulin the meal took and ▲ marks a low or rescue carbs.",
+                localized: "Insulin bars: meal bolus, SMB and temp basal above the scheduled rate in the 4 h after the meal, and manual corrections from 30 min on. ◆ is what the bolus calculator recommended, ● the estimated insulin the meal took and ▲ marks a low or rescue carbs.",
                 comment: "Meal response: insulin chart explanation"
             ))
+            if let insulinLine = insulinLine(summary) {
+                lines.append(insulinLine)
+            }
             if summary.medianNeeded != nil {
                 lines.append(String(
-                    localized: "Took: insulin on board at the meal plus everything delivered in 4 h, minus what was still on board, corrected for where glucose ended (via ISF) and for rescue carbs (via the carb ratio). Fat and protein absorbing after 4 h and a basal that is off are not separated out.",
+                    localized: "Took: insulin on board at the meal plus everything delivered in 4 h, minus what was still on board, corrected for where glucose ended (via ISF) and for rescue carbs (via the carb ratio). ×CR compares that with the carbs at your carb ratio. Fat and protein absorbing after 4 h and a basal that is off are not separated out.",
                     comment: "Meal response: how the needed insulin is estimated"
                 ))
             }
@@ -288,7 +277,7 @@ extension AIInsights {
                 localized: "The loop reacts to the curve itself, so read glucose together with the insulin. A higher curve can come from the carb estimate as well as from settings. This describes past meals; it is not dosing advice.",
                 comment: "Meal response: disclaimer"
             ))
-            return lines.joined(separator: " ")
+            return lines.joined(separator: "\n\n")
         }
 
         private func signedGlucose(_ mgdl: Double) -> String {
@@ -304,6 +293,40 @@ extension AIInsights {
 
         private func signedUnits(_ value: Double) -> String {
             String(format: "%+.1f", value)
+        }
+    }
+
+    /// A small (i) button that shows an explanation in a popover, so the page itself can stay short.
+    struct InfoButton: View {
+        let title: String
+        let message: String
+
+        @State private var isPresented = false
+
+        var body: some View {
+            Button {
+                isPresented = true
+            } label: {
+                Image(systemName: "info.circle")
+                    .font(.subheadline)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(title)
+            .popover(isPresented: $isPresented) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(title)
+                            .font(.headline)
+                        Text(message)
+                            .font(.footnote)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding()
+                    .frame(width: 320, alignment: .leading)
+                }
+                .frame(maxHeight: 440)
+                .presentationCompactAdaptation(.popover)
+            }
         }
     }
 
