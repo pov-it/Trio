@@ -557,6 +557,23 @@ private func bolus(_ id: String, _ minute: Double, _ units: Double, smb: Bool = 
         #expect(everything.leftOut.isEmpty)
     }
 
+    @Test("When every meal is disturbed the numbers are shown anyway and marked")
+    func disturbedOnly() {
+        var all = analyses(2)
+        all[0].outcome.flags.mealAfter = true
+        all[1].outcome.flags.mealAfter = true
+
+        let summary = Summary.make(analyses: all, scale: .change, includeDisturbed: false)
+        #expect(summary.isDisturbedOnly)
+        #expect(summary.includedCount == 2)
+        #expect(summary.leftOut.mealAfter == 2)
+        #expect(summary.medianRise != nil)
+
+        let included = Summary.make(analyses: all, scale: .change, includeDisturbed: true)
+        #expect(!included.isDisturbedOnly)
+        #expect(included.leftOut.isEmpty)
+    }
+
     @Test("Insulin numbers come from the included meals")
     func insulinNumbers() {
         var all = analyses(3)

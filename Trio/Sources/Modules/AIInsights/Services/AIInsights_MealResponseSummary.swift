@@ -129,6 +129,9 @@ extension AIInsights {
         var neededP75: Double?
         var medianMealFactor: Double?
         var medianUnitsPer10g: Double?
+        /// Every meal with glucose was disturbed, so the numbers are of those meals and only indicative.
+        /// `leftOut` still says why.
+        var isDisturbedOnly = false
 
         /// The estimate for `carbs` grams at the median units per 10 g; nil below `needMinimum` meals.
         func neededEstimate(forCarbs carbs: Double) -> Double? {
@@ -139,12 +142,42 @@ extension AIInsights {
         /// Meals needed before an estimate for a new portion is shown.
         static let needMinimum = 5
 
+        /// Leaves disturbed meals out unless `includeDisturbed`. When that leaves no meal, the disturbed meals are
+        /// counted after all and the summary is marked `isDisturbedOnly`, so the card is not empty.
         static func make(
             analyses: [MealEventAnalysis],
             scale: MealResponseScale,
             includeDisturbed: Bool,
             fromMinute: Int = -30,
             throughMinute: Int = 240
+        ) -> MealResponseSummary {
+            let strict = build(
+                analyses: analyses,
+                scale: scale,
+                includeDisturbed: includeDisturbed,
+                fromMinute: fromMinute,
+                throughMinute: throughMinute
+            )
+            guard !includeDisturbed, strict.includedCount == 0, strict.totalCount > 0 else { return strict }
+            var fallback = build(
+                analyses: analyses,
+                scale: scale,
+                includeDisturbed: true,
+                fromMinute: fromMinute,
+                throughMinute: throughMinute
+            )
+            guard fallback.includedCount > 0 else { return strict }
+            fallback.leftOut = strict.leftOut
+            fallback.isDisturbedOnly = true
+            return fallback
+        }
+
+        private static func build(
+            analyses: [MealEventAnalysis],
+            scale: MealResponseScale,
+            includeDisturbed: Bool,
+            fromMinute: Int,
+            throughMinute: Int
         ) -> MealResponseSummary {
             let withGlucose = analyses
                 .filter { !$0.curve.points(from: fromMinute, through: throughMinute).isEmpty }
