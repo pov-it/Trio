@@ -1657,32 +1657,18 @@ extension AIInsights {
         }
 
         @ViewBuilder private func postMealCountIcons(_ window: FoodFinderPostMealWindow) -> some View {
-            HStack(spacing: 10) {
-                if window.lowOccurrenceCount > 0 {
-                    Label("\(window.lowOccurrenceCount)", systemImage: "arrow.down.circle.fill")
-                        .foregroundStyle(.red)
-                        .accessibilityLabel(String(
-                            format: String(localized: "%d meals went below range", comment: "FoodFinder post-meal meals below range"),
-                            window.lowOccurrenceCount
-                        ))
-                }
-                if window.highOccurrenceCount > 0 {
-                    Label("\(window.highOccurrenceCount)", systemImage: "arrow.up.circle.fill")
-                        .foregroundStyle(.orange)
-                        .accessibilityLabel(String(
-                            format: String(localized: "%d meals went above range", comment: "FoodFinder post-meal meals above range"),
-                            window.highOccurrenceCount
-                        ))
-                }
-                Label("\(window.occurrenceCount)", systemImage: "fork.knife")
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel(String(
-                        format: String(localized: "%d meals", comment: "FoodFinder post-meal number of meals"),
-                        window.occurrenceCount
-                    ))
+            HStack(spacing: 3) {
+                Image(systemName: "fork.knife")
+                Text("\(window.occurrenceCount)")
             }
             .font(.caption.weight(.semibold))
             .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(String(
+                format: String(localized: "%d meals", comment: "FoodFinder post-meal number of meals"),
+                window.occurrenceCount
+            ))
         }
 
         private func postMealWindowTitle(_ window: FoodFinderPostMealWindow) -> String {
@@ -1749,7 +1735,7 @@ extension AIInsights {
                 )
             }
             let legend = String(
-                localized: "The bar shows the share of the time with glucose below range (red), in range (green) and above range (orange). The icons count the meals: with a low, with a high, and in total. A clock means the window is still open.",
+                localized: "The bar shows the share of the time with glucose below range (red), in range (green) and above range (orange). The fork and knife counts the meals. A clock means the window is still open.",
                 comment: "FoodFinder post-meal info: bar and icon legend"
             )
             return ([postMealFooter(summary), legend] + counts).joined(separator: "\n\n")

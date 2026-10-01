@@ -67,6 +67,14 @@ extension AIInsights {
         }
 
         @ViewBuilder private func content(_ summary: MealResponseSummary) -> some View {
+            if summary.isDisturbedOnly {
+                Label(disturbedNote(summary.leftOut), systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.12)))
+            }
             StatTileGrid(items: statTiles(summary))
             let needs = needTiles(summary)
             if !needs.isEmpty {
@@ -173,6 +181,24 @@ extension AIInsights {
                 ))
             }
             return items
+        }
+
+        private func disturbedNote(_ left: MealResponseSummary.LeftOut) -> String {
+            var reasons: [String] = []
+            if left.mealBefore > 0 {
+                reasons.append(String(localized: "other carbs in the 2 h before", comment: "Meal response: disturbed by carbs before"))
+            }
+            if left.mealAfter > 0 {
+                reasons.append(String(localized: "other carbs within 3 h", comment: "Meal response: disturbed by carbs after"))
+            }
+            if left.lowCoverage > 0 {
+                reasons.append(String(localized: "gaps in glucose", comment: "Meal response: disturbed by glucose gaps"))
+            }
+            let title = String(
+                localized: "Disturbed meals only, numbers are indicative",
+                comment: "Meal response: every meal was disturbed"
+            )
+            return reasons.isEmpty ? title : title + ": " + reasons.joined(separator: ", ")
         }
 
         /// The estimate of the insulin the meal took; empty until there is one.
