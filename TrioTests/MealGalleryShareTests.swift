@@ -273,6 +273,30 @@ struct MealGalleryShareTests {
         defaults.removePersistentDomain(forName: suite)
     }
 
+    @Test("Saved-meal folders file meals by key and forget them when the folder is deleted")
+    func savedMealFolders() {
+        let suite = "MealGalleryShareTests.folders.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let store = AIInsights.SavedMealFolderStore(defaults: defaults)
+
+        #expect(store.addFolder("  Ontbijt ") == "Ontbijt")
+        #expect(store.addFolder("ontbijt") == "Ontbijt")
+        store.setFolder("Pasta", forMealKey: "pasta pesto")
+        store.setFolder("ontbijt", forMealKey: "yoghurt met muesli")
+        #expect(store.folderNames() == ["Ontbijt", "Pasta"])
+        #expect(store.assignments() == ["pasta pesto": "Pasta", "yoghurt met muesli": "Ontbijt"])
+
+        store.setFolder(nil, forMealKey: "pasta pesto")
+        #expect(store.assignments()["pasta pesto"] == nil)
+        #expect(store.folderNames() == ["Ontbijt", "Pasta"])
+
+        store.deleteFolder("ONTBIJT")
+        #expect(store.folderNames() == ["Pasta"])
+        #expect(store.assignments().isEmpty)
+        defaults.removePersistentDomain(forName: suite)
+    }
+
     // MARK: - Companion share privacy
 
     @Test("Share toggle defaults off")

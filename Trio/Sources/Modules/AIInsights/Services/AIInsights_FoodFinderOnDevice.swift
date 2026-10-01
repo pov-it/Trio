@@ -113,6 +113,8 @@ extension AIInsights {
             case failed
             case ready
             case unavailable
+            /// Still running; the meal already shows the other engine's estimate.
+            case pending
         }
 
         var outcome: Outcome
@@ -165,6 +167,19 @@ extension AIInsights {
                 calories: 0
             )
         }
+
+        static let pending = FoodFinderPhotoSide(
+            outcome: .pending,
+            message: nil,
+            mealName: nil,
+            mealPortion: nil,
+            items: [],
+            carbs: 0,
+            fat: 0,
+            protein: 0,
+            fiber: 0,
+            calories: 0
+        )
 
         static func failed(_ message: String) -> Self {
             Self(
@@ -222,6 +237,34 @@ extension AIInsights {
                 geminiCandidateCount: nil,
                 geminiDoseGuardApplied: nil
             )
+        }
+
+        /// Fills in the on-device side once it finishes, keeping the adopted engine and Gemini's diagnostics.
+        mutating func completeOnDevice(_ side: FoodFinderPhotoSide) {
+            onDevice = side
+            if onDevice.outcome == .ready, gemini.outcome == .ready {
+                agreementPercent = FoodFinderPhotoAgreement.percent(onDevice.macros, gemini.macros)
+            } else {
+                agreementPercent = nil
+            }
+        }
+
+        /// A side left pending when the app stopped cannot finish any more.
+        mutating func settleInterruptedSides() -> Bool {
+            let message = String(
+                localized: "Stopped before it finished.",
+                comment: "FoodFinder photo side that was still running when the app stopped"
+            )
+            var changed = false
+            if onDevice.outcome == .pending {
+                onDevice = .failed(message)
+                changed = true
+            }
+            if gemini.outcome == .pending {
+                gemini = .failed(message)
+                changed = true
+            }
+            return changed
         }
     }
 

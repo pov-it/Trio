@@ -26,6 +26,14 @@ extension AIInsights {
         @State private var dragFrozenKeyboardLift: CGFloat = 0
         @Namespace private var composerNamespace
         @State private var pendingGalleryBolus: FoodAnalysisResult?
+        /// Saved-meal folder shown on the start page; nil shows every folder.
+        @State private var selectedSavedFolder: String?
+        @State private var savedFolderAssignments: [String: String] = [:]
+        @State private var savedFolderNames: [String] = []
+        @State private var isAddingSavedFolder = false
+        @State private var newSavedFolderName = ""
+        /// Meal to file in the folder being created, when it was started from a meal.
+        @State private var newSavedFolderMealKey: String?
 
         @FetchRequest(
             entity: MealPresetStored.entity(),
@@ -277,14 +285,7 @@ extension AIInsights {
                         .frame(maxWidth: .infinity)
 
                     if !saved.isEmpty {
-                        FoodFinderMealGridSection(
-                            title: String(localized: "Saved Meals", comment: "Saved meal presets section header"),
-                            count: saved.count
-                        ) {
-                            ForEach(saved) { entry in
-                                savedMealTile(entry)
-                            }
-                        }
+                        savedMealsSection(saved)
                     }
 
                     if !recent.isEmpty {
@@ -304,6 +305,22 @@ extension AIInsights {
             }
             .scrollDismissesKeyboard(.interactively)
             .background(appState.trioBackgroundColor(for: colorScheme))
+            .onAppear(perform: reloadSavedFolders)
+            .alert(
+                String(localized: "New folder", comment: "FoodFinder new saved-meal folder alert title"),
+                isPresented: $isAddingSavedFolder
+            ) {
+                TextField(
+                    String(localized: "Folder name", comment: "FoodFinder new saved-meal folder name field"),
+                    text: $newSavedFolderName
+                )
+                Button(String(localized: "Add", comment: "Add meal gallery group")) {
+                    addSavedFolder()
+                }
+                Button(String(localized: "Cancel", comment: "Cancel button"), role: .cancel) {
+                    newSavedFolderMealKey = nil
+                }
+            }
         }
 
         // MARK: - Meal detail screen (in-place swap, not nav push)
@@ -545,9 +562,13 @@ extension AIInsights {
                     Text(String(localized: "Agreement", comment: "FoodFinder photo agreement label"))
                         .font(.subheadline.bold())
                     Spacer()
-                    Text(agreementText(comparison.agreementPercent))
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .foregroundStyle(agreementColor(comparison.agreementPercent))
+                    if comparison.onDevice.outcome == .pending || comparison.gemini.outcome == .pending {
+                        ProgressView()
+                    } else {
+                        Text(agreementText(comparison.agreementPercent))
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .foregroundStyle(agreementColor(comparison.agreementPercent))
+                    }
                 }
                 Text(loggedMealNote(comparison))
                     .font(.caption)
@@ -580,6 +601,12 @@ extension AIInsights {
 
         private func loggedMealNote(_ comparison: FoodFinderPhotoComparison) -> String {
             let other = comparison.adoptedEngine == .gemini ? comparison.onDevice : comparison.gemini
+            if other.outcome == .pending {
+                return String(
+                    localized: "Logged meal uses Gemini. On-device is still running; the agreement appears when it finishes.",
+                    comment: "FoodFinder comparison while the on-device model is still running"
+                )
+            }
             if other.outcome == .ready {
                 return comparison.adoptedEngine == .gemini
                     ? String(
@@ -659,6 +686,13 @@ extension AIInsights {
                             )
                         )
                         .font(.caption2)
+                    } else if side.outcome == .pending {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.mini)
+                            Text(String(localized: "Running…", comment: "FoodFinder photo side still running"))
+                                .font(.caption.weight(.semibold))
+                        }
                     } else {
                         Text(
                             side.outcome == .unavailable
@@ -872,7 +906,9 @@ extension AIInsights {
                     Spacer(minLength: 0)
                 }
 
-                if let candidateCount = result.analysisCandidateCount,
+                // Photo meals show the agreement between the two engines instead of a range.
+                if result.photoComparison == nil,
+                   let candidateCount = result.analysisCandidateCount,
                    candidateCount > 1,
                    let lower = result.carbEstimateLowerBound,
                    let upper = result.carbEstimateUpperBound
@@ -1259,6 +1295,206 @@ extension AIInsights {
             return entries
         }
 
+        // MARK: Saved-meal folders
+
+        private struct SavedMealGroup: Identifiable {
+            let id: String
+            /// Empty when the grid needs no header of its own.
+            let title: String
+            let entries: [SavedMealEntry]
+        }
+
+        private func savedMealKey(_ entry: SavedMealEntry) -> String {
+            MealEventIdentity.normalized(mealTitle(for: entry.result))
+        }
+
+        private func savedFolder(of entry: SavedMealEntry) -> String? {
+            savedFolderAssignments[savedMealKey(entry)]
+        }
+
+        private func isInFolder(_ entry: SavedMealEntry, _ folder: String) -> Bool {
+            guard let current = savedFolder(of: entry) else { return false }
+            return SavedMealFolderStore.same(current, folder)
+        }
+
+        /// One grid per folder, then the meals without a folder; one plain grid while nothing is filed.
+        private func savedMealGroups(_ entries: [SavedMealEntry]) -> [SavedMealGroup] {
+            if let selected = selectedSavedFolder {
+                return [SavedMealGroup(
+                    id: "folder-" + selected,
+                    title: "",
+                    entries: entries.filter { entry in isInFolder(entry, selected) }
+                )]
+            }
+            guard entries.contains(where: { entry in savedFolder(of: entry) != nil }) else {
+                return [SavedMealGroup(id: "all", title: "", entries: entries)]
+            }
+            var groups: [SavedMealGroup] = []
+            for name in savedFolderNames {
+                let inFolder = entries.filter { entry in isInFolder(entry, name) }
+                if !inFolder.isEmpty {
+                    groups.append(SavedMealGroup(id: "folder-" + name, title: name, entries: inFolder))
+                }
+            }
+            let loose = entries.filter { entry in savedFolder(of: entry) == nil }
+            if !loose.isEmpty {
+                groups.append(SavedMealGroup(
+                    id: "loose",
+                    title: String(localized: "No folder", comment: "FoodFinder saved meals without a folder"),
+                    entries: loose
+                ))
+            }
+            return groups
+        }
+
+        private func savedMealsSection(_ saved: [SavedMealEntry]) -> some View {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(String(localized: "Saved Meals", comment: "Saved meal presets section header"))
+                        .font(.headline)
+                    Text("\(saved.count)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        newSavedFolderMealKey = nil
+                        newSavedFolderName = ""
+                        isAddingSavedFolder = true
+                    } label: {
+                        Image(systemName: "folder.badge.plus")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(String(localized: "New folder", comment: "FoodFinder new saved-meal folder alert title"))
+                }
+
+                if !savedFolderNames.isEmpty {
+                    savedFolderChips
+                }
+
+                ForEach(savedMealGroups(saved)) { group in
+                    FoodFinderMealGridSection(title: group.title, count: group.entries.count, isSubsection: true) {
+                        ForEach(group.entries) { entry in
+                            savedMealTile(entry)
+                        }
+                    }
+                }
+            }
+        }
+
+        private var savedFolderChips: some View {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    savedFolderChip(
+                        String(localized: "All", comment: "Meal gallery browse-all mode"),
+                        isSelected: selectedSavedFolder == nil
+                    ) {
+                        selectedSavedFolder = nil
+                    }
+                    ForEach(savedFolderNames, id: \.self) { name in
+                        savedFolderChip(name, isSelected: selectedSavedFolder.map { SavedMealFolderStore.same($0, name) } ?? false) {
+                            selectedSavedFolder = name
+                        }
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                deleteSavedFolder(name)
+                            } label: {
+                                Label(
+                                    String(localized: "Delete folder", comment: "FoodFinder delete saved-meal folder"),
+                                    systemImage: "trash"
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        private func savedFolderChip(_ title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+            Button(action: action) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.15)))
+                    .foregroundStyle(isSelected ? Color.white : Color.primary)
+            }
+            .buttonStyle(.plain)
+        }
+
+        @ViewBuilder private func savedFolderMenu(for entry: SavedMealEntry) -> some View {
+            let current = savedFolder(of: entry)
+            Menu {
+                ForEach(savedFolderNames, id: \.self) { name in
+                    Button {
+                        setSavedFolder(name, for: entry)
+                    } label: {
+                        if isInFolder(entry, name) {
+                            Label(name, systemImage: "checkmark")
+                        } else {
+                            Text(name)
+                        }
+                    }
+                }
+                Button {
+                    newSavedFolderMealKey = savedMealKey(entry)
+                    newSavedFolderName = ""
+                    isAddingSavedFolder = true
+                } label: {
+                    Label(
+                        String(localized: "New folder…", comment: "FoodFinder new saved-meal folder from a meal"),
+                        systemImage: "folder.badge.plus"
+                    )
+                }
+                if current != nil {
+                    Button {
+                        setSavedFolder(nil, for: entry)
+                    } label: {
+                        Label(
+                            String(localized: "Remove from folder", comment: "FoodFinder take a saved meal out of its folder"),
+                            systemImage: "folder.badge.minus"
+                        )
+                    }
+                }
+            } label: {
+                Label(
+                    String(localized: "Move to folder", comment: "FoodFinder move a saved meal to a folder"),
+                    systemImage: "folder"
+                )
+            }
+        }
+
+        private func reloadSavedFolders() {
+            let store = SavedMealFolderStore()
+            savedFolderAssignments = store.assignments()
+            savedFolderNames = store.folderNames()
+            if let selected = selectedSavedFolder, !savedFolderNames.contains(where: { SavedMealFolderStore.same($0, selected) }) {
+                selectedSavedFolder = nil
+            }
+        }
+
+        private func addSavedFolder() {
+            let store = SavedMealFolderStore()
+            if let name = store.addFolder(newSavedFolderName), let key = newSavedFolderMealKey {
+                store.setFolder(name, forMealKey: key)
+            }
+            newSavedFolderMealKey = nil
+            newSavedFolderName = ""
+            reloadSavedFolders()
+        }
+
+        private func setSavedFolder(_ folder: String?, for entry: SavedMealEntry) {
+            SavedMealFolderStore().setFolder(folder, forMealKey: savedMealKey(entry))
+            reloadSavedFolders()
+        }
+
+        private func deleteSavedFolder(_ name: String) {
+            SavedMealFolderStore().deleteFolder(name)
+            if let selected = selectedSavedFolder, SavedMealFolderStore.same(selected, name) {
+                selectedSavedFolder = nil
+            }
+            reloadSavedFolders()
+        }
+
         private func isSavedMeal(_ result: FoodAnalysisResult) -> Bool {
             if state.frequentMeals.contains(where: { $0.id == result.id }) { return true }
             let key = MealEventIdentity.normalized(mealTitle(for: result))
@@ -1278,6 +1514,7 @@ extension AIInsights {
             }
             .buttonStyle(.plain)
             .contextMenu {
+                savedFolderMenu(for: entry)
                 Button(role: .destructive) {
                     removeSavedMeal(entry)
                 } label: {
@@ -1354,37 +1591,98 @@ extension AIInsights {
                 postMealWindowRow(summary.zeroToTwoHours)
                 postMealWindowRow(summary.twoToFourHours)
                 if let fpu = summary.fpu {
-                    Text(postMealFPUNote(fpu))
+                    Label(postMealFPUNote(fpu), systemImage: "clock.arrow.circlepath")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             } header: {
-                Text(String(localized: "After this meal", comment: "FoodFinder post-meal section"))
-            } footer: {
-                Text(postMealFooter(summary))
+                HStack {
+                    Text(String(localized: "After this meal", comment: "FoodFinder post-meal section"))
+                    Spacer()
+                    InfoButton(
+                        title: String(localized: "After this meal", comment: "FoodFinder post-meal section"),
+                        message: postMealExplanation(summary)
+                    )
+                    .textCase(nil)
+                }
             }
         }
 
+        /// One window: the share in range large, a red / green / orange bar, and icons for the number of meals and
+        /// how many of them went below or above range.
         private func postMealWindowRow(_ window: FoodFinderPostMealWindow) -> some View {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(postMealWindowTitle(window))
                         .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Text(postMealHeadline(window))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(window.timeInRangePercent == nil ? Color.secondary : Color.primary)
-                }
-                if let detail = postMealDetail(window) {
-                    Text(detail)
-                        .font(.caption)
                         .foregroundStyle(.secondary)
+                    if let percent = window.timeInRangePercent {
+                        Text("\(percent)%")
+                            .font(.title3.weight(.bold))
+                            .monospacedDigit()
+                            .foregroundStyle(TimeInRangeBar.tint(forInRange: percent))
+                        if !window.isComplete {
+                            Image(systemName: "clock")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .accessibilityLabel(String(
+                                    localized: "so far",
+                                    comment: "FoodFinder post-meal window still collecting glucose, short"
+                                ))
+                        }
+                    }
+                    Spacer(minLength: 4)
+                    postMealCountIcons(window)
                 }
-                Text(postMealOccurrences(window))
+
+                if let inRange = window.timeInRangePercent,
+                   let below = window.timeBelowRangePercent,
+                   let above = window.timeAboveRangePercent
+                {
+                    TimeInRangeBar(below: below, inRange: inRange, above: above)
+                } else {
+                    Label(
+                        postMealHeadline(window),
+                        systemImage: window.isComplete ? "minus.circle" : "hourglass"
+                    )
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 2)
+                    .padding(.horizontal, 8)
+                    .background(Capsule().fill(Color.secondary.opacity(0.12)))
+                }
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 2)
+        }
+
+        @ViewBuilder private func postMealCountIcons(_ window: FoodFinderPostMealWindow) -> some View {
+            HStack(spacing: 10) {
+                if window.lowOccurrenceCount > 0 {
+                    Label("\(window.lowOccurrenceCount)", systemImage: "arrow.down.circle.fill")
+                        .foregroundStyle(.red)
+                        .accessibilityLabel(String(
+                            format: String(localized: "%d meals went below range", comment: "FoodFinder post-meal meals below range"),
+                            window.lowOccurrenceCount
+                        ))
+                }
+                if window.highOccurrenceCount > 0 {
+                    Label("\(window.highOccurrenceCount)", systemImage: "arrow.up.circle.fill")
+                        .foregroundStyle(.orange)
+                        .accessibilityLabel(String(
+                            format: String(localized: "%d meals went above range", comment: "FoodFinder post-meal meals above range"),
+                            window.highOccurrenceCount
+                        ))
+                }
+                Label("\(window.occurrenceCount)", systemImage: "fork.knife")
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel(String(
+                        format: String(localized: "%d meals", comment: "FoodFinder post-meal number of meals"),
+                        window.occurrenceCount
+                    ))
+            }
+            .font(.caption.weight(.semibold))
+            .monospacedDigit()
         }
 
         private func postMealWindowTitle(_ window: FoodFinderPostMealWindow) -> String {
@@ -1416,33 +1714,6 @@ extension AIInsights {
             )
         }
 
-        private func postMealDetail(_ window: FoodFinderPostMealWindow) -> String? {
-            guard let below = window.timeBelowRangePercent, let above = window.timeAboveRangePercent else { return nil }
-            return String(
-                format: String(
-                    localized: "Below range %d%% · above range %d%%",
-                    comment: "FoodFinder post-meal time below and above range"
-                ),
-                below,
-                above
-            )
-        }
-
-        private func postMealOccurrences(_ window: FoodFinderPostMealWindow) -> String {
-            guard window.occurrenceCount > 0 else {
-                return String(localized: "n = 0", comment: "FoodFinder post-meal window without meals that have glucose")
-            }
-            return String(
-                format: String(
-                    localized: "n = %d · below range in %d · above range in %d",
-                    comment: "FoodFinder post-meal meals with glucose in the window and how many went below or above range"
-                ),
-                window.occurrenceCount,
-                window.lowOccurrenceCount,
-                window.highOccurrenceCount
-            )
-        }
-
         private func postMealFPUNote(_ fpu: FoodFinderPostMealFPU) -> String {
             switch fpu {
             case let .insideFourHourWindow(until):
@@ -1462,6 +1733,26 @@ extension AIInsights {
                     until.formatted(date: .omitted, time: .shortened)
                 )
             }
+        }
+
+        private func postMealExplanation(_ summary: FoodFinderPostMealSummary) -> String {
+            let counts = summary.windows.map { window in
+                String(
+                    format: String(
+                        localized: "%@: below range in %d and above range in %d of %d meals.",
+                        comment: "FoodFinder post-meal info: meals below and above range in one window"
+                    ),
+                    postMealWindowTitle(window),
+                    window.lowOccurrenceCount,
+                    window.highOccurrenceCount,
+                    window.occurrenceCount
+                )
+            }
+            let legend = String(
+                localized: "The bar shows the share of the time with glucose below range (red), in range (green) and above range (orange). The icons count the meals: with a low, with a high, and in total. A clock means the window is still open.",
+                comment: "FoodFinder post-meal info: bar and icon legend"
+            )
+            return ([postMealFooter(summary), legend] + counts).joined(separator: "\n\n")
         }
 
         private func postMealFooter(_ summary: FoodFinderPostMealSummary) -> String {

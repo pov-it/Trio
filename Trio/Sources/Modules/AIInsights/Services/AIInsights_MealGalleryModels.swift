@@ -195,6 +195,76 @@ extension AIInsights {
         }
     }
 
+    /// Folders for the saved meals on the FoodFinder start page. A meal is filed by its normalized name
+    /// (`MealEventIdentity.normalized`), so a kept FoodFinder meal and a Trio preset with the same name share a folder.
+    /// Stays on this phone, like the gallery groups.
+    struct SavedMealFolderStore {
+        static let assignmentsKey = "ai_foodfinder_saved_meal_folders"
+        static let namesKey = "ai_foodfinder_saved_meal_folder_names"
+
+        let defaults: UserDefaults
+
+        init(defaults: UserDefaults = .standard) {
+            self.defaults = defaults
+        }
+
+        /// Folder per meal key.
+        func assignments() -> [String: String] {
+            defaults.dictionary(forKey: Self.assignmentsKey) as? [String: String] ?? [:]
+        }
+
+        /// Stored names plus any name still in use, deduplicated ignoring case and accents, sorted.
+        func folderNames() -> [String] {
+            let stored = defaults.stringArray(forKey: Self.namesKey) ?? []
+            return Self.deduplicated(stored + Array(assignments().values))
+        }
+
+        /// Adds a folder and returns its name as stored (an existing folder's spelling when it matches).
+        @discardableResult
+        func addFolder(_ raw: String) -> String? {
+            let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            let names = folderNames()
+            if let existing = names.first(where: { Self.same($0, name) }) {
+                return existing
+            }
+            defaults.set(Self.deduplicated(names + [name]), forKey: Self.namesKey)
+            return name
+        }
+
+        /// Files the meal under `folder`, or takes it out of its folder when nil.
+        func setFolder(_ folder: String?, forMealKey key: String) {
+            guard !key.isEmpty else { return }
+            var current = assignments()
+            if let folder, let name = addFolder(folder) {
+                current[key] = name
+            } else {
+                current.removeValue(forKey: key)
+            }
+            defaults.set(current, forKey: Self.assignmentsKey)
+        }
+
+        /// Removes the folder; its meals are no longer in a folder.
+        func deleteFolder(_ name: String) {
+            defaults.set(folderNames().filter { !Self.same($0, name) }, forKey: Self.namesKey)
+            defaults.set(assignments().filter { !Self.same($0.value, name) }, forKey: Self.assignmentsKey)
+        }
+
+        static func same(_ lhs: String, _ rhs: String) -> Bool {
+            lhs.compare(rhs, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+        }
+
+        static func deduplicated(_ names: [String]) -> [String] {
+            var result: [String] = []
+            for raw in names {
+                let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty, !result.contains(where: { same($0, name) }) else { continue }
+                result.append(name)
+            }
+            return result.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        }
+    }
+
     /// How the gallery root is presented.
     enum GalleryBrowseMode: String, CaseIterable, Identifiable {
         case all

@@ -136,6 +136,36 @@ struct FoodFinderPhotoRouteTests {
         #expect(comparison == nil)
     }
 
+    @Test("Gemini is logged while on-device is still running, and agreement follows when it finishes")
+    func geminiFirstThenOnDevice() {
+        var comparison = AIInsights.FoodFinderPhotoComparison.make(
+            onDevice: .pending,
+            gemini: side(name: "Rice", carbs: 50)
+        )
+        #expect(comparison?.adoptedEngine == .gemini)
+        #expect(comparison?.agreementPercent == nil)
+        #expect(comparison?.onDevice.outcome == .pending)
+
+        comparison?.completeOnDevice(side(name: "Rice", carbs: 40))
+        #expect(comparison?.onDevice.outcome == .ready)
+        #expect(comparison?.agreementPercent == 92)
+        #expect(comparison?.adoptedEngine == .gemini)
+
+        comparison?.completeOnDevice(.failed("On-device meal analysis failed."))
+        #expect(comparison?.agreementPercent == nil)
+    }
+
+    @Test("A side still running when the app stopped is settled as not finished")
+    func settlesInterruptedSide() {
+        var comparison = AIInsights.FoodFinderPhotoComparison.make(
+            onDevice: .pending,
+            gemini: side(name: "Rice", carbs: 50)
+        )
+        #expect(comparison?.settleInterruptedSides() == true)
+        #expect(comparison?.onDevice.outcome == .failed)
+        #expect(comparison?.settleInterruptedSides() == false)
+    }
+
     @Test("On-device JSON matches the FoodFinder meal schema")
     func onDeviceJSONShape() {
         let estimate = AIInsights.FoodFinderOnDeviceEstimate(

@@ -4,8 +4,11 @@ import UIKit
 extension AIInsights {
     /// A section of meal tiles on the FoodFinder start page, in the same grid as the meal gallery.
     struct FoodFinderMealGridSection<Tile: View>: View {
+        /// Empty for a grid without its own header.
         let title: String
         let count: Int
+        /// A smaller header, for a folder inside a section.
+        var isSubsection: Bool = false
         @ViewBuilder let tiles: () -> Tile
 
         private let columns = [
@@ -16,13 +19,21 @@ extension AIInsights {
 
         var body: some View {
             VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(title)
-                        .font(.headline)
-                    Spacer()
-                    Text("\(count)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                if !title.isEmpty {
+                    HStack(alignment: .firstTextBaseline) {
+                        if isSubsection {
+                            Label(title, systemImage: "folder")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(title)
+                                .font(.headline)
+                        }
+                        Spacer()
+                        Text("\(count)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 LazyVGrid(columns: columns, spacing: 14) {
                     tiles()
