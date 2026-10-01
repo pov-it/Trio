@@ -24,6 +24,7 @@ struct FeatureSettingsView: BaseView {
                     Text("Treatments").navigationLink(to: .treatmentsSettings, from: self)
                     Text("Shortcuts").navigationLink(to: .shortcutsConfig, from: self)
                     Text("Remote Control").navigationLink(to: .remoteControlConfig, from: self)
+                    Text(String(localized: "AutoPresets", comment: "AutoPresets feature row")).navigationLink(to: .autoPresets, from: self)
                 }
             )
             .listRowBackground(Color.chart)
@@ -41,6 +42,14 @@ struct FeatureSettingsView: BaseView {
                 header: Text("Anonymized Data Sharing"),
                 content: {
                     Text("App Diagnostics").navigationLink(to: .appDiagnostics, from: self)
+                }
+            )
+            .listRowBackground(Color.chart)
+
+            Section(
+                header: Text("AI", comment: "AI section header in Feature Settings"),
+                content: {
+                    Text("AI Settings").navigationLink(to: .aiSettings, from: self)
                 }
             )
             .listRowBackground(Color.chart)

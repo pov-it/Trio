@@ -14,9 +14,10 @@ struct GlucoseAlert: Identifiable, Codable, Equatable {
     /// iOS still drives haptics from the interruption level.
     var playsSound: Bool
     /// When true, this alarm bypasses Focus Mode / silent switch
-    /// modes. Maps to `Alert.InterruptionLevel.critical` and triggers the
-    /// in-process `CriticalAlertAudioPlayer` fallback for builds without the
-    /// Critical Alerts entitlement.
+    /// modes. Maps to `Alert.InterruptionLevel.critical`. When Critical Alerts
+    /// are authorized the user notification plays this alarm's `.caf` via
+    /// `criticalSoundNamed` and nothing else. Otherwise AlarmKit or the
+    /// in-process `CriticalAlertAudioPlayer` is the only audible channel.
     var overridesSilenceAndDND: Bool
     var activeOption: ActiveOption
     /// Per-alarm snooze. Distinct from the global mute on `AlertMuter`.

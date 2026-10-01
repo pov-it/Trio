@@ -4,12 +4,14 @@ struct GlucoseAlertConfiguration: Codable, Equatable {
     var dayStart: TimeOfDay
     var nightStart: TimeOfDay
     /// Force Trio alarms on even when the CGM advertises its own.
+    /// Defaults on to match pre-upstream-dev `main`: Trio owns glucose
+    /// alarms (including Low / Urgent Low) regardless of CGM vendor.
     var forceTrioAlertsWhenCGMProvidesOwn: Bool
 
     init(
         dayStart: TimeOfDay = TimeOfDay(hour: 6, minute: 0),
         nightStart: TimeOfDay = TimeOfDay(hour: 22, minute: 0),
-        forceTrioAlertsWhenCGMProvidesOwn: Bool = false
+        forceTrioAlertsWhenCGMProvidesOwn: Bool = true
     ) {
         self.dayStart = dayStart
         self.nightStart = nightStart
@@ -29,7 +31,7 @@ struct GlucoseAlertConfiguration: Codable, Equatable {
         forceTrioAlertsWhenCGMProvidesOwn = try container.decodeIfPresent(
             Bool.self,
             forKey: .forceTrioAlertsWhenCGMProvidesOwn
-        ) ?? false
+        ) ?? true
     }
 
     /// Resolve whether `date` falls into the user's "night" window. Mirrors

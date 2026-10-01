@@ -187,7 +187,12 @@ final class BaseUserNotificationsManager: NSObject, UserNotificationsManager, In
 
     func requestNotificationPermissions(completion: @escaping (Bool) -> Void) {
         debug(.service, "requestNotificationPermissions")
-        notificationCenter.requestAuthorization(options: [.badge, .sound, .alert]) { granted, error in
+        // `.criticalAlert` matches pre-merge main. The entitlements file
+        // includes `com.apple.developer.usernotifications.critical-alerts`
+        // (restored from main; dropped by the upstream/dev merge). iOS only
+        // honors true critical interruption if that capability is also
+        // enabled on the App ID / provisioning profile.
+        notificationCenter.requestAuthorization(options: [.badge, .sound, .alert, .criticalAlert]) { granted, error in
             if granted {
                 debug(.service, "requestNotificationPermissions was granted")
                 DispatchQueue.main.async {
@@ -211,14 +216,11 @@ final class BaseUserNotificationsManager: NSObject, UserNotificationsManager, In
 extension BaseUserNotificationsManager: UNUserNotificationCenterDelegate {
     func userNotificationCenter(
         _: UNUserNotificationCenter,
-        willPresent notification: UNNotification,
+        willPresent _: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        let userInfo = notification.request.content.userInfo
-        if userInfo[AlertUserInfoKey.managerIdentifier.rawValue] is String {
-            completionHandler([.badge, .list])
-            return
-        }
+        // Pre-merge main always presented banner + sound while Trio was
+        // foregrounded (nightstand). Do not swallow Trio-alert sound here.
         completionHandler([.banner, .badge, .sound, .list])
     }
 

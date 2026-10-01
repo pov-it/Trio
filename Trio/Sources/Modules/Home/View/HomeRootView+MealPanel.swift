@@ -91,16 +91,35 @@ extension Home.RootView {
     }
 
     @ViewBuilder private var liveMealPanel: some View {
-        ZStack {
-            // the carb value itself sits on the panel's midline; the icon hangs off it
-            Text(
-                (
-                    Formatter.decimalFormatterWithTwoFractionDigits.string(
-                        from: NSNumber(value: state.enactedAndNonEnactedDeterminations.first?.cob ?? 0)
-                    ) ?? "0"
-                ) +
-                    String(localized: " g", comment: "gram of carbs")
-            )
+        // One row so carbs stay between insulin and the action pills. A centered
+        // overlay collided with sparkles + FoodFinder + the snooze capsule on a
+        // narrow phone (glucose and pump already occupy the header above).
+        HStack(spacing: 6) {
+            insulinOnBoardLabel
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+            Spacer(minLength: 4)
+            carbsOnBoardLabel
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+            Spacer(minLength: 4)
+            HStack(spacing: 6) {
+                aiHubPill
+                foodFinderPill
+                alarmsPill
+            }
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .padding(.horizontal)
+    }
+
+    /// Carb value on the row; the fork hangs off its leading edge.
+    private var carbsOnBoardLabel: some View {
+        let grams = Formatter.decimalFormatterWithTwoFractionDigits.string(
+            from: NSNumber(value: state.enactedAndNonEnactedDeterminations.first?.cob ?? 0)
+        ) ?? "0"
+        let value = grams + String(localized: " g", comment: "gram of carbs")
+        return Text(value)
             .font(.callout).fontWeight(.bold).fontDesign(.rounded)
             .overlay(alignment: .leading) {
                 Image(systemName: "fork.knife")
@@ -111,46 +130,90 @@ extension Home.RootView {
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Text("Carbs on board"))
-            .accessibilityValue(Text(
-                (Formatter.decimalFormatterWithTwoFractionDigits.string(
-                    from: NSNumber(value: state.enactedAndNonEnactedDeterminations.first?.cob ?? 0)
-                ) ?? "0") + String(localized: " g", comment: "gram of carbs")
-            ))
+            .accessibilityValue(Text(value))
+    }
 
-            HStack {
-                HStack {
-                    Image(systemName: "syringe.fill")
-                        .font(.callout)
-                        .foregroundColor(Color.insulin)
-                    Text(
-                        (
-                            Formatter.decimalFormatterWithTwoFractionDigits
-                                .string(from: state.currentIOB as NSNumber) ?? "0"
-                        ) +
-                            String(localized: " U", comment: "Insulin unit")
-                    )
-                    .font(.callout).fontWeight(.bold).fontDesign(.rounded)
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(Text("Insulin on board"))
-                .accessibilityValue(Text(
-                    (
-                        Formatter.decimalFormatterWithTwoFractionDigits
-                            .string(from: state.currentIOB as NSNumber) ?? "0"
-                    )
-                        + String(localized: " U", comment: "Insulin unit")
-                ))
-
-                Spacer()
-
-                alarmsPill
-            }
-        }.padding(.horizontal)
+    private var insulinOnBoardLabel: some View {
+        let units = (
+            Formatter.decimalFormatterWithTwoFractionDigits
+                .string(from: state.currentIOB as NSNumber) ?? "0"
+        ) + String(localized: " U", comment: "Insulin unit")
+        return HStack {
+            Image(systemName: "syringe.fill")
+                .font(.callout)
+                .foregroundColor(Color.insulin)
+            Text(units)
+                .font(.callout).fontWeight(.bold).fontDesign(.rounded)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Insulin on board"))
+        .accessibilityValue(Text(units))
     }
 
     func refreshAlarmsSnooze() {
         alarmsSnoozeUntil = UserDefaults.standard
             .object(forKey: "UserNotificationsManager.snoozeUntilDate") as? Date ?? .distantPast
+    }
+
+    /// Sparkles pill matching the alarm bell; opens AI Hub (chat, insights, trackers).
+    @ViewBuilder var aiHubPill: some View {
+        NavigationLink {
+            AIInsights.HubView(resolver: resolver)
+        } label: {
+            Image(systemName: "sparkles")
+                .font(.callout)
+                .fontWeight(.semibold)
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.7215686275, green: 0.3411764706, blue: 1),
+                            Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 32, height: 32)
+                .overlay(
+                    Circle()
+                        .stroke(Color.primary.opacity(0.4), lineWidth: 2)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(String(localized: "AI Hub", comment: "AI Hub accessibility label"))
+        .accessibilityHint(Text(String(localized: "Opens chat, insights, and trackers", comment: "AI Hub accessibility hint")))
+        .accessibilityAddTraits(.isButton)
+    }
+
+    /// Opens FoodFinder as the same home-screen modal the widget deep link uses,
+    /// so the composer docks to the keyboard the same way.
+    @ViewBuilder var foodFinderPill: some View {
+        Button {
+            state.showModal(for: .aiFoodFinder)
+        } label: {
+            Image(systemName: "fork.knife")
+                .font(.callout)
+                .fontWeight(.semibold)
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.3411764706, green: 0.6666666667, blue: 0.9254901961),
+                            Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 32, height: 32)
+                .overlay(
+                    Circle()
+                        .stroke(Color.primary.opacity(0.4), lineWidth: 2)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(String(localized: "FoodFinder", comment: "FoodFinder home button accessibility label"))
+        .accessibilityHint(Text(String(localized: "Opens FoodFinder", comment: "FoodFinder home button accessibility hint")))
+        .accessibilityAddTraits(.isButton)
     }
 
     /// Bell pill matching the header pills; countdown replaces the label while snoozed.

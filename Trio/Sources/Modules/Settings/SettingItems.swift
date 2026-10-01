@@ -268,6 +268,17 @@ enum SettingItems {
             path: ["Features", "Remote Control"]
         ),
         SettingItem(
+            title: "AutoPresets",
+            view: .autoPresets,
+            searchContents: [
+                "AutoPresets",
+                "Activity",
+                "Caffeine",
+                "Alcohol"
+            ],
+            path: ["Features", "AutoPresets"]
+        ),
+        SettingItem(
             title: "User Interface",
             view: .userInterfaceSettings,
             searchContents: [
@@ -322,6 +333,55 @@ enum SettingItems {
             view: .appDiagnostics,
             searchContents: ["Anonymized Data Sharing"],
             path: ["Features", "App Diagnostics"]
+        )
+    ]
+
+    static let aiItems = [
+        SettingItem(
+            title: "AI Insights",
+            view: .aiInsights,
+            searchContents: [
+                "AI Chat",
+                "AI Provider",
+                "API Key",
+                "AI Model",
+                "AI Personality",
+                "Analysis Period",
+                "System Prompt",
+                "Enable AI Insights",
+                "FoodFinder",
+                "OpenFoodFacts",
+                "Open Food Facts API",
+                "Barcode",
+                "Meals Companion"
+            ],
+            path: ["Features", "AI", "AI Insights"]
+        ),
+        SettingItem(
+            title: "AI Settings",
+            view: .aiSettings,
+            searchContents: [
+                "AI Provider",
+                "Google Gemini",
+                "OpenAI",
+                "Anthropic",
+                "API Key",
+                "Model",
+                "Endpoint URL",
+                "Test Connection",
+                "Analysis Period",
+                "AI Personality",
+                "Clinical Expert",
+                "Supportive Coach",
+                "System Prompt",
+                "FoodFinder",
+                "OpenFoodFacts",
+                "Open Food Facts API",
+                "Barcode Lookup",
+                "Meals Companion",
+                "Share meals with companion"
+            ],
+            path: ["Features", "AI", "AI Settings"]
         )
     ]
 
@@ -426,7 +486,7 @@ enum SettingItems {
     ]
 
     static var allItems: [SettingItem] {
-        trioConfig + devicesItems + therapyItems + algorithmItems + trioFeaturesItems + notificationItems + serviceItems
+        trioConfig + devicesItems + therapyItems + algorithmItems + trioFeaturesItems + aiItems + notificationItems + serviceItems
     }
 
     static func filteredItems(searchText: String) -> [FilteredSettingItem] {

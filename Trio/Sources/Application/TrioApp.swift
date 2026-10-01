@@ -85,6 +85,8 @@ extension Notification.Name {
         }
         _ = resolver.resolve(IOBService.self)!
         _ = resolver.resolve(GlucoseAlertCoordinator.self)!
+        // Libre glucose notifications default to "always" and ignore the home bell.
+        LibreGlucoseAlarmSuppression.apply()
         _ = resolver.resolve(NotLoopingMonitor.self)!
         _ = DeviceAlertsStore.shared
         // Last: needs the pump manager's AlertResponder registration and the
@@ -409,6 +411,7 @@ extension Notification.Name {
             }
 
             if newScenePhase == .active {
+                LibreGlucoseAlarmSuppression.apply()
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                    let rootVC = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController
                 {
@@ -418,6 +421,17 @@ extension Notification.Name {
                 presentDevelopmentBranchWarningIfNeeded()
                 if initState.complete {
                     performCleanupIfNecessary()
+                }
+                // Feature R — AI Insights MONTHLY recap foreground catch-up.
+                // Runs on cold launch AND every return-to-foreground (scene
+                // becomes active). Fires in a detached low-priority Task so it
+                // never blocks launch; a cheap calendar-month gate inside means
+                // it is a no-op on the vast majority of activations. Read/analyze
+                // + local-notification only — it never influences dosing. This is
+                // the FOREGROUND-ONLY catch-up (no BGTaskScheduler / background
+                // modes / entitlement changes).
+                Task.detached(priority: .utility) {
+                    await AIInsights.RecapForegroundCoordinator.runMonthlyCatchUpIfDue(resolver: TrioApp.resolver)
                 }
             }
         }
@@ -535,6 +549,12 @@ extension Notification.Name {
         switch components?.host {
         case "device-select-resp":
             resolver.resolve(NotificationCenter.self)!.post(name: .openFromGarminConnect, object: url)
+        case "foodfinder":
+            // Lock-screen / home-screen widget shortcut → open FoodFinder.
+            resolver.resolve(Router.self)!.mainModalScreen.send(.aiFoodFinder)
+        case "caffeine":
+            // Lock-screen / home-screen widget shortcut → open Caffeine tracker.
+            resolver.resolve(Router.self)!.mainModalScreen.send(.aiCaffeine)
         default: break
         }
     }

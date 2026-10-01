@@ -32,6 +32,20 @@ class BaseStateModel<Provider>: StateModel, Injectable where Provider: Trio.Prov
     func subscribe() {}
 
     func showModal(for screen: Screen?) {
+        guard let screen else {
+            router.mainModalScreen.send(nil)
+            return
+        }
+        // If the subject already holds this screen but the sheet never became
+        // visible (nested-sheet collision), `removeDuplicates` would ignore a
+        // second send. Clear first so Home + can recover.
+        if router.mainModalScreen.value == screen {
+            router.mainModalScreen.send(nil)
+            DispatchQueue.main.async { [weak self] in
+                self?.router.mainModalScreen.send(screen)
+            }
+            return
+        }
         router.mainModalScreen.send(screen)
     }
 

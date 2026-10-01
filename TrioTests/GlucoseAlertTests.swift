@@ -75,6 +75,15 @@ import Testing
         #expect(a.overridesSilenceAndDND == false)
     }
 
+    @Test("low and urgentLow default to override Silence & DND") func lowFamilyOverrideDefaults() {
+        #expect(GlucoseAlertType.low.defaultOverridesSilenceAndDND)
+        #expect(GlucoseAlertType.urgentLow.defaultOverridesSilenceAndDND)
+        #expect(GlucoseAlert(type: .low).overridesSilenceAndDND)
+        #expect(GlucoseAlert(type: .urgentLow).overridesSilenceAndDND)
+        #expect(!GlucoseAlertType.high.defaultOverridesSilenceAndDND)
+        #expect(!GlucoseAlertType.forecastedLow.defaultOverridesSilenceAndDND)
+    }
+
     @Test("isReadingDriven: true for low family + high, false for forecast + carbs") func isReadingDriven() {
         #expect(GlucoseAlertType.urgentLow.isReadingDriven)
         #expect(GlucoseAlertType.low.isReadingDriven)
@@ -129,6 +138,20 @@ import Testing
         #expect(decoded.activeOption == .always)
         #expect(decoded.snoozedUntil == nil)
         #expect(decoded.isEnabled == true)
+    }
+
+    @Test("low with overridesSilenceAndDND omitted uses type defaults") func decodeLowOverrideDefault() throws {
+        let json = """
+        {
+            "id": "55555555-5555-5555-5555-555555555555",
+            "type": "low",
+            "name": "Low Glucose",
+            "thresholdMgDL": 72
+        }
+        """
+        let decoded = try JSONDecoder().decode(GlucoseAlert.self, from: Data(json.utf8))
+        #expect(decoded.overridesSilenceAndDND == true)
+        #expect(decoded.soundFilename == GlucoseAlertType.low.defaultSoundFilename)
     }
 
     @Test("urgentLow with overridesSilenceAndDND omitted uses type defaults") func decodeUrgentLowOverrideDefault() throws {

@@ -1,7 +1,6 @@
 import CGMBLEKit
 import Foundation
 import G7SensorKit
-import LibreTransmitter
 import LoopKit
 import Testing
 
@@ -50,5 +49,14 @@ import Testing
         let app = CGMManagerAlertOwnership.owningApp(manager: manager, sourceType: .plugin)
         #expect(app?.name == "Dexcom G5")
         #expect(app?.deepLink == nil)
+    }
+
+    /// LibreTransmitter is an in-process plugin. After the upstream/dev merge it
+    /// was incorrectly treated as a companion-app owner, which silenced Trio
+    /// hypo alarms. Pin that it is not an owner (nil manager + .plugin is the
+    /// closest we can get without constructing the vendor manager).
+    @Test("plugin source with no Dexcom manager is not an alert owner") func pluginWithoutDexcomManagerIsNotOwner() {
+        #expect(CGMManagerAlertOwnership.owningApp(manager: nil, sourceType: .plugin) == nil)
+        #expect(!CGMManagerAlertOwnership.providesOwnGlucoseAlerts(manager: nil, sourceType: .plugin))
     }
 }

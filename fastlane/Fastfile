@@ -183,7 +183,8 @@ platform :ios do
       Spaceship::ConnectAPI::BundleIdCapability::Type::APP_GROUPS,
       Spaceship::ConnectAPI::BundleIdCapability::Type::HEALTHKIT,
       Spaceship::ConnectAPI::BundleIdCapability::Type::NFC_TAG_READING,
-      Spaceship::ConnectAPI::BundleIdCapability::Type::PUSH_NOTIFICATIONS
+      Spaceship::ConnectAPI::BundleIdCapability::Type::PUSH_NOTIFICATIONS,
+      Spaceship::ConnectAPI::BundleIdCapability::Type::ICLOUD
     ])
 
     configure_bundle_id("Trio Watch Complication", "#{BUNDLE_ID}.watchkitapp.TrioWatchComplication", [
@@ -211,9 +212,15 @@ platform :ios do
       key_content: "#{FASTLANE_KEY}"
     )
     
+    match_force = (ENV["MATCH_FORCE"] == "true" || ENV["FORCE_PROFILES"] == "true")
+    UI.message("Match force=#{match_force} (regenerates profiles only; does not nuke certificates)")
     match(
       type: "appstore",
-      force: false,
+      # Regenerates provisioning profiles so new App ID entitlements (e.g. the
+      # meals CloudKit container) are signed in. Does NOT nuke certificates.
+      # Parent: set MATCH_FORCE=true (or FORCE_PROFILES=true) for one
+      # "3. Create Certificates" run, then unset it. Default false.
+      force: match_force,
       verbose: true,
       git_basic_authorization: Base64.strict_encode64("#{GITHUB_REPOSITORY_OWNER}:#{GH_PAT}"),
       app_identifier: [

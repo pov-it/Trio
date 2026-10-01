@@ -112,6 +112,11 @@ extension Treatments {
         var id_: String = ""
         var summary: String = ""
 
+        /// The FoodFinder meal this calculator was opened with, until its carb entry is saved.
+        @ObservationIgnored var foodFinderHandoff: AIInsights.FoodBolusHandoff? = nil
+        /// The meal event recorded for that meal, until its bolus is given.
+        @ObservationIgnored var foodFinderMealEventID: UUID? = nil
+
         var externalInsulin: Bool = false
         var showInfo: Bool = false
         var glucoseFromPersistence: [GlucoseStored] = []
@@ -282,6 +287,7 @@ extension Treatments {
                     self.setupDeterminationController()
                     self.setupLastBolusController()
                 }
+                await self.applyFoodFinderHandoffIfNeeded()
             }
         }
 
@@ -344,6 +350,31 @@ extension Treatments {
                     }
                 }
             }
+        }
+
+        @MainActor func applyFoodFinderHandoffIfNeeded() async {
+            guard let handoff = AIInsights.FoodBolusHandoff.consume() else { return }
+            foodFinderHandoff = handoff
+
+            carbs = min(Decimal(handoff.carbs), maxCarbs)
+            fat = min(Decimal(handoff.fat), maxFat)
+            protein = min(Decimal(handoff.protein), maxProtein)
+            note = String(handoff.note.prefix(25))
+            date = handoff.createdAt
+
+            if fat > 0 || protein > 0 {
+                useFPUconversion = true
+            }
+
+            let shouldUseReducedBolus = handoff.useReducedBolus
+                ?? AIInsights.foodFinderReducedBolusRecommended(fat: handoff.fat, protein: handoff.protein)
+            if fattyMeals && shouldUseReducedBolus {
+                useFattyMealCorrectionFactor = true
+                useSuperBolus = false
+            }
+
+            insulinCalculated = await calculateInsulin()
+            await updateForecasts()
         }
 
         private func registerObservers() {
@@ -644,7 +675,8 @@ extension Treatments {
                     await MainActor.run {
                         self.isAwaitingDeterminationResult = true
                     }
-                    await apsManager.enactBolus(amount: maxAmount, isSMB: false, callback: nil)
+                    let mealEventCallback = await requestFoodFinderMealEventBolus(units: maxAmount, kind: .pump, at: Date())
+                    await apsManager.enactBolus(amount: maxAmount, isSMB: false, callback: mealEventCallback)
                 }
             } catch {
                 debug(.bolusState, "Authentication error for pump bolus: \(error)")
@@ -676,6 +708,7 @@ extension Treatments {
                     await MainActor.run {
                         self.isAwaitingDeterminationResult = true
                     }
+                    await requestFoodFinderMealEventBolus(units: Double(amount), kind: .external, at: min(date, Date()))
                     // store external dose to pump history
                     await pumpHistoryStorage.storeExternalInsulinEvent(amount: amount, timestamp: date)
                     // perform determine basal sync
@@ -704,6 +737,7 @@ extension Treatments {
                     self.id_ = UUID().uuidString
                 }
 
+                let fpuID = fat > 0 || protein > 0 ? UUID().uuidString : nil
                 let carbsToStore = [CarbsEntry(
                     id: id_,
                     createdAt: now,
@@ -714,9 +748,10 @@ extension Treatments {
                     note: note,
                     enteredBy: CarbsEntry.local,
                     isFPU: false,
-                    fpuID: fat > 0 || protein > 0 ? UUID().uuidString : nil
+                    fpuID: fpuID
                 )]
                 try await carbsStorage.storeCarbs(carbsToStore, areFetchedFromRemote: false)
+                await recordFoodFinderMealEvent(fpuID: fpuID)
 
                 // only perform determine basal sync if the user doesn't use the pump bolus, otherwise the enact bolus func in the APSManger does a sync
                 if amount <= 0 {

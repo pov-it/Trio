@@ -19,6 +19,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, ObservableObject, UNUserNoti
         let crashReportingEnabled: Bool = PropertyPersistentFlags.shared.crashlyticsSharingEnabled ?? true
         CrashReportingGate.configureAtLaunch(enabled: crashReportingEnabled)
 
+        // Resume AutoPresets monitoring if the user previously enabled it.
+        AutoPresetsCoordinator.shared.startIfConfigured()
+
         return true
     }
 

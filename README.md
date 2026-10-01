@@ -30,6 +30,20 @@ Today, Trio primarily serves:
 
 Over time, Trio aims to work safely for **any** person with diabetes who is willing to learn, while continuing to bring along the experienced users, "super users", and contributors who help shape and improve the project and the OS-AID ecosystem as a whole.
 
+### pov-it extras on this branch (beyond stock Trio v1.0.1)
+
+This fork branch keeps **nightscout/Trio v1.0.1** as the medical/looping base and adds AI Hub / FoodFinder, meal gallery, and an opt-in Meals Companion publisher. AI Hub is an **in-repo Trio module** (`Trio/Sources/Modules/AIInsights/`), not a DanaKit/LibreTransmitter-style git submodule or SPM package.
+
+See:
+
+- [DeveloperDocs/README.md](DeveloperDocs/README.md) — index (in-repo Hub vs Dana/Libre kits)
+- [Trio/Sources/Modules/AIInsights/README.md](Trio/Sources/Modules/AIInsights/README.md) — module folder map
+- [DeveloperDocs/AIHubAndCompanion.md](DeveloperDocs/AIHubAndCompanion.md) — feature list vs stock v1.0.1
+- [DeveloperDocs/MealCompanionShare.md](DeveloperDocs/MealCompanionShare.md) — meal-only CloudKit share (no glucose)
+- Companion **app** (separate repo, not AI Hub extracted): [pov-it/meals-companion](https://github.com/pov-it/meals-companion)
+
+No medical advice. These extras are not claimed as TestFlight-verified.
+
 ---
 
 ## To download this repo:
