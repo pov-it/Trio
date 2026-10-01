@@ -1591,7 +1591,7 @@ extension AIInsights {
                 postMealWindowRow(summary.zeroToTwoHours)
                 postMealWindowRow(summary.twoToFourHours)
                 if let fpu = summary.fpu {
-                    Text(postMealFPUNote(fpu))
+                    Label(postMealFPUNote(fpu), systemImage: "clock.arrow.circlepath")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1608,30 +1608,81 @@ extension AIInsights {
             }
         }
 
-        /// One line per window: time in range, then below and above range and the number of meals.
+        /// One window: the share in range large, a red / green / orange bar, and icons for the number of meals and
+        /// how many of them went below or above range.
         private func postMealWindowRow(_ window: FoodFinderPostMealWindow) -> some View {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(postMealWindowTitle(window))
-                    .font(.subheadline.weight(.semibold))
-                    .frame(minWidth: 44, alignment: .leading)
-                Text(postMealHeadline(window))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(window.timeInRangePercent == nil ? Color.secondary : Color.primary)
-                Spacer(minLength: 4)
-                Text(postMealCompactDetail(window))
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(postMealWindowTitle(window))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    if let percent = window.timeInRangePercent {
+                        Text("\(percent)%")
+                            .font(.title3.weight(.bold))
+                            .monospacedDigit()
+                            .foregroundStyle(TimeInRangeBar.tint(forInRange: percent))
+                        if !window.isComplete {
+                            Image(systemName: "clock")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .accessibilityLabel(String(
+                                    localized: "so far",
+                                    comment: "FoodFinder post-meal window still collecting glucose, short"
+                                ))
+                        }
+                    }
+                    Spacer(minLength: 4)
+                    postMealCountIcons(window)
+                }
+
+                if let inRange = window.timeInRangePercent,
+                   let below = window.timeBelowRangePercent,
+                   let above = window.timeAboveRangePercent
+                {
+                    TimeInRangeBar(below: below, inRange: inRange, above: above)
+                } else {
+                    Label(
+                        postMealHeadline(window),
+                        systemImage: window.isComplete ? "minus.circle" : "hourglass"
+                    )
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 2)
+                    .padding(.horizontal, 8)
+                    .background(Capsule().fill(Color.secondary.opacity(0.12)))
+                }
             }
+            .padding(.vertical, 2)
         }
 
-        private func postMealCompactDetail(_ window: FoodFinderPostMealWindow) -> String {
-            var parts: [String] = []
-            if let below = window.timeBelowRangePercent, let above = window.timeAboveRangePercent {
-                parts.append("↓\(below)% ↑\(above)%")
+        @ViewBuilder private func postMealCountIcons(_ window: FoodFinderPostMealWindow) -> some View {
+            HStack(spacing: 10) {
+                if window.lowOccurrenceCount > 0 {
+                    Label("\(window.lowOccurrenceCount)", systemImage: "arrow.down.circle.fill")
+                        .foregroundStyle(.red)
+                        .accessibilityLabel(String(
+                            format: String(localized: "%d meals went below range", comment: "FoodFinder post-meal meals below range"),
+                            window.lowOccurrenceCount
+                        ))
+                }
+                if window.highOccurrenceCount > 0 {
+                    Label("\(window.highOccurrenceCount)", systemImage: "arrow.up.circle.fill")
+                        .foregroundStyle(.orange)
+                        .accessibilityLabel(String(
+                            format: String(localized: "%d meals went above range", comment: "FoodFinder post-meal meals above range"),
+                            window.highOccurrenceCount
+                        ))
+                }
+                Label("\(window.occurrenceCount)", systemImage: "fork.knife")
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel(String(
+                        format: String(localized: "%d meals", comment: "FoodFinder post-meal number of meals"),
+                        window.occurrenceCount
+                    ))
             }
-            parts.append("n = \(window.occurrenceCount)")
-            return parts.joined(separator: " · ")
+            .font(.caption.weight(.semibold))
+            .monospacedDigit()
         }
 
         private func postMealWindowTitle(_ window: FoodFinderPostMealWindow) -> String {
@@ -1698,8 +1749,8 @@ extension AIInsights {
                 )
             }
             let legend = String(
-                localized: "↓ below range, ↑ above range, as a share of the time with glucose.",
-                comment: "FoodFinder post-meal info: arrows legend"
+                localized: "The bar shows the share of the time with glucose below range (red), in range (green) and above range (orange). The icons count the meals: with a low, with a high, and in total. A clock means the window is still open.",
+                comment: "FoodFinder post-meal info: bar and icon legend"
             )
             return ([postMealFooter(summary), legend] + counts).joined(separator: "\n\n")
         }

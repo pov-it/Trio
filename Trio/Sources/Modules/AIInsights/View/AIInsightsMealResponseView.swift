@@ -67,11 +67,10 @@ extension AIInsights {
         }
 
         @ViewBuilder private func content(_ summary: MealResponseSummary) -> some View {
-            Text(headline(summary))
-                .font(.footnote)
-            if let needLine = needLine(summary) {
-                Text(needLine)
-                    .font(.footnote.weight(.semibold))
+            StatTileGrid(items: statTiles(summary))
+            let needs = needTiles(summary)
+            if !needs.isEmpty {
+                StatTileGrid(items: needs)
             }
 
             HStack(spacing: 8) {
@@ -111,46 +110,116 @@ extension AIInsights {
 
         // MARK: - Text
 
-        private func headline(_ summary: MealResponseSummary) -> String {
+        private func statTiles(_ summary: MealResponseSummary) -> [StatTileItem] {
             let n = summary.includedCount
-            var parts = [String(format: String(localized: "n = %d", comment: "Meal response: meals counted"), n)]
+            var items = [StatTileItem(
+                id: "n",
+                systemImage: "fork.knife",
+                value: "\(n)",
+                caption: String(localized: "meals", comment: "Meal response tile: meals counted"),
+                tint: .blue
+            )]
             if let rise = summary.medianRise {
-                if let peak = summary.medianPeakMinute {
-                    parts.append(String(
-                        format: String(localized: "%@ after %d min", comment: "Meal response: median rise and minutes to the peak"),
-                        signedGlucose(rise),
-                        peak
-                    ))
-                } else {
-                    parts.append(signedGlucose(rise))
-                }
+                items.append(StatTileItem(
+                    id: "rise",
+                    systemImage: "arrow.up.right",
+                    value: signedGlucose(rise),
+                    caption: String(localized: "rise", comment: "Meal response tile: median rise from the start"),
+                    tint: .orange
+                ))
+            }
+            if let peak = summary.medianPeakMinute {
+                items.append(StatTileItem(
+                    id: "peak",
+                    systemImage: "timer",
+                    value: "\(peak) min",
+                    caption: String(localized: "to peak", comment: "Meal response tile: median minutes to the peak"),
+                    tint: .purple
+                ))
             }
             if let inRange = summary.medianInRange0to4h {
-                parts.append(String(
-                    format: String(localized: "TIR 0–4 h %d%%", comment: "Meal response: median time in range 0–4 h"),
-                    inRange
+                items.append(StatTileItem(
+                    id: "tir",
+                    systemImage: "target",
+                    value: "\(inRange)%",
+                    caption: String(localized: "TIR 0–4 h", comment: "Meal response tile: median time in range 0–4 h"),
+                    tint: TimeInRangeBar.tint(forInRange: inRange)
                 ))
             }
             if n > 0 {
-                parts.append(String(
-                    format: String(localized: "low %d/%d", comment: "Meal response: meals with a low within 4 h, of n"),
-                    summary.lowCount,
-                    n
+                items.append(StatTileItem(
+                    id: "lows",
+                    systemImage: "arrow.down.circle.fill",
+                    value: "\(summary.lowCount)/\(n)",
+                    caption: String(localized: "lows", comment: "Meal response tile: meals with a low within 4 h"),
+                    tint: summary.lowCount > 0 ? .red : .green
                 ))
-                parts.append(String(
-                    format: String(localized: "correction %d/%d", comment: "Meal response: meals with a manual correction, of n"),
-                    summary.correctionCount,
-                    n
+                items.append(StatTileItem(
+                    id: "corrections",
+                    systemImage: "syringe",
+                    value: "\(summary.correctionCount)/\(n)",
+                    caption: String(localized: "corrections", comment: "Meal response tile: meals with a manual correction"),
+                    tint: summary.correctionCount > 0 ? .orange : .green
                 ))
             }
             let leftOut = summary.totalCount - summary.includedCount
             if leftOut > 0 {
-                parts.append(String(
-                    format: String(localized: "%d left out", comment: "Meal response: meals drawn dashed and not counted"),
-                    leftOut
+                items.append(StatTileItem(
+                    id: "left-out",
+                    systemImage: "line.diagonal",
+                    value: "\(leftOut)",
+                    caption: String(localized: "left out", comment: "Meal response tile: meals drawn dashed and not counted"),
+                    tint: .gray
                 ))
             }
-            return parts.joined(separator: " · ")
+            return items
+        }
+
+        /// The estimate of the insulin the meal took; empty until there is one.
+        private func needTiles(_ summary: MealResponseSummary) -> [StatTileItem] {
+            guard let needed = summary.medianNeeded else { return [] }
+            var range = ""
+            if let low = summary.neededP25, let high = summary.neededP75, summary.needCount >= 4 {
+                range = " (\(unitsText(low))–\(unitsText(high)))"
+            }
+            var items = [StatTileItem(
+                id: "took",
+                systemImage: "syringe.fill",
+                value: "\(unitsText(needed)) U",
+                caption: String(localized: "took", comment: "Meal response tile: median estimated insulin the meal took") + range,
+                tint: .green
+            )]
+            if let factor = summary.medianMealFactor {
+                items.append(StatTileItem(
+                    id: "factor",
+                    systemImage: "divide",
+                    value: "×" + String(format: "%.2f", factor),
+                    caption: String(localized: "vs carb ratio", comment: "Meal response tile: needed insulin relative to carbs at the carb ratio"),
+                    tint: .teal
+                ))
+            }
+            if let perTen = summary.medianUnitsPer10g {
+                items.append(StatTileItem(
+                    id: "per-10g",
+                    systemImage: "scalemass",
+                    value: String(format: "%.2f U", perTen),
+                    caption: String(localized: "per 10 g carbs", comment: "Meal response tile: needed insulin per 10 g carbs"),
+                    tint: .teal
+                ))
+            }
+            if let currentCarbs, let estimate = summary.neededEstimate(forCarbs: currentCarbs) {
+                items.append(StatTileItem(
+                    id: "portion",
+                    systemImage: "fork.knife.circle",
+                    value: "≈ \(unitsText(estimate)) U",
+                    caption: String(
+                        format: String(localized: "this portion (%d g)", comment: "Meal response tile: estimate for the current portion"),
+                        Int(currentCarbs.rounded())
+                    ),
+                    tint: .teal
+                ))
+            }
+            return items
         }
 
         private func insulinLine(_ summary: MealResponseSummary) -> String? {
@@ -175,36 +244,6 @@ extension AIInsights {
                 ))
             }
             return parts.joined(separator: " · ") + "."
-        }
-
-        private func needLine(_ summary: MealResponseSummary) -> String? {
-            guard let needed = summary.medianNeeded else { return nil }
-            var line = String(
-                format: String(localized: "Took ≈ %@ U", comment: "Meal response: median estimated insulin the meal took"),
-                unitsText(needed)
-            )
-            if let low = summary.neededP25, let high = summary.neededP75, summary.needCount >= 4 {
-                line += " (\(unitsText(low))–\(unitsText(high)))"
-            }
-            if let factor = summary.medianMealFactor {
-                line += " · ×" + String(format: "%.2f", factor) + " CR"
-            }
-            if let perTen = summary.medianUnitsPer10g {
-                line += " · " + String(
-                    format: String(localized: "%@ U/10 g", comment: "Meal response: needed insulin per 10 g carbs"),
-                    String(format: "%.2f", perTen)
-                )
-            }
-            if let currentCarbs, let estimate = summary.neededEstimate(forCarbs: currentCarbs) {
-                line += " · " + String(
-                    format: String(
-                        localized: "this portion ≈ %@ U",
-                        comment: "Meal response: estimated insulin for the current portion from past meals"
-                    ),
-                    unitsText(estimate)
-                )
-            }
-            return line
         }
 
         /// Everything the card leaves out to stay short, for the info button.
@@ -293,6 +332,120 @@ extension AIInsights {
 
         private func signedUnits(_ value: Double) -> String {
             String(format: "%+.1f", value)
+        }
+    }
+
+    struct StatTileItem: Identifiable {
+        let id: String
+        let systemImage: String
+        let value: String
+        let caption: String
+        var tint: Color = .accentColor
+    }
+
+    /// Small tiles of icon, value and caption, wrapping to as many columns as fit.
+    struct StatTileGrid: View {
+        let items: [StatTileItem]
+
+        private let columns = [GridItem(.adaptive(minimum: 92), spacing: 6, alignment: .leading)]
+
+        var body: some View {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
+                ForEach(items) { item in
+                    StatTile(item: item)
+                }
+            }
+        }
+    }
+
+    struct StatTile: View {
+        let item: StatTileItem
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Image(systemName: item.systemImage)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(item.tint)
+                    Text(item.value)
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                Text(item.caption)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8).fill(item.tint.opacity(0.12)))
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    /// Time below, in and above range as one bar: red, green and orange, with the share inside each part that is
+    /// wide enough for it.
+    struct TimeInRangeBar: View {
+        let below: Int
+        let inRange: Int
+        let above: Int
+
+        static func tint(forInRange percent: Int) -> Color {
+            if percent >= 70 { return .green }
+            if percent >= 50 { return .orange }
+            return .red
+        }
+
+        private struct Part: Identifiable {
+            let id: String
+            let percent: Int
+            let color: Color
+        }
+
+        private var parts: [Part] {
+            [
+                Part(id: "below", percent: below, color: .red),
+                Part(id: "in", percent: inRange, color: .green),
+                Part(id: "above", percent: above, color: .orange)
+            ].filter { $0.percent > 0 }
+        }
+
+        var body: some View {
+            GeometryReader { proxy in
+                let total = max(1, parts.reduce(0) { $0 + $1.percent })
+                HStack(spacing: 0) {
+                    ForEach(parts) { part in
+                        let width = proxy.size.width * CGFloat(part.percent) / CGFloat(total)
+                        ZStack {
+                            Rectangle()
+                                .fill(part.color.opacity(0.85))
+                            if width >= 30 {
+                                Text("\(part.percent)%")
+                                    .font(.caption2.weight(.bold))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.white)
+                            }
+                        }
+                        .frame(width: width)
+                    }
+                }
+            }
+            .frame(height: 18)
+            .clipShape(Capsule())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(String(
+                format: String(
+                    localized: "%d%% below range, %d%% in range, %d%% above range",
+                    comment: "Time in range bar accessibility label"
+                ),
+                below,
+                inRange,
+                above
+            ))
         }
     }
 
