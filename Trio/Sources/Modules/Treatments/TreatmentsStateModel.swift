@@ -360,7 +360,9 @@ extension Treatments {
             fat = min(Decimal(handoff.fat), maxFat)
             protein = min(Decimal(handoff.protein), maxProtein)
             note = String(handoff.note.prefix(25))
-            date = handoff.createdAt
+            // `date` stays as it is: `handoff.createdAt` is when FoodFinder sent the meal, and any `date` more
+            // than a second away from `defaultDate` makes the calculator treat the meal as backdated and leave
+            // its carbs out of the recommendation.
 
             if fat > 0 || protein > 0 {
                 useFPUconversion = true
@@ -373,8 +375,12 @@ extension Treatments {
                 useSuperBolus = false
             }
 
-            insulinCalculated = await calculateInsulin()
+            // Same order as typed carbs: simulate the meal first so minPredBG and COB include it, then
+            // recommend. The initial determination run would otherwise publish a result without the meal.
+            determinationUpdateTask?.cancel()
             await updateForecasts()
+            guard !Task.isCancelled else { return }
+            insulinCalculated = await calculateInsulin()
         }
 
         private func registerObservers() {
