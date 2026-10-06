@@ -156,10 +156,6 @@ extension AIInsights {
         func withdraw(mealIDs: [UUID]) async -> Bool
     }
 
-    extension MealCompanionTransport {
-        func withdraw(mealIDs _: [UUID]) async -> Bool { true }
-    }
-
     // MARK: - Settings (opt-in, default OFF)
 
     /// CloudKit record contract for `pov-it/meals-companion`. Keep field names
@@ -1856,4 +1852,8 @@ extension AIInsights {
             }
         #endif
     }
+}
+
+extension AIInsights.MealCompanionTransport {
+    func withdraw(mealIDs _: [UUID]) async -> Bool { true }
 }
