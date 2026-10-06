@@ -297,6 +297,66 @@ struct MealGalleryShareTests {
         defaults.removePersistentDomain(forName: suite)
     }
 
+    @Test("Library folders take over saved-meal folders and gallery groups without losing any")
+    func libraryFolderMigration() {
+        let suite = "MealGalleryShareTests.library.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let saved = AIInsights.SavedMealFolderStore(defaults: defaults)
+        saved.setFolder("Pasta", forMealKey: "pasta pesto")
+        saved.addFolder("Empty")
+        let photographed = item(name: "Pasta Pesto", tags: ["Weekday", "pasta"])
+        let unnamed = AIInsights.MealGalleryStore.GalleryItem(
+            id: UUID(),
+            date: Date(),
+            mealName: nil,
+            totalCarbs: 20,
+            thumbnailFilename: "x.jpg",
+            tags: ["Snacks"]
+        )
+
+        let store = AIInsights.MealFolderStore(defaults: defaults)
+        store.migrateIfNeeded(galleryItems: [photographed, unnamed], galleryGroupNames: ["Party"])
+
+        #expect(store.folderNames() == ["Empty", "Party", "Pasta", "Snacks", "Weekday"])
+        #expect(store.folders(forMemberKey: "pasta pesto") == ["Pasta", "Weekday"])
+        #expect(store.folders(forMemberKey: AIInsights.MealFolderStore.memberKey(for: unnamed)) == ["Snacks"])
+        #expect(saved.assignments() == ["pasta pesto": "Pasta"])
+
+        store.deleteFolder("Snacks")
+        store.migrateIfNeeded(galleryItems: [unnamed], galleryGroupNames: [])
+        #expect(!store.folderNames().contains("Snacks"))
+
+        store.renameFolder(from: "pasta", to: "Noodles")
+        #expect(store.folders(forMemberKey: "pasta pesto") == ["Noodles", "Weekday"])
+        store.toggle("Weekday", forMemberKey: "pasta pesto")
+        #expect(store.folders(forMemberKey: "pasta pesto") == ["Noodles"])
+        defaults.removePersistentDomain(forName: suite)
+    }
+
+    @Test("A meal without a photo is never sent to the companion")
+    func companionSkipsMealsWithoutPhoto() async throws {
+        final class Recorder: AIInsights.MealCompanionTransport, @unchecked Sendable {
+            var published: [UUID] = []
+            func publish(_ record: AIInsights.SharedMealRecord) async {
+                published.append(record.payload.id)
+            }
+        }
+        let suite = "MealGalleryShareTests.photoOnly.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let recorder = Recorder()
+        let publisher = AIInsights.MealCompanionPublisher(defaults: defaults, transports: [recorder])
+        publisher.isShareEnabled = true
+        let payload = AIInsights.SharedMealPayload(id: UUID(), date: Date(), mealName: "Soup", thumbnailFilename: nil, carbs: 20)
+
+        publisher.publish(payload: payload, thumbnailJPEG: nil)
+        publisher.publish(payload: payload, thumbnailJPEG: Data())
+        try await Task.sleep(nanoseconds: 300_000_000)
+        #expect(recorder.published.isEmpty)
+        defaults.removePersistentDomain(forName: suite)
+    }
+
     // MARK: - Companion share privacy
 
     @Test("Share toggle defaults off")
