@@ -531,13 +531,9 @@ extension AIInsights {
             // store is idempotent (already-archived ids are skipped) and does its
             // downscale + write off the main thread, so this is cheap here.
             AIInsights.MealGalleryStore.shared.archive(recentResults)
-            // Companion share (opt-in, default off) for meals that have no photo
-            // and therefore never enter the gallery archive. Photographed meals
-            // are published from `archive` after the thumbnail hits disk.
-            // Local-first: the publisher returns immediately if sharing is off.
-            for result in recentResults where result.imageData == nil || result.imageData?.isEmpty == true {
-                AIInsights.MealCompanionPublisher.shared.publish(result: result, thumbnailJPEG: nil)
-            }
+            // Companion share (opt-in, default off) only carries photographed meals; `archive` publishes them once
+            // the photo is on disk. Local-first: the publisher returns immediately if sharing is off.
+            AIInsights.MealCompanionPublisher.shared.withdrawPhotolessMealsIfNeeded()
         }
 
         private func loadDraftDescription() {
