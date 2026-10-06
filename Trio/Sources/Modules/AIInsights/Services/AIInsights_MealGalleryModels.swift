@@ -195,9 +195,8 @@ extension AIInsights {
         }
     }
 
-    /// Folders for the saved meals on the FoodFinder start page. A meal is filed by its normalized name
-    /// (`MealEventIdentity.normalized`), so a kept FoodFinder meal and a Trio preset with the same name share a folder.
-    /// Stays on this phone, like the gallery groups.
+    /// The saved-meal folders of earlier versions, one folder per normalized meal name. Only read by
+    /// `MealFolderStore.migrateIfNeeded`; the meal library files meals in `MealFolderStore`.
     struct SavedMealFolderStore {
         static let assignmentsKey = "ai_foodfinder_saved_meal_folders"
         static let namesKey = "ai_foodfinder_saved_meal_folder_names"
@@ -265,6 +264,154 @@ extension AIInsights {
         }
     }
 
+    /// The one folder model of the meal library: saved meals, photographed meals and recent meals are filed in the
+    /// same folders. A meal is filed by `memberKey` (its normalized name, as the saved-meal folders did), so every
+    /// photo of "Pasta pesto" and the saved "Pasta pesto" share their folders. A meal can be in several folders.
+    /// Stays on this phone.
+    ///
+    /// Replaces the saved-meal folders (`SavedMealFolderStore`) and the gallery groups (`GalleryItem.tags`). Both are
+    /// copied in once by `migrateIfNeeded`; their stored data is left as it was.
+    struct MealFolderStore {
+        static let namesKey = "ai_meal_library_folder_names"
+        static let assignmentsKey = "ai_meal_library_folder_assignments"
+        static let migratedKey = "ai_meal_library_folders_migrated_v1"
+
+        let defaults: UserDefaults
+
+        init(defaults: UserDefaults = .standard) {
+            self.defaults = defaults
+        }
+
+        /// The key a meal is filed under: its name, else its description, else its ingredient names, normalized like
+        /// `MealEventIdentity`. A meal with none of these only matches itself.
+        static func memberKey(mealName: String?, mealDescription: String? = nil, itemNames: [String], id: UUID) -> String {
+            let candidates = [mealName ?? "", mealDescription ?? "", itemNames.joined(separator: ", ")]
+            for candidate in candidates {
+                let key = MealEventIdentity.normalized(candidate)
+                if !key.isEmpty { return key }
+            }
+            return "meal:" + id.uuidString.lowercased()
+        }
+
+        static func memberKey(for result: FoodAnalysisResult) -> String {
+            memberKey(
+                mealName: result.mealName,
+                mealDescription: result.mealDescription,
+                itemNames: result.items.map(\.name),
+                id: result.id
+            )
+        }
+
+        /// Folders per member key.
+        func assignments() -> [String: [String]] {
+            defaults.dictionary(forKey: Self.assignmentsKey) as? [String: [String]] ?? [:]
+        }
+
+        /// Stored names plus any name still in use, deduplicated ignoring case and accents, sorted.
+        func folderNames() -> [String] {
+            let stored = defaults.stringArray(forKey: Self.namesKey) ?? []
+            return SavedMealFolderStore.deduplicated(stored + assignments().values.flatMap { $0 })
+        }
+
+        func folders(forMemberKey key: String) -> [String] {
+            assignments()[key] ?? []
+        }
+
+        /// Adds a folder and returns its name as stored (an existing folder's spelling when it matches).
+        @discardableResult
+        func addFolder(_ raw: String) -> String? {
+            let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            let names = folderNames()
+            if let existing = names.first(where: { SavedMealFolderStore.same($0, name) }) {
+                return existing
+            }
+            defaults.set(SavedMealFolderStore.deduplicated(names + [name]), forKey: Self.namesKey)
+            return name
+        }
+
+        /// Files the meal in exactly `folders`; an empty list takes it out of every folder.
+        func setFolders(_ folders: [String], forMemberKey key: String) {
+            guard !key.isEmpty else { return }
+            let names = SavedMealFolderStore.deduplicated(folders.compactMap { addFolder($0) })
+            var current = assignments()
+            current[key] = names.isEmpty ? nil : names
+            defaults.set(current, forKey: Self.assignmentsKey)
+        }
+
+        func isInFolder(_ folder: String, memberKey key: String) -> Bool {
+            folders(forMemberKey: key).contains { SavedMealFolderStore.same($0, folder) }
+        }
+
+        /// Puts the meal in `folder`, or takes it out when it is already there.
+        func toggle(_ folder: String, forMemberKey key: String) {
+            var folders = folders(forMemberKey: key)
+            if folders.contains(where: { SavedMealFolderStore.same($0, folder) }) {
+                folders.removeAll { SavedMealFolderStore.same($0, folder) }
+            } else {
+                folders.append(folder)
+            }
+            setFolders(folders, forMemberKey: key)
+        }
+
+        func renameFolder(from old: String, to raw: String) {
+            let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, name != old else { return }
+            let names = folderNames().filter { !SavedMealFolderStore.same($0, old) }
+            defaults.set(SavedMealFolderStore.deduplicated(names + [name]), forKey: Self.namesKey)
+            var current = assignments()
+            for (key, folders) in current {
+                guard folders.contains(where: { SavedMealFolderStore.same($0, old) }) else { continue }
+                current[key] = SavedMealFolderStore.deduplicated(
+                    folders.map { SavedMealFolderStore.same($0, old) ? name : $0 }
+                )
+            }
+            defaults.set(current, forKey: Self.assignmentsKey)
+        }
+
+        /// Removes the folder; its meals stay in the library, just not in this folder.
+        func deleteFolder(_ name: String) {
+            defaults.set(folderNames().filter { !SavedMealFolderStore.same($0, name) }, forKey: Self.namesKey)
+            var current = assignments()
+            for (key, folders) in current {
+                let kept = folders.filter { !SavedMealFolderStore.same($0, name) }
+                current[key] = kept.isEmpty ? nil : kept
+            }
+            defaults.set(current, forKey: Self.assignmentsKey)
+        }
+
+        /// Copies the saved-meal folders and the gallery groups into this store, once. Every folder name of either is
+        /// kept, a saved meal keeps its folder and a gallery meal keeps all its groups; meals filed in both get both.
+        func migrateIfNeeded(galleryItems: [MealGalleryStore.GalleryItem], galleryGroupNames: [String]) {
+            guard !defaults.bool(forKey: Self.migratedKey) else { return }
+            let saved = SavedMealFolderStore(defaults: defaults)
+
+            var current = assignments()
+            func file(_ folders: [String], under key: String) {
+                guard !key.isEmpty, !folders.isEmpty else { return }
+                current[key] = SavedMealFolderStore.deduplicated((current[key] ?? []) + folders)
+            }
+            for (key, folder) in saved.assignments() {
+                file([folder], under: key)
+            }
+            for item in galleryItems where !item.tags.isEmpty {
+                file(item.tags, under: Self.memberKey(for: item))
+            }
+
+            let names = (defaults.stringArray(forKey: Self.namesKey) ?? [])
+                + saved.folderNames()
+                + galleryGroupNames
+                + current.values.flatMap { $0 }
+            defaults.set(SavedMealFolderStore.deduplicated(names), forKey: Self.namesKey)
+            defaults.set(current, forKey: Self.assignmentsKey)
+            defaults.set(true, forKey: Self.migratedKey)
+        }
+
+        static func memberKey(for item: MealGalleryStore.GalleryItem) -> String {
+            memberKey(mealName: item.mealName, itemNames: item.items.map(\.name), id: item.id)
+        }
+    }
+
     /// How the gallery root is presented.
     enum GalleryBrowseMode: String, CaseIterable, Identifiable {
         case all
@@ -280,7 +427,7 @@ extension AIInsights {
             case .mealSlot:
                 return String(localized: "By meal", comment: "Meal gallery browse-by-slot mode")
             case .groups:
-                return String(localized: "Groups", comment: "Meal gallery browse-by-group mode")
+                return String(localized: "Folders", comment: "Meal library browse-by-folder mode")
             }
         }
     }

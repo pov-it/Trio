@@ -14,7 +14,7 @@ extension AIInsights {
         @FocusState private var isTextFieldFocused: Bool
         @State private var isComposerExpanded: Bool = false
         @State private var isEditingTotals = false
-        // Feature M — presents the meal-photo gallery from the empty FoodFinder screen.
+        /// Presents the meal library (saved, photographed and recent meals).
         @State private var showMealGallery = false
         @State private var editingFoodItem: FoodItem?
         @State private var selectedSourceItem: FoodItem?
@@ -26,14 +26,6 @@ extension AIInsights {
         @State private var dragFrozenKeyboardLift: CGFloat = 0
         @Namespace private var composerNamespace
         @State private var pendingGalleryBolus: FoodAnalysisResult?
-        /// Saved-meal folder shown on the start page; nil shows every folder.
-        @State private var selectedSavedFolder: String?
-        @State private var savedFolderAssignments: [String: String] = [:]
-        @State private var savedFolderNames: [String] = []
-        @State private var isAddingSavedFolder = false
-        @State private var newSavedFolderName = ""
-        /// Meal to file in the folder being created, when it was started from a meal.
-        @State private var newSavedFolderMealKey: String?
 
         @FetchRequest(
             entity: MealPresetStored.entity(),
@@ -73,6 +65,16 @@ extension AIInsights {
                         }
                     }
                     ToolbarItem(placement: .topBarTrailing) {
+                        if let result = state.currentResult {
+                            MealShareButton(content: MealShareContent(
+                                result: result,
+                                title: mealTitle(for: result),
+                                subtitle: mealPortion(for: result),
+                                photo: result.imageData
+                            ))
+                        }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             state.clearResult(resetDraft: true)
                         } label: {
@@ -81,8 +83,7 @@ extension AIInsights {
                         }
                     }
                 }
-                // Feature M — on the default/empty FoodFinder screen, offer the
-                // meal-photo gallery in the top-right. Separate ToolbarItem from
+                // On the start page, the meal library in the top-right. Separate ToolbarItem from
                 // the "New" button above, which only shows when a result exists.
                 if state.currentResult == nil {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -91,7 +92,7 @@ extension AIInsights {
                         } label: {
                             Image(systemName: "photo.stack")
                         }
-                        .accessibilityLabel(String(localized: "Meal gallery", comment: "Meal gallery button accessibility label"))
+                        .accessibilityLabel(String(localized: "Meal library", comment: "Meal library navigation title"))
                     }
                 }
             }
@@ -104,6 +105,9 @@ extension AIInsights {
             }) {
                 AIInsights.MealGalleryView(
                     fallbackResults: state.recentResults,
+                    savedMeals: savedMealEntries.map { entry in
+                        LibrarySavedMeal(id: entry.id, result: entry.result, isKept: entry.isKept)
+                    },
                     onOpenInFoodFinder: { result in
                         showMealGallery = false
                         state.currentResult = result
@@ -111,6 +115,14 @@ extension AIInsights {
                     onUseInBolusCalculator: { result in
                         pendingGalleryBolus = result
                         showMealGallery = false
+                    },
+                    onSaveMeal: { result in
+                        saveMeal(result)
+                    },
+                    onRemoveSavedMeal: { id in
+                        if let entry = savedMealEntries.first(where: { $0.id == id }) {
+                            removeSavedMeal(entry)
+                        }
                     },
                     units: state.settingsManager.settings.units
                 )
@@ -284,8 +296,8 @@ extension AIInsights {
                     emptyStateView(compact: !saved.isEmpty || !recent.isEmpty)
                         .frame(maxWidth: .infinity)
 
-                    if !saved.isEmpty {
-                        savedMealsSection(saved)
+                    if !saved.isEmpty || !recent.isEmpty {
+                        mealLibraryCard(savedCount: saved.count)
                     }
 
                     if !recent.isEmpty {
@@ -305,22 +317,48 @@ extension AIInsights {
             }
             .scrollDismissesKeyboard(.interactively)
             .background(appState.trioBackgroundColor(for: colorScheme))
-            .onAppear(perform: reloadSavedFolders)
-            .alert(
-                String(localized: "New folder", comment: "FoodFinder new saved-meal folder alert title"),
-                isPresented: $isAddingSavedFolder
-            ) {
-                TextField(
-                    String(localized: "Folder name", comment: "FoodFinder new saved-meal folder name field"),
-                    text: $newSavedFolderName
+        }
+
+        /// Opens the meal library, where the saved meals, their folders and every earlier meal are.
+        private func mealLibraryCard(savedCount: Int) -> some View {
+            Button {
+                showMealGallery = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "photo.stack")
+                        .font(.title3)
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(localized: "Meal library", comment: "Meal library navigation title"))
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        Text(
+                            savedCount > 0
+                                ? String(
+                                    localized: "\(savedCount) saved · folders · all meals",
+                                    comment: "FoodFinder meal library entry subtitle with saved-meal count"
+                                )
+                                : String(
+                                    localized: "Folders and all meals, searchable by ingredient",
+                                    comment: "FoodFinder meal library entry subtitle"
+                                )
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white)
                 )
-                Button(String(localized: "Add", comment: "Add meal gallery group")) {
-                    addSavedFolder()
-                }
-                Button(String(localized: "Cancel", comment: "Cancel button"), role: .cancel) {
-                    newSavedFolderMealKey = nil
-                }
             }
+            .buttonStyle(.plain)
         }
 
         // MARK: - Meal detail screen (in-place swap, not nav push)
@@ -1295,235 +1333,10 @@ extension AIInsights {
             return entries
         }
 
-        // MARK: Saved-meal folders
-
-        private struct SavedMealGroup: Identifiable {
-            let id: String
-            /// Empty when the grid needs no header of its own.
-            let title: String
-            let entries: [SavedMealEntry]
-        }
-
-        private func savedMealKey(_ entry: SavedMealEntry) -> String {
-            MealEventIdentity.normalized(mealTitle(for: entry.result))
-        }
-
-        private func savedFolder(of entry: SavedMealEntry) -> String? {
-            savedFolderAssignments[savedMealKey(entry)]
-        }
-
-        private func isInFolder(_ entry: SavedMealEntry, _ folder: String) -> Bool {
-            guard let current = savedFolder(of: entry) else { return false }
-            return SavedMealFolderStore.same(current, folder)
-        }
-
-        /// One grid per folder, then the meals without a folder; one plain grid while nothing is filed.
-        private func savedMealGroups(_ entries: [SavedMealEntry]) -> [SavedMealGroup] {
-            if let selected = selectedSavedFolder {
-                return [SavedMealGroup(
-                    id: "folder-" + selected,
-                    title: "",
-                    entries: entries.filter { entry in isInFolder(entry, selected) }
-                )]
-            }
-            guard entries.contains(where: { entry in savedFolder(of: entry) != nil }) else {
-                return [SavedMealGroup(id: "all", title: "", entries: entries)]
-            }
-            var groups: [SavedMealGroup] = []
-            for name in savedFolderNames {
-                let inFolder = entries.filter { entry in isInFolder(entry, name) }
-                if !inFolder.isEmpty {
-                    groups.append(SavedMealGroup(id: "folder-" + name, title: name, entries: inFolder))
-                }
-            }
-            let loose = entries.filter { entry in savedFolder(of: entry) == nil }
-            if !loose.isEmpty {
-                groups.append(SavedMealGroup(
-                    id: "loose",
-                    title: String(localized: "No folder", comment: "FoodFinder saved meals without a folder"),
-                    entries: loose
-                ))
-            }
-            return groups
-        }
-
-        private func savedMealsSection(_ saved: [SavedMealEntry]) -> some View {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(String(localized: "Saved Meals", comment: "Saved meal presets section header"))
-                        .font(.headline)
-                    Text("\(saved.count)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        newSavedFolderMealKey = nil
-                        newSavedFolderName = ""
-                        isAddingSavedFolder = true
-                    } label: {
-                        Image(systemName: "folder.badge.plus")
-                    }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel(String(localized: "New folder", comment: "FoodFinder new saved-meal folder alert title"))
-                }
-
-                if !savedFolderNames.isEmpty {
-                    savedFolderChips
-                }
-
-                ForEach(savedMealGroups(saved)) { group in
-                    FoodFinderMealGridSection(title: group.title, count: group.entries.count, isSubsection: true) {
-                        ForEach(group.entries) { entry in
-                            savedMealTile(entry)
-                        }
-                    }
-                }
-            }
-        }
-
-        private var savedFolderChips: some View {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    savedFolderChip(
-                        String(localized: "All", comment: "Meal gallery browse-all mode"),
-                        isSelected: selectedSavedFolder == nil
-                    ) {
-                        selectedSavedFolder = nil
-                    }
-                    ForEach(savedFolderNames, id: \.self) { name in
-                        savedFolderChip(name, isSelected: selectedSavedFolder.map { SavedMealFolderStore.same($0, name) } ?? false) {
-                            selectedSavedFolder = name
-                        }
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                deleteSavedFolder(name)
-                            } label: {
-                                Label(
-                                    String(localized: "Delete folder", comment: "FoodFinder delete saved-meal folder"),
-                                    systemImage: "trash"
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        private func savedFolderChip(_ title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-            Button(action: action) {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.15)))
-                    .foregroundStyle(isSelected ? Color.white : Color.primary)
-            }
-            .buttonStyle(.plain)
-        }
-
-        @ViewBuilder private func savedFolderMenu(for entry: SavedMealEntry) -> some View {
-            let current = savedFolder(of: entry)
-            Menu {
-                ForEach(savedFolderNames, id: \.self) { name in
-                    Button {
-                        setSavedFolder(name, for: entry)
-                    } label: {
-                        if isInFolder(entry, name) {
-                            Label(name, systemImage: "checkmark")
-                        } else {
-                            Text(name)
-                        }
-                    }
-                }
-                Button {
-                    newSavedFolderMealKey = savedMealKey(entry)
-                    newSavedFolderName = ""
-                    isAddingSavedFolder = true
-                } label: {
-                    Label(
-                        String(localized: "New folder…", comment: "FoodFinder new saved-meal folder from a meal"),
-                        systemImage: "folder.badge.plus"
-                    )
-                }
-                if current != nil {
-                    Button {
-                        setSavedFolder(nil, for: entry)
-                    } label: {
-                        Label(
-                            String(localized: "Remove from folder", comment: "FoodFinder take a saved meal out of its folder"),
-                            systemImage: "folder.badge.minus"
-                        )
-                    }
-                }
-            } label: {
-                Label(
-                    String(localized: "Move to folder", comment: "FoodFinder move a saved meal to a folder"),
-                    systemImage: "folder"
-                )
-            }
-        }
-
-        private func reloadSavedFolders() {
-            let store = SavedMealFolderStore()
-            savedFolderAssignments = store.assignments()
-            savedFolderNames = store.folderNames()
-            if let selected = selectedSavedFolder, !savedFolderNames.contains(where: { SavedMealFolderStore.same($0, selected) }) {
-                selectedSavedFolder = nil
-            }
-        }
-
-        private func addSavedFolder() {
-            let store = SavedMealFolderStore()
-            if let name = store.addFolder(newSavedFolderName), let key = newSavedFolderMealKey {
-                store.setFolder(name, forMealKey: key)
-            }
-            newSavedFolderMealKey = nil
-            newSavedFolderName = ""
-            reloadSavedFolders()
-        }
-
-        private func setSavedFolder(_ folder: String?, for entry: SavedMealEntry) {
-            SavedMealFolderStore().setFolder(folder, forMealKey: savedMealKey(entry))
-            reloadSavedFolders()
-        }
-
-        private func deleteSavedFolder(_ name: String) {
-            SavedMealFolderStore().deleteFolder(name)
-            if let selected = selectedSavedFolder, SavedMealFolderStore.same(selected, name) {
-                selectedSavedFolder = nil
-            }
-            reloadSavedFolders()
-        }
-
         private func isSavedMeal(_ result: FoodAnalysisResult) -> Bool {
             if state.frequentMeals.contains(where: { $0.id == result.id }) { return true }
             let key = MealEventIdentity.normalized(mealTitle(for: result))
             return !key.isEmpty && savedMealEntries.contains { MealEventIdentity.normalized(mealTitle(for: $0.result)) == key }
-        }
-
-        private func savedMealTile(_ entry: SavedMealEntry) -> some View {
-            Button {
-                state.currentResult = entry.result
-            } label: {
-                FoodFinderMealTile(
-                    title: mealTitle(for: entry.result),
-                    carbs: entry.result.totalCarbs,
-                    photoID: entry.isKept ? entry.result.id : nil,
-                    inlineImage: entry.result.imageData
-                )
-            }
-            .buttonStyle(.plain)
-            .contextMenu {
-                savedFolderMenu(for: entry)
-                Button(role: .destructive) {
-                    removeSavedMeal(entry)
-                } label: {
-                    Label(
-                        String(localized: "Remove from saved meals", comment: "Remove a meal from the FoodFinder saved meals"),
-                        systemImage: "trash"
-                    )
-                }
-            }
         }
 
         private func recentMealTile(_ result: FoodAnalysisResult) -> some View {
@@ -1792,6 +1605,8 @@ extension AIInsights {
                 calories: kcal
             )
             return FoodAnalysisResult(
+                // Stable, so the library keeps the preset's detail and folders across redraws.
+                id: MealEventIdentity.mealID(forKey: "preset:" + preset.objectID.uriRepresentation().absoluteString),
                 items: [item],
                 rawResponse: nil,
                 timestamp: Date(),
