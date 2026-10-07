@@ -2,18 +2,18 @@
 //  AIInsightsMealGalleryView.swift
 //  Trio
 //
-//  The FoodFinder meal library: saved meals (kept FoodFinder meals and Trio
-//  meal presets), every photographed meal from the durable `MealGalleryStore`
-//  and the recent FoodFinder meals, in one screen. Tapping a meal opens a
-//  detail sheet with the larger image, meal name, timestamp, macros, folders,
-//  a share card and actions to reload FoodFinder or `FoodBolusHandoff`
-//  ("Use in Bolus Calculator").
+//  The FoodFinder meal library, shown on the FoodFinder start page: saved
+//  meals (kept FoodFinder meals and Trio meal presets), every photographed
+//  meal from the durable `MealGalleryStore` and the recent FoodFinder meals.
+//  Tapping a meal opens a detail sheet with the larger image, meal name,
+//  timestamp, macros, folders, a share card and actions to reload FoodFinder
+//  or `FoodBolusHandoff` ("Use in Bolus Calculator").
 //
-//  Browse modes: everything (saved, then all meals newest first), auto folders
-//  by meal slot (local hour of `date`), and the folders of `MealFolderStore`,
-//  which saved and photographed meals share. Search matches the meal name and
-//  its ingredients; filters (date, carbs, folders/slot) apply on top of every
-//  mode. Local-first — never waits on sync.
+//  Chips narrow the meals to the automatic Drinks folder, a folder of
+//  `MealFolderStore` (shared by saved and photographed meals) or a meal slot
+//  (local hour of `date`). Search matches the meal name and its ingredients;
+//  filters (date, carbs, folders/slot) apply on top. Local-first — never
+//  waits on sync.
 //
 
 import SwiftUI
@@ -28,7 +28,20 @@ extension AIInsights {
         let isKept: Bool
     }
 
-    struct MealGalleryView: View {
+    /// What the chips above the meals narrow the library to.
+    enum LibraryScope: Hashable {
+        case all
+        /// The automatic folder of `DrinkClassifier`.
+        case drinks
+        case slot(MealSlot)
+        case folder(String)
+    }
+
+    /// The meal library on the FoodFinder start page: a search bar and chips, the saved meals for quick tapping,
+    /// then every meal newest first. Saved meals (kept FoodFinder meals and Trio meal presets), photographed meals
+    /// from `MealGalleryStore` and recent FoodFinder meals share the folders of `MealFolderStore`. Tapping a meal
+    /// opens `MealDetailView`. Lives inside the start page's scroll view, so it has no scroll view of its own.
+    struct MealLibrarySection: View {
         /// Recent FoodFinder results: shown next to the archived meals (also the ones without a photo) and the
         /// preferred full `FoodItem` list when re-bolusing a recent meal.
         let fallbackResults: [FoodAnalysisResult]
@@ -38,17 +51,23 @@ extension AIInsights {
         var onSaveMeal: ((FoodAnalysisResult) -> Void)? = nil
         /// Removes the saved meal with this `LibrarySavedMeal.id`.
         var onRemoveSavedMeal: ((String) -> Void)? = nil
+        /// Deletes a recent FoodFinder meal.
+        var onDeleteRecent: ((FoodAnalysisResult) -> Void)? = nil
         /// Glucose units for the meal response charts.
         var units: GlucoseUnits = .mgdL
+        var searchFocus: FocusState<Bool>.Binding
 
-        @Environment(\.dismiss) private var dismiss
+        @Environment(\.colorScheme) private var colorScheme
 
         /// Meals from the gallery archive, newest first.
         @State private var archivedMeals: [DisplayMeal] = []
         @State private var selectedMeal: DisplayMeal?
+        /// Meal to hand to the bolus calculator once its detail sheet is gone.
+        @State private var pendingBolus: FoodAnalysisResult?
         @State private var isLoading = true
         @State private var filter = GalleryFilter()
-        @State private var browseMode: GalleryBrowseMode = .all
+        @State private var scope: LibraryScope = .all
+        @AppStorage("ai_foodfinder_saved_meals_expanded") private var savedExpanded = false
         @State private var showFilters = false
         @State private var showShareSettings = false
         @State private var shareEnabled = MealCompanionPublisher.shared.isShareEnabled
@@ -60,6 +79,10 @@ extension AIInsights {
         @State private var newFolderMemberKey: String?
         @State private var renamingFolder: String?
         @State private var renamedFolderName: String = ""
+
+        private static let savedTileWidth: CGFloat = 104
+        private static let savedRowHeight: CGFloat = 152
+        private static let savedMaxRows = 3
 
         // MARK: - View model
 
@@ -82,6 +105,8 @@ extension AIInsights {
             /// or the fallback recent result.
             let items: [ItemCarb]
             let snapshots: [GalleryFoodSnapshot]
+            /// In the automatic Drinks folder.
+            var isDrink: Bool = false
             /// Set for the entries of the saved meals.
             var savedID: String? = nil
             /// A Trio meal preset: no meal time, so date filters and meal slots do not apply.
@@ -175,6 +200,17 @@ extension AIInsights {
             folders(of: meal).contains { SavedMealFolderStore.same($0, folder) }
         }
 
+        private var isSearching: Bool {
+            searchFocus.wrappedValue || !filter.normalizedQuery.isEmpty
+        }
+
+        /// Filters beyond the search text, set in the filter sheet.
+        private var hasSheetFilters: Bool {
+            var other = filter
+            other.nameQuery = ""
+            return other.isActive
+        }
+
         private func matches(_ meal: DisplayMeal) -> Bool {
             var effective = filter
             if meal.isUndated {
@@ -182,92 +218,67 @@ extension AIInsights {
                 effective.endDate = nil
                 effective.mealSlot = nil
             }
-            return effective.matches(displayMealAsItem(meal))
+            guard effective.matches(displayMealAsItem(meal)) else { return false }
+            switch scope {
+            case .all:
+                return true
+            case .drinks:
+                return meal.isDrink
+            case let .slot(slot):
+                return !meal.isUndated && meal.mealSlot == slot
+            case let .folder(name):
+                return isInFolder(meal, name)
+            }
+        }
+
+        private var visibleSavedMeals: [DisplayMeal] {
+            savedDisplayMeals.filter(matches)
+        }
+
+        /// Newest first. Saved meals without a meal time only join once something narrows the list.
+        private var listedMeals: [DisplayMeal] {
+            let narrowed = isSearching || hasSheetFilters || scope != .all
+            return (narrowed ? libraryMeals : historyMeals)
+                .filter(matches)
+                .sorted { lhs, rhs in
+                    if lhs.isUndated != rhs.isUndated { return !lhs.isUndated }
+                    return lhs.date > rhs.date
+                }
+        }
+
+        private var cardFill: Color {
+            colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white
         }
 
         // MARK: - Body
 
         var body: some View {
-            NavigationStack {
-                Group {
-                    if isLoading, libraryMeals.isEmpty {
-                        ProgressView()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else if libraryMeals.isEmpty, folderNames.isEmpty {
-                        emptyState
-                    } else {
-                        browseContent
+            VStack(alignment: .leading, spacing: 14) {
+                if !libraryMeals.isEmpty || !folderNames.isEmpty {
+                    searchBar
+                    scopeChips
+                    if hasSheetFilters {
+                        filterChips
                     }
-                }
-                .navigationTitle(String(localized: "Meal library", comment: "Meal library navigation title"))
-                .navigationBarTitleDisplayMode(.inline)
-                .searchable(
-                    text: $filter.nameQuery,
-                    prompt: String(localized: "Search name or ingredient", comment: "Meal library search prompt")
-                )
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Menu {
-                            Button {
-                                showFilters = true
-                            } label: {
-                                Label(
-                                    String(localized: "Filters", comment: "Meal gallery filters button"),
-                                    systemImage: filter.isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle"
-                                )
-                            }
-                            Button {
-                                startNewFolder(for: nil)
-                            } label: {
-                                Label(
-                                    String(localized: "New folder", comment: "FoodFinder new saved-meal folder alert title"),
-                                    systemImage: "folder.badge.plus"
-                                )
-                            }
-                            Button {
-                                showShareSettings = true
-                            } label: {
-                                Label(
-                                    String(localized: "Companion sharing", comment: "Meal gallery companion-share settings"),
-                                    systemImage: shareEnabled ? "person.2.fill" : "person.2"
-                                )
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                        }
-                        .accessibilityLabel(String(localized: "Library options", comment: "Meal library options menu"))
+                    if !isSearching, !visibleSavedMeals.isEmpty {
+                        savedSection(visibleSavedMeals)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                     }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            dismiss()
-                        } label: {
-                            Text(String(localized: "Done", comment: "Close meal gallery button"))
-                        }
-                    }
-                }
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    VStack(spacing: 8) {
-                        Picker(String(localized: "Browse", comment: "Meal gallery browse mode picker"), selection: $browseMode) {
-                            ForEach(GalleryBrowseMode.allCases) { mode in
-                                Text(mode.localizedTitle).tag(mode)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
-
-                        if filter.isActive {
-                            filterChips
-                        }
-                    }
-                    .padding(.bottom, 8)
-                    .background(.bar)
+                    mealsSection(listedMeals)
                 }
             }
+            .animation(.easeInOut(duration: 0.25), value: isSearching)
+            .animation(.easeInOut(duration: 0.25), value: savedExpanded)
+            .animation(.easeInOut(duration: 0.2), value: scope)
             .task {
                 await loadMeals()
             }
-            .sheet(item: $selectedMeal) { meal in
+            .sheet(item: $selectedMeal, onDismiss: {
+                if let result = pendingBolus {
+                    pendingBolus = nil
+                    onUseInBolusCalculator?(result)
+                }
+            }) { meal in
                 MealDetailView(
                     meal: meal,
                     result: preferredResult(for: meal),
@@ -280,10 +291,8 @@ extension AIInsights {
                         onOpenInFoodFinder?(result)
                     },
                     onUseInBolusCalculator: { result in
+                        pendingBolus = result
                         selectedMeal = nil
-                        DispatchQueue.main.async {
-                            onUseInBolusCalculator?(result)
-                        }
                     },
                     onFoldersChanged: { folders in
                         MealFolderStore().setFolders(folders, forMemberKey: meal.memberKey)
@@ -325,7 +334,13 @@ extension AIInsights {
                 )
                 Button(String(localized: "Rename", comment: "Meal library rename folder button")) {
                     if let old = renamingFolder {
-                        MealFolderStore().renameFolder(from: old, to: renamedFolderName)
+                        let store = MealFolderStore()
+                        store.renameFolder(from: old, to: renamedFolderName)
+                        if scope == .folder(old), let renamed = store.folderNames().first(where: {
+                            SavedMealFolderStore.same($0, renamedFolderName.trimmingCharacters(in: .whitespacesAndNewlines))
+                        }) {
+                            scope = .folder(renamed)
+                        }
                         reloadFolders()
                     }
                     renamingFolder = nil
@@ -336,187 +351,266 @@ extension AIInsights {
             }
         }
 
-        @ViewBuilder
-        private var browseContent: some View {
-            switch browseMode {
-            case .all:
-                allMeals
-            case .mealSlot:
-                mealSlotFolders
-            case .groups:
-                folderList
-            }
-        }
+        // MARK: - Search and chips
 
-        /// Saved meals first, then every meal newest first.
-        @ViewBuilder private var allMeals: some View {
-            let saved = savedDisplayMeals.filter(matches)
-            let history = historyMeals.filter(matches)
-            if saved.isEmpty, history.isEmpty {
-                noMatchingMeals
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
-                        if !saved.isEmpty {
-                            FoodFinderMealGridSection(
-                                title: String(localized: "Saved Meals", comment: "Saved meal presets section header"),
-                                count: saved.count
-                            ) {
-                                ForEach(saved) { meal in
-                                    mealTile(meal)
-                                }
-                            }
-                        }
-                        if !history.isEmpty {
-                            FoodFinderMealGridSection(
-                                title: String(localized: "All meals", comment: "Meal library history section header"),
-                                count: history.count
-                            ) {
-                                ForEach(history) { meal in
-                                    mealTile(meal, showsDate: true)
-                                }
-                            }
-                        }
-                    }
-                    .padding(16)
-                }
-            }
-        }
-
-        private var mealSlotFolders: some View {
-            List {
-                ForEach(MealSlot.allCases) { slot in
-                    let slotMeals = historyMeals.filter { $0.mealSlot == slot && matches($0) }
-                    NavigationLink {
-                        mealGrid(slotMeals)
-                            .navigationTitle(slot.localizedTitle)
-                    } label: {
-                        Label {
-                            HStack {
-                                Text(slot.localizedTitle)
-                                Spacer()
-                                Text("\(slotMeals.count)")
-                                    .foregroundStyle(.secondary)
-                            }
-                        } icon: {
-                            Image(systemName: slot.systemImage)
-                        }
-                    }
-                    .disabled(slotMeals.isEmpty)
-                }
-            }
-            .listStyle(.insetGrouped)
-        }
-
-        private var folderList: some View {
-            let visible = libraryMeals.filter(matches)
-            return List {
-                Section {
-                    ForEach(folderNames, id: \.self) { name in
-                        let inFolder = visible.filter { isInFolder($0, name) }
-                        NavigationLink {
-                            mealGrid(inFolder, responseTitle: String(
-                                localized: "Glucose after meals in this group",
-                                comment: "Meal gallery group response card title"
-                            ))
-                            .navigationTitle(name)
+        private var searchBar: some View {
+            HStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField(
+                        String(localized: "Search name or ingredient", comment: "Meal library search prompt"),
+                        text: $filter.nameQuery
+                    )
+                    .focused(searchFocus)
+                    .submitLabel(.search)
+                    .autocorrectionDisabled()
+                    if !filter.nameQuery.isEmpty {
+                        Button {
+                            filter.nameQuery = ""
                         } label: {
-                            Label {
-                                HStack {
-                                    Text(name)
-                                    Spacer()
-                                    Text("\(inFolder.count)")
-                                        .foregroundStyle(.secondary)
-                                }
-                            } icon: {
-                                Image(systemName: "folder")
-                            }
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
                         }
-                        .contextMenu {
-                            folderActions(name)
-                        }
-                        .swipeActions(edge: .trailing) {
-                            folderActions(name)
-                        }
-                    }
-                    let loose = visible.filter { folders(of: $0).isEmpty }
-                    NavigationLink {
-                        mealGrid(loose)
-                            .navigationTitle(String(localized: "No folder", comment: "FoodFinder saved meals without a folder"))
-                    } label: {
-                        Label {
-                            HStack {
-                                Text(String(localized: "No folder", comment: "FoodFinder saved meals without a folder"))
-                                Spacer()
-                                Text("\(loose.count)")
-                                    .foregroundStyle(.secondary)
-                            }
-                        } icon: {
-                            Image(systemName: "tray")
-                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(String(localized: "Clear search", comment: "Meal library clear search"))
                     }
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(cardFill))
 
-                Section {
-                    HStack {
-                        TextField(
-                            String(localized: "Folder name", comment: "FoodFinder new saved-meal folder name field"),
-                            text: $newFolderName
-                        )
-                        Button(String(localized: "Add", comment: "Add meal gallery group")) {
-                            newFolderMemberKey = nil
-                            addFolder()
-                        }
-                        .disabled(newFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if isSearching {
+                    Button(String(localized: "Cancel", comment: "Cancel button")) {
+                        filter.nameQuery = ""
+                        searchFocus.wrappedValue = false
                     }
-                } footer: {
-                    Text(String(
-                        localized: "Saved and photographed meals share these folders, which stay on this phone. Meal folders (breakfast / lunch / dinner / other) are assigned from the local hour of the photo.",
-                        comment: "Meal library folders footer"
-                    ))
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                } else {
+                    Button {
+                        showFilters = true
+                    } label: {
+                        Image(systemName: hasSheetFilters
+                            ? "line.3.horizontal.decrease.circle.fill"
+                            : "line.3.horizontal.decrease.circle")
+                            .font(.title3)
+                    }
+                    .accessibilityLabel(String(localized: "Filters", comment: "Meal gallery filters button"))
+                    Menu {
+                        Button {
+                            startNewFolder(for: nil)
+                        } label: {
+                            Label(
+                                String(localized: "New folder", comment: "FoodFinder new saved-meal folder alert title"),
+                                systemImage: "folder.badge.plus"
+                            )
+                        }
+                        Button {
+                            showShareSettings = true
+                        } label: {
+                            Label(
+                                String(localized: "Companion sharing", comment: "Meal gallery companion-share settings"),
+                                systemImage: shareEnabled ? "person.2.fill" : "person.2"
+                            )
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title3)
+                    }
+                    .accessibilityLabel(String(localized: "Library options", comment: "Meal library options menu"))
                 }
             }
-            .listStyle(.insetGrouped)
+        }
+
+        private var scopeChips: some View {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    scopeChip(.all, title: String(localized: "All", comment: "Meal gallery browse-all mode"), systemImage: nil)
+                    scopeChip(.drinks, title: DrinkClassifier.folderTitle, systemImage: "cup.and.saucer")
+                        .accessibilityHint(Text(String(
+                            localized: "Automatic folder with every drink",
+                            comment: "Meal library drinks folder accessibility hint"
+                        )))
+                    ForEach(folderNames, id: \.self) { name in
+                        scopeChip(.folder(name), title: name, systemImage: "folder")
+                            .contextMenu {
+                                folderActions(name)
+                            }
+                    }
+                    ForEach(MealSlot.allCases) { slot in
+                        scopeChip(.slot(slot), title: slot.localizedTitle, systemImage: slot.systemImage)
+                    }
+                    Button {
+                        startNewFolder(for: nil)
+                    } label: {
+                        Image(systemName: "folder.badge.plus")
+                            .font(.subheadline)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Capsule().fill(Color.secondary.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(String(localized: "New folder", comment: "FoodFinder new saved-meal folder alert title"))
+                }
+                .padding(.vertical, 2)
+            }
+        }
+
+        private func scopeChip(_ value: LibraryScope, title: String, systemImage: String?) -> some View {
+            let isSelected = scope == value
+            return Button {
+                scope = isSelected && value != .all ? .all : value
+            } label: {
+                HStack(spacing: 4) {
+                    if let systemImage {
+                        Image(systemName: systemImage)
+                    }
+                    Text(title)
+                        .lineLimit(1)
+                }
+                .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? Color.white : Color.primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.12)))
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
         }
 
         @ViewBuilder private func folderActions(_ name: String) -> some View {
-            Button(role: .destructive) {
-                MealFolderStore().deleteFolder(name)
-                reloadFolders()
-            } label: {
-                Label(String(localized: "Delete folder", comment: "FoodFinder delete saved-meal folder"), systemImage: "trash")
-            }
             Button {
                 renamedFolderName = name
                 renamingFolder = name
             } label: {
                 Label(String(localized: "Rename", comment: "Meal library rename folder button"), systemImage: "pencil")
             }
+            Button(role: .destructive) {
+                MealFolderStore().deleteFolder(name)
+                if scope == .folder(name) {
+                    scope = .all
+                }
+                reloadFolders()
+            } label: {
+                Label(String(localized: "Delete folder", comment: "FoodFinder delete saved-meal folder"), systemImage: "trash")
+            }
         }
 
-        /// `responseTitle` adds a response card for all the meals in `items` above the grid.
-        @ViewBuilder private func mealGrid(_ items: [DisplayMeal], responseTitle: String? = nil) -> some View {
-            if items.isEmpty {
-                noMatchingMeals
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        if let responseTitle {
-                            let keys = MealResponseKeys(results: items.map { preferredResult(for: $0) })
-                            MealResponseCard(
-                                title: responseTitle,
-                                mealIDs: keys.mealIDs,
-                                foodResultIDs: keys.foodResultIDs,
-                                units: units
-                            )
-                        }
-                        FoodFinderMealGridSection(title: "", count: items.count) {
-                            ForEach(items) { meal in
-                                mealTile(meal, showsDate: !meal.isUndated)
+        private var filterChips: some View {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    Button {
+                        let query = filter.nameQuery
+                        filter = GalleryFilter()
+                        filter.nameQuery = query
+                    } label: {
+                        Label(
+                            String(localized: "Clear filters", comment: "Clear meal gallery filters"),
+                            systemImage: "xmark.circle.fill"
+                        )
+                        .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    if let slot = filter.mealSlot {
+                        chip(slot.localizedTitle)
+                    }
+                    if filter.startDate != nil || filter.endDate != nil {
+                        chip(String(localized: "Date", comment: "Meal library date filter chip"))
+                    }
+                    if filter.minCarbs != nil || filter.maxCarbs != nil {
+                        chip(carbChipTitle)
+                    }
+                    ForEach(Array(filter.tags).sorted(), id: \.self) { tag in
+                        chip(tag)
+                    }
+                }
+            }
+        }
+
+        private var carbChipTitle: String {
+            switch (filter.minCarbs, filter.maxCarbs) {
+            case let (min?, max?):
+                return "\(Int(min))–\(Int(max)) g"
+            case let (min?, nil):
+                return "≥ \(Int(min)) g"
+            case let (nil, max?):
+                return "≤ \(Int(max)) g"
+            default:
+                return String(localized: "Carbs", comment: "Meal gallery carbs filter chip")
+            }
+        }
+
+        private func chip(_ title: String) -> some View {
+            Text(title)
+                .font(.caption)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(Color.secondary.opacity(0.15)))
+        }
+
+        // MARK: - Sections
+
+        /// One row that scrolls sideways; expanded, up to three rows.
+        private func savedSection(_ meals: [DisplayMeal]) -> some View {
+            let canExpand = meals.count > Self.savedMaxRows
+            let rows = savedExpanded && canExpand ? min(Self.savedMaxRows, meals.count) : 1
+            return VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(String(localized: "Saved Meals", comment: "Saved meal presets section header"))
+                        .font(.headline)
+                    Text("\(meals.count)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if canExpand {
+                        Button {
+                            savedExpanded.toggle()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(savedExpanded
+                                    ? String(localized: "Less", comment: "Collapse the saved meals")
+                                    : String(localized: "More", comment: "Expand the saved meals"))
+                                Image(systemName: "chevron.down")
+                                    .rotationEffect(.degrees(savedExpanded ? 180 : 0))
                             }
+                            .font(.subheadline.weight(.semibold))
+                        }
+                        .accessibilityLabel(savedExpanded
+                            ? String(localized: "Show one row of saved meals", comment: "Collapse saved meals, spoken")
+                            : String(localized: "Show more saved meals", comment: "Expand saved meals, spoken"))
+                    }
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHGrid(
+                        rows: Array(repeating: GridItem(.fixed(Self.savedRowHeight), spacing: 12, alignment: .top), count: rows),
+                        alignment: .top,
+                        spacing: 12
+                    ) {
+                        ForEach(meals) { meal in
+                            mealTile(meal)
+                                .frame(width: Self.savedTileWidth, height: Self.savedRowHeight, alignment: .top)
                         }
                     }
-                    .padding(16)
+                }
+                .frame(height: CGFloat(rows) * Self.savedRowHeight + CGFloat(rows - 1) * 12)
+            }
+        }
+
+        @ViewBuilder private func mealsSection(_ meals: [DisplayMeal]) -> some View {
+            if meals.isEmpty {
+                if !isLoading {
+                    noMatchingMeals
+                }
+            } else {
+                FoodFinderMealGridSection(
+                    title: isSearching || hasSheetFilters || scope != .all
+                        ? String(localized: "Results", comment: "Meal library filtered meals header")
+                        : String(localized: "All meals", comment: "Meal library history section header"),
+                    count: meals.count
+                ) {
+                    ForEach(meals) { meal in
+                        mealTile(meal, showsDate: !meal.isUndated)
+                    }
                 }
             }
         }
@@ -526,15 +620,18 @@ extension AIInsights {
                 String(localized: "No matching meals", comment: "Meal gallery empty filter title"),
                 systemImage: "line.3.horizontal.decrease.circle",
                 description: Text(String(
-                    localized: "Try clearing filters or photographing a meal in FoodFinder.",
-                    comment: "Meal gallery empty filter description"
+                    localized: "Try another search, folder or filter.",
+                    comment: "Meal library empty filter description"
                 ))
             )
+            .frame(maxWidth: .infinity)
         }
 
         private func mealTile(_ meal: DisplayMeal, showsDate: Bool = false) -> some View {
             let isSaved = meal.savedID != nil || savedMemberKeys.contains(meal.memberKey)
+            let recent = fallbackResults.first { $0.id == meal.id }
             return Button {
+                searchFocus.wrappedValue = false
                 selectedMeal = meal
             } label: {
                 FoodFinderMealTile(
@@ -563,6 +660,13 @@ extension AIInsights {
                         onSaveMeal(preferredResult(for: meal))
                     } label: {
                         Label(String(localized: "Save", comment: "Save as meal preset"), systemImage: "bookmark")
+                    }
+                }
+                if meal.savedID == nil, let recent, let onDeleteRecent {
+                    Button(role: .destructive) {
+                        onDeleteRecent(recent)
+                    } label: {
+                        Label(String(localized: "Delete", comment: "Delete recent meal"), systemImage: "trash")
                     }
                 }
             }
@@ -595,75 +699,6 @@ extension AIInsights {
             }
         }
 
-        private var filterChips: some View {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    if filter.isActive {
-                        Button {
-                            filter = GalleryFilter()
-                        } label: {
-                            Label(
-                                String(localized: "Clear filters", comment: "Clear meal gallery filters"),
-                                systemImage: "xmark.circle.fill"
-                            )
-                            .font(.caption.weight(.semibold))
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    if let slot = filter.mealSlot {
-                        chip(slot.localizedTitle)
-                    }
-                    if filter.minCarbs != nil || filter.maxCarbs != nil {
-                        chip(carbChipTitle)
-                    }
-                    ForEach(Array(filter.tags).sorted(), id: \.self) { tag in
-                        chip(tag)
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-        }
-
-        private var carbChipTitle: String {
-            switch (filter.minCarbs, filter.maxCarbs) {
-            case let (min?, max?):
-                return "\(Int(min))–\(Int(max)) g"
-            case let (min?, nil):
-                return "≥ \(Int(min)) g"
-            case let (nil, max?):
-                return "≤ \(Int(max)) g"
-            default:
-                return String(localized: "Carbs", comment: "Meal gallery carbs filter chip")
-            }
-        }
-
-        private func chip(_ title: String) -> some View {
-            Text(title)
-                .font(.caption)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Capsule().fill(Color.secondary.opacity(0.15)))
-        }
-
-        private var emptyState: some View {
-            VStack(spacing: 12) {
-                Image(systemName: "photo.stack")
-                    .font(.system(size: 44))
-                    .foregroundStyle(.secondary)
-                Text(String(localized: "No meals yet", comment: "Meal library empty state title"))
-                    .font(.headline)
-                Text(String(
-                    localized: "Meals you analyze or save in FoodFinder appear here.",
-                    comment: "Meal library empty state description"
-                ))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            }
-            .padding(32)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-
         // MARK: - Folders
 
         private func startNewFolder(for memberKey: String?) {
@@ -687,6 +722,9 @@ extension AIInsights {
             folderNames = store.folderNames()
             folderAssignments = store.assignments()
             filter.tags = filter.tags.filter { tag in folderNames.contains { SavedMealFolderStore.same($0, tag) } }
+            if case let .folder(name) = scope, !folderNames.contains(where: { SavedMealFolderStore.same($0, name) }) {
+                scope = .all
+            }
         }
 
         // MARK: - Loading
@@ -728,6 +766,7 @@ extension AIInsights {
                     .init(id: UUID(), name: $0.name, carbs: $0.carbs * $0.portionMultiplier)
                 }
             }
+            let isDrink = fallback.map { DrinkClassifier.isDrink($0.items) } ?? DrinkClassifier.isDrink(snapshots)
             return DisplayMeal(
                 id: item.id,
                 date: item.date,
@@ -741,7 +780,8 @@ extension AIInsights {
                 memberKey: MealFolderStore.memberKey(for: item),
                 fullImageData: fallback?.imageData,
                 items: itemCarbs,
-                snapshots: snapshots
+                snapshots: snapshots,
+                isDrink: isDrink
             )
         }
 
@@ -759,7 +799,8 @@ extension AIInsights {
                 memberKey: MealFolderStore.memberKey(for: result),
                 fullImageData: result.imageData,
                 items: result.items.map { .init(id: $0.id, name: $0.name, carbs: $0.adjustedCarbs) },
-                snapshots: result.items.map { GalleryFoodSnapshot(item: $0) }
+                snapshots: result.items.map { GalleryFoodSnapshot(item: $0) },
+                isDrink: DrinkClassifier.isDrink(result.items)
             )
         }
 
@@ -798,7 +839,7 @@ extension AIInsights {
     /// Full-size view of a single gallery meal. Visual language matches
     /// FoodFinder's result cards (photo overlay, carbs hero, macro chips).
     struct MealDetailView: View {
-        let meal: MealGalleryView.DisplayMeal
+        let meal: MealLibrarySection.DisplayMeal
         let result: FoodAnalysisResult
         var knownFolders: [String] = []
         var shareEnabled: Bool = false
@@ -819,7 +860,7 @@ extension AIInsights {
         }
 
         init(
-            meal: MealGalleryView.DisplayMeal,
+            meal: MealLibrarySection.DisplayMeal,
             result: FoodAnalysisResult,
             folders: [String] = [],
             knownFolders: [String] = [],

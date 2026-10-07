@@ -14,8 +14,8 @@ extension AIInsights {
         @FocusState private var isTextFieldFocused: Bool
         @State private var isComposerExpanded: Bool = false
         @State private var isEditingTotals = false
-        /// Presents the meal library (saved, photographed and recent meals).
-        @State private var showMealGallery = false
+        /// The meal library's search field on the start page; the composer steps aside while it is in use.
+        @FocusState private var isLibrarySearchFocused: Bool
         @State private var editingFoodItem: FoodItem?
         @State private var selectedSourceItem: FoodItem?
         @State private var compactInputMeasuredHeight: CGFloat = 0
@@ -25,7 +25,6 @@ extension AIInsights {
         @State private var keyboardLift: CGFloat = 0
         @State private var dragFrozenKeyboardLift: CGFloat = 0
         @Namespace private var composerNamespace
-        @State private var pendingGalleryBolus: FoodAnalysisResult?
 
         @FetchRequest(
             entity: MealPresetStored.entity(),
@@ -44,7 +43,9 @@ extension AIInsights {
             // `keyboardLift` (keyboard overlap minus the tab bar and home
             // indicator this inset already clears).
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                foodInputBar
+                if !isLibrarySearchFocused {
+                    foodInputBar
+                }
             }
             .aiInsightsStripKeyboardSafeArea()
             .ignoresSafeArea(.keyboard, edges: .bottom)
@@ -83,49 +84,6 @@ extension AIInsights {
                         }
                     }
                 }
-                // On the start page, the meal library in the top-right. Separate ToolbarItem from
-                // the "New" button above, which only shows when a result exists.
-                if state.currentResult == nil {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showMealGallery = true
-                        } label: {
-                            Image(systemName: "photo.stack")
-                        }
-                        .accessibilityLabel(String(localized: "Meal library", comment: "Meal library navigation title"))
-                    }
-                }
-            }
-            .sheet(isPresented: $showMealGallery, onDismiss: {
-                if let result = pendingGalleryBolus {
-                    pendingGalleryBolus = nil
-                    state.sendToBolusCalculator(result: result, openBolusCalculator: onHandoffComplete == nil)
-                    onHandoffComplete?()
-                }
-            }) {
-                AIInsights.MealGalleryView(
-                    fallbackResults: state.recentResults,
-                    savedMeals: savedMealEntries.map { entry in
-                        LibrarySavedMeal(id: entry.id, result: entry.result, isKept: entry.isKept)
-                    },
-                    onOpenInFoodFinder: { result in
-                        showMealGallery = false
-                        state.currentResult = result
-                    },
-                    onUseInBolusCalculator: { result in
-                        pendingGalleryBolus = result
-                        showMealGallery = false
-                    },
-                    onSaveMeal: { result in
-                        saveMeal(result)
-                    },
-                    onRemoveSavedMeal: { id in
-                        if let entry = savedMealEntries.first(where: { $0.id == id }) {
-                            removeSavedMeal(entry)
-                        }
-                    },
-                    units: state.settingsManager.settings.units
-                )
             }
             .simultaneousGesture(swipeBackGesture)
             .onAppear(perform: configureView)
@@ -296,20 +254,32 @@ extension AIInsights {
                     emptyStateView(compact: !saved.isEmpty || !recent.isEmpty)
                         .frame(maxWidth: .infinity)
 
-                    if !saved.isEmpty || !recent.isEmpty {
-                        mealLibraryCard(savedCount: saved.count)
-                    }
-
-                    if !recent.isEmpty {
-                        FoodFinderMealGridSection(
-                            title: String(localized: "Recent Meals", comment: "Recent results section header"),
-                            count: recent.count
-                        ) {
-                            ForEach(recent) { result in
-                                recentMealTile(result)
+                    AIInsights.MealLibrarySection(
+                        fallbackResults: recent,
+                        savedMeals: saved.map { entry in
+                            LibrarySavedMeal(id: entry.id, result: entry.result, isKept: entry.isKept)
+                        },
+                        onOpenInFoodFinder: { result in
+                            state.currentResult = result
+                        },
+                        onUseInBolusCalculator: { result in
+                            state.sendToBolusCalculator(result: result, openBolusCalculator: onHandoffComplete == nil)
+                            onHandoffComplete?()
+                        },
+                        onSaveMeal: { result in
+                            saveMeal(result)
+                        },
+                        onRemoveSavedMeal: { id in
+                            if let entry = savedMealEntries.first(where: { $0.id == id }) {
+                                removeSavedMeal(entry)
                             }
-                        }
-                    }
+                        },
+                        onDeleteRecent: { result in
+                            state.deleteRecentResult(result)
+                        },
+                        units: state.settingsManager.settings.units,
+                        searchFocus: $isLibrarySearchFocused
+                    )
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -317,48 +287,6 @@ extension AIInsights {
             }
             .scrollDismissesKeyboard(.interactively)
             .background(appState.trioBackgroundColor(for: colorScheme))
-        }
-
-        /// Opens the meal library, where the saved meals, their folders and every earlier meal are.
-        private func mealLibraryCard(savedCount: Int) -> some View {
-            Button {
-                showMealGallery = true
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "photo.stack")
-                        .font(.title3)
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 32)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(String(localized: "Meal library", comment: "Meal library navigation title"))
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                        Text(
-                            savedCount > 0
-                                ? String(
-                                    localized: "\(savedCount) saved · folders · all meals",
-                                    comment: "FoodFinder meal library entry subtitle with saved-meal count"
-                                )
-                                : String(
-                                    localized: "Folders and all meals, searchable by ingredient",
-                                    comment: "FoodFinder meal library entry subtitle"
-                                )
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(12)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white)
-                )
-            }
-            .buttonStyle(.plain)
         }
 
         // MARK: - Meal detail screen (in-place swap, not nav push)
@@ -1333,43 +1261,6 @@ extension AIInsights {
             return entries
         }
 
-        private func isSavedMeal(_ result: FoodAnalysisResult) -> Bool {
-            if state.frequentMeals.contains(where: { $0.id == result.id }) { return true }
-            let key = MealEventIdentity.normalized(mealTitle(for: result))
-            return !key.isEmpty && savedMealEntries.contains { MealEventIdentity.normalized(mealTitle(for: $0.result)) == key }
-        }
-
-        private func recentMealTile(_ result: FoodAnalysisResult) -> some View {
-            let saved = isSavedMeal(result)
-            return Button {
-                state.currentResult = result
-            } label: {
-                FoodFinderMealTile(
-                    title: mealTitle(for: result),
-                    carbs: result.totalCarbs,
-                    subtitle: relativeMinutesText(from: result.timestamp),
-                    photoID: result.id,
-                    inlineImage: result.imageData,
-                    badgeSystemImage: saved ? "bookmark.fill" : nil
-                )
-            }
-            .buttonStyle(.plain)
-            .contextMenu {
-                if !saved {
-                    Button {
-                        saveMeal(result)
-                    } label: {
-                        Label(String(localized: "Save", comment: "Save as meal preset"), systemImage: "bookmark")
-                    }
-                }
-                Button(role: .destructive) {
-                    state.deleteRecentResult(result)
-                } label: {
-                    Label(String(localized: "Delete", comment: "Delete recent meal"), systemImage: "trash")
-                }
-            }
-        }
-
         /// Keeps the meal with its photo and ingredients, and adds it to Trio's meal presets if it is not there yet.
         private func saveMeal(_ result: FoodAnalysisResult) {
             state.keepMeal(result)
@@ -2161,21 +2052,6 @@ extension AIInsights {
                 .padding(.horizontal, 12)
             }
             .frame(height: 64)
-        }
-
-        private func relativeMinutesText(from date: Date) -> String {
-            let minutes = max(0, Int(Date().timeIntervalSince(date) / 60))
-            if minutes < 1 {
-                return String(localized: "< 1 min", comment: "Relative time less than one minute")
-            }
-            if minutes < 60 {
-                return String(localized: "\(minutes) min", comment: "Relative time minutes")
-            }
-            let hours = minutes / 60
-            if hours < 24 {
-                return String(localized: "\(hours) h", comment: "Relative time hours")
-            }
-            return date.formatted(.dateTime.month().day().hour().minute())
         }
     }
 }
