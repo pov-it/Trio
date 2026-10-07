@@ -123,6 +123,34 @@ extension AIInsights {
             )
         }
 
+        enum CodingKeys: String, CodingKey {
+            case name
+            case portion
+            case carbs
+            case fat
+            case protein
+            case fiber
+            case calories
+            case portionMultiplier
+            case basisUnit
+        }
+
+        /// Every field is optional on decode: snapshots come from several earlier builds, and an unknown unit or a
+        /// missing macro must not drop the meal they belong to.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            name = container.lossyDecode(String.self, forKey: .name) ?? ""
+            portion = container.lossyDecode(String.self, forKey: .portion) ?? ""
+            carbs = container.lossyNumber(forKey: .carbs) ?? 0
+            fat = container.lossyNumber(forKey: .fat) ?? 0
+            protein = container.lossyNumber(forKey: .protein) ?? 0
+            fiber = container.lossyNumber(forKey: .fiber) ?? 0
+            calories = container.lossyNumber(forKey: .calories) ?? 0
+            let multiplier = container.lossyNumber(forKey: .portionMultiplier) ?? 1
+            portionMultiplier = multiplier.isFinite && multiplier > 0 ? multiplier : 1
+            basisUnit = container.lossyDecode(MeasurementUnit.self, forKey: .basisUnit)
+        }
+
         func toFoodItem() -> FoodItem {
             FoodItem(
                 name: name,
@@ -214,13 +242,12 @@ extension AIInsights {
 
         /// Folder per meal key.
         func assignments() -> [String: String] {
-            defaults.dictionary(forKey: Self.assignmentsKey) as? [String: String] ?? [:]
+            StoredFolders.assignments(defaults, Self.assignmentsKey).compactMapValues(\.first)
         }
 
         /// Stored names plus any name still in use, deduplicated ignoring case and accents, sorted.
         func folderNames() -> [String] {
-            let stored = defaults.stringArray(forKey: Self.namesKey) ?? []
-            return Self.deduplicated(stored + Array(assignments().values))
+            Self.deduplicated(StoredFolders.strings(defaults, Self.namesKey) + Array(assignments().values))
         }
 
         /// Adds a folder and returns its name as stored (an existing folder's spelling when it matches).
@@ -309,13 +336,12 @@ extension AIInsights {
 
         /// Folders per member key.
         func assignments() -> [String: [String]] {
-            defaults.dictionary(forKey: Self.assignmentsKey) as? [String: [String]] ?? [:]
+            StoredFolders.assignments(defaults, Self.assignmentsKey)
         }
 
         /// Stored names plus any name still in use, deduplicated ignoring case and accents, sorted.
         func folderNames() -> [String] {
-            let stored = defaults.stringArray(forKey: Self.namesKey) ?? []
-            return SavedMealFolderStore.deduplicated(stored + assignments().values.flatMap { $0 })
+            SavedMealFolderStore.deduplicated(StoredFolders.strings(defaults, Self.namesKey) + assignments().values.flatMap { $0 })
         }
 
         func folders(forMemberKey key: String) -> [String] {
@@ -403,7 +429,7 @@ extension AIInsights {
                 file(item.tags, under: Self.memberKey(for: item))
             }
 
-            let names = (defaults.stringArray(forKey: Self.namesKey) ?? [])
+            let names = StoredFolders.strings(defaults, Self.namesKey)
                 + saved.folderNames()
                 + galleryGroupNames
                 + current.values.flatMap { $0 }
@@ -426,12 +452,13 @@ extension AIInsights {
         }
 
         /// A number followed by a volume unit: ml, cl, dl, l, liter/litre(s), fl oz.
-        private static let liquidPortion = try! NSRegularExpression(
+        private static let liquidPortion = try? NSRegularExpression(
             pattern: #"(?<![\p{L}\d])\d+(?:[.,]\d+)?\s*(?:ml|cl|dl|l|ltr|liters?|litres?|fl\.?\s*oz)(?![\p{L}])"#,
             options: [.caseInsensitive]
         )
 
         static func isLiquidPortion(_ portion: String) -> Bool {
+            guard let liquidPortion, !portion.isEmpty else { return false }
             let range = NSRange(portion.startIndex..., in: portion)
             return liquidPortion.firstMatch(in: portion, options: [], range: range) != nil
         }
@@ -443,5 +470,103 @@ extension AIInsights {
         static func isDrink(_ snapshots: [GalleryFoodSnapshot]) -> Bool {
             !snapshots.isEmpty && snapshots.allSatisfy { $0.basisUnit == .milliliter || isLiquidPortion($0.portion) }
         }
+    }
+
+    /// Reads folder data written by any earlier build: a name list may hold non-strings, and a meal's folders may be
+    /// one name or a list. Anything else is skipped rather than failing the whole store.
+    enum StoredFolders {
+        static func strings(_ defaults: UserDefaults, _ key: String) -> [String] {
+            strings(from: defaults.object(forKey: key))
+        }
+
+        static func strings(from value: Any?) -> [String] {
+            switch value {
+            case let name as String:
+                return [name]
+            case let list as [Any]:
+                return list.compactMap { $0 as? String }
+            default:
+                return []
+            }
+        }
+
+        static func assignments(_ defaults: UserDefaults, _ key: String) -> [String: [String]] {
+            guard let stored = defaults.object(forKey: key) as? [String: Any] else { return [:] }
+            var result: [String: [String]] = [:]
+            for (memberKey, value) in stored {
+                let names = strings(from: value).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                if !memberKey.isEmpty, !names.isEmpty {
+                    result[memberKey] = names
+                }
+            }
+            return result
+        }
+    }
+
+    /// Decodes a stored JSON list one element at a time, so one entry an older or newer build wrote differently
+    /// costs that entry instead of the whole list.
+    enum LossyJSONList {
+        private struct Element<Value: Decodable>: Decodable {
+            let value: Value?
+
+            init(from decoder: Decoder) throws {
+                value = try? Value(from: decoder)
+            }
+        }
+
+        /// The readable elements and how many were skipped; nil when the data is not a JSON list at all.
+        static func decode<Value: Decodable>(_: Value.Type, from data: Data) -> (values: [Value], skipped: Int)? {
+            guard let elements = try? JSONDecoder().decode([Element<Value>].self, from: data) else { return nil }
+            let values = elements.compactMap(\.value)
+            return (values, elements.count - values.count)
+        }
+
+        /// Keeps the stored bytes once under `<key>.unreadable` before a list that could not be read in full is
+        /// written back, so entries this build cannot read are not lost to the next save.
+        static func preserveUnreadable(_ data: Data, forKey key: String, defaults: UserDefaults = .standard) {
+            let backupKey = key + ".unreadable"
+            guard defaults.data(forKey: backupKey) == nil else { return }
+            defaults.set(data, forKey: backupKey)
+        }
+
+        /// Reads the list stored under `key`, keeping the first entry per id.
+        static func load<Value: Decodable & Identifiable>(
+            _ type: Value.Type,
+            forKey key: String,
+            defaults: UserDefaults = .standard
+        ) -> [Value]? {
+            guard let data = defaults.data(forKey: key) else { return nil }
+            guard let decoded = decode(type, from: data) else {
+                preserveUnreadable(data, forKey: key, defaults: defaults)
+                return nil
+            }
+            if decoded.skipped > 0 {
+                preserveUnreadable(data, forKey: key, defaults: defaults)
+            }
+            return decoded.values.aiInsightsUniqued(by: \.id)
+        }
+    }
+}
+
+extension KeyedDecodingContainer {
+    /// The value, or nil when the key is missing, null or holds something else.
+    func lossyDecode<T: Decodable>(_ type: T.Type, forKey key: Key) -> T? {
+        (try? decodeIfPresent(type, forKey: key)) ?? nil
+    }
+
+    /// A number stored as a number or as a numeric string; nil otherwise or when not finite.
+    func lossyNumber(forKey key: Key) -> Double? {
+        let value = lossyDecode(Double.self, forKey: key)
+            ?? lossyDecode(String.self, forKey: key).flatMap { Double($0.replacingOccurrences(of: ",", with: ".")) }
+        guard let value, value.isFinite else { return nil }
+        return value
+    }
+}
+
+extension Array {
+    /// The elements in order, keeping only the first one per key.
+    func aiInsightsUniqued<Key: Hashable>(by key: (Element) -> Key) -> [Element] {
+        var seen = Set<Key>()
+        return filter { seen.insert(key($0)).inserted }
     }
 }

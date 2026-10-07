@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 import UIKit
 
@@ -1129,5 +1130,250 @@ struct FoodFinderBolusHandoffTests {
         #expect(state.carbs == 25)
         #expect(state.wholeCob > 0)
         tearDown(state)
+    }
+}
+
+
+// MARK: - Start page with data from earlier builds
+
+/// Hosts the real FoodFinder start-page library in a window and lets it load and lay out, with data in the shapes
+/// earlier builds left on the phone. A crash in any of these is a crash on opening FoodFinder.
+@Suite("FoodFinder start page with data from earlier builds", .serialized)
+@MainActor
+struct FoodFinderStartPageLegacyDataTests {
+    private struct Host: View {
+        let recent: [AIInsights.FoodAnalysisResult]
+        let saved: [AIInsights.LibrarySavedMeal]
+        @FocusState private var focus: Bool
+
+        var body: some View {
+            ScrollView {
+                AIInsights.MealLibrarySection(fallbackResults: recent, savedMeals: saved, searchFocus: $focus)
+            }
+        }
+    }
+
+    private static let keys = [
+        AIInsights.MealGalleryStore.indexKey,
+        AIInsights.MealGalleryStore.indexKey + ".unreadable",
+        AIInsights.MealGalleryStore.groupNamesKey,
+        AIInsights.MealFolderStore.namesKey,
+        AIInsights.MealFolderStore.assignmentsKey,
+        AIInsights.MealFolderStore.migratedKey,
+        AIInsights.SavedMealFolderStore.namesKey,
+        AIInsights.SavedMealFolderStore.assignmentsKey,
+        "ai_foodfinder_saved_meals_expanded"
+    ]
+
+    private func withStoredValues(_ values: [String: Any], _ body: () -> Void) {
+        let defaults = UserDefaults.standard
+        let previous = Self.keys.map { ($0, defaults.object(forKey: $0)) }
+        Self.keys.forEach { defaults.removeObject(forKey: $0) }
+        values.forEach { defaults.set($0.value, forKey: $0.key) }
+        body()
+        for (key, value) in previous {
+            if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+    }
+
+    private func render(recent: [AIInsights.FoodAnalysisResult] = [], saved: [AIInsights.LibrarySavedMeal] = []) {
+        let controller = UIHostingController(rootView: Host(recent: recent, saved: saved))
+        let window: UIWindow
+        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
+            window = UIWindow(windowScene: scene)
+        } else {
+            window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+        }
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        for _ in 0 ..< 25 {
+            window.layoutIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.08))
+        }
+        window.isHidden = true
+    }
+
+    private func meal(_ name: String, id: UUID = UUID(), minutesAgo: Double = 30, portion: String = "1 plate")
+        -> AIInsights.FoodAnalysisResult
+    {
+        AIInsights.FoodAnalysisResult(
+            id: id,
+            items: [AIInsights.FoodItem(name: name, portion: portion, carbs: 40, fat: 10, protein: 12, fiber: 2, calories: 300)],
+            rawResponse: nil,
+            timestamp: Date().addingTimeInterval(-minutesAgo * 60),
+            source: .aiText,
+            imageData: nil,
+            mealDescription: name,
+            mealName: name
+        )
+    }
+
+    private func indexJSON(_ entries: [[String: Any]]) -> Data {
+        (try? JSONSerialization.data(withJSONObject: entries)) ?? Data()
+    }
+
+    private func entry(id: UUID, name: String, secondsAgo: Double, extra: [String: Any] = [:]) -> [String: Any] {
+        var entry: [String: Any] = [
+            "id": id.uuidString,
+            "date": Date().addingTimeInterval(-secondsAgo).timeIntervalSinceReferenceDate,
+            "mealName": name,
+            "totalCarbs": 45,
+            "thumbnailFilename": "\(id.uuidString).jpg"
+        ]
+        extra.forEach { entry[$0.key] = $0.value }
+        return entry
+    }
+
+    @Test("Plain saved, gallery and recent meals render")
+    func plainData() {
+        let id = UUID()
+        withStoredValues([AIInsights.MealGalleryStore.indexKey: indexJSON([entry(id: id, name: "Pasta", secondsAgo: 600)])]) {
+            render(
+                recent: [meal("Soup"), meal("Toast", minutesAgo: 90)],
+                saved: [AIInsights.LibrarySavedMeal(id: "kept-a", result: meal("Pasta", id: id), isKept: true)]
+            )
+        }
+    }
+
+    @Test("A kept meal saved under two names (same meal id twice) renders")
+    func savedMealTwice() {
+        let id = UUID()
+        withStoredValues([:]) {
+            render(
+                recent: [meal("Soup")],
+                saved: [
+                    AIInsights.LibrarySavedMeal(id: "kept-1", result: meal("Pasta", id: id), isKept: true),
+                    AIInsights.LibrarySavedMeal(id: "kept-2", result: meal("Pasta pesto", id: id), isKept: true),
+                    AIInsights.LibrarySavedMeal(id: "kept-3", result: meal("Rice"), isKept: true),
+                    AIInsights.LibrarySavedMeal(id: "kept-4", result: meal("Salad"), isKept: true)
+                ]
+            )
+        }
+    }
+
+    @Test("A gallery index holding the same meal twice renders")
+    func galleryMealTwice() {
+        let id = UUID()
+        withStoredValues([
+            AIInsights.MealGalleryStore.indexKey: indexJSON([
+                entry(id: id, name: "Pasta", secondsAgo: 600),
+                entry(id: id, name: "Pasta", secondsAgo: 600),
+                entry(id: UUID(), name: "Rice", secondsAgo: 900)
+            ])
+        ]) {
+            render(recent: [meal("Pasta", id: id, minutesAgo: 10)])
+        }
+    }
+
+    @Test("A recent list holding the same meal twice renders")
+    func recentMealTwice() {
+        let id = UUID()
+        withStoredValues([:]) {
+            render(recent: [meal("Soup", id: id), meal("Soup", id: id), meal("Toast")])
+        }
+    }
+
+    @Test("Gallery entries and folders in unknown or older shapes render and keep the readable meals")
+    func unknownShapes() {
+        let good = UUID()
+        withStoredValues([
+            AIInsights.MealGalleryStore.indexKey: indexJSON([
+                entry(id: good, name: "Pasta", secondsAgo: 600, extra: [
+                    "mealSlot": "brunch",
+                    "tags": ["Work", "work", " "],
+                    "items": [["name": "Juice", "portion": "250 ml", "carbs": 25, "fat": 0, "protein": 0, "fiber": 0,
+                               "calories": 110, "portionMultiplier": 1, "basisUnit": "litre"]]
+                ]),
+                ["id": "not-a-uuid", "date": "yesterday"],
+                entry(id: UUID(), name: "Rice", secondsAgo: 900, extra: ["totalCarbs": "lots", "newField": ["a": 1]])
+            ]),
+            AIInsights.MealFolderStore.assignmentsKey: ["pasta": "Work", "rice": ["Lunch", 3]],
+            AIInsights.MealFolderStore.namesKey: ["Work", "Work", ""],
+            AIInsights.SavedMealFolderStore.assignmentsKey: ["pasta": ["Old"]],
+            AIInsights.MealGalleryStore.groupNamesKey: "Work"
+        ]) {
+            render(recent: [meal("Juice", portion: "0,5 l")])
+            #expect(AIInsights.MealGalleryStore.shared.loadIndex().contains { $0.id == good })
+        }
+    }
+}
+
+@Suite("Stored FoodFinder data from other builds loads without losing readable meals")
+struct FoodFinderStoredDataToleranceTests {
+    private func suite() -> UserDefaults {
+        let name = "foodfinder-tolerance-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
+    }
+
+    @Test("A list with an unreadable entry keeps the rest, one per id, and keeps the bytes aside")
+    func lossyListKeepsReadableEntries() throws {
+        let defaults = suite()
+        let id = UUID()
+        let json = """
+        [
+          {"id": "\(id.uuidString)", "date": 700000000, "mealName": "Pasta", "thumbnailFilename": "a.jpg",
+           "mealSlot": "brunch", "tags": ["Work", 3], "totalCarbs": "45",
+           "items": [{"name": "Juice", "portion": "250 ml", "carbs": 25, "basisUnit": "litre"}, 7]},
+          {"id": "\(id.uuidString)", "date": 700000000, "thumbnailFilename": "a.jpg"},
+          {"id": "nope"},
+          "garbage"
+        ]
+        """
+        let data = Data(json.utf8)
+        defaults.set(data, forKey: "list")
+
+        let items = try #require(AIInsights.LossyJSONList.load(AIInsights.MealGalleryStore.GalleryItem.self, forKey: "list", defaults: defaults))
+        #expect(items.count == 1)
+        let item = try #require(items.first)
+        #expect(item.mealName == "Pasta")
+        #expect(item.totalCarbs == 45)
+        #expect(item.tags == ["Work"])
+        #expect(item.mealSlot == AIInsights.MealSlot.from(date: item.date))
+        #expect(item.items.map(\.name) == ["Juice"])
+        #expect(item.items.first?.basisUnit == nil)
+        #expect(AIInsights.DrinkClassifier.isDrink(item.items))
+        #expect(defaults.data(forKey: "list.unreadable") == data)
+    }
+
+    @Test("Data that is not a list at all is kept aside and reads as empty")
+    func notAList() {
+        let defaults = suite()
+        defaults.set(Data("{\"meals\": 3}".utf8), forKey: "list")
+        #expect(AIInsights.LossyJSONList.load(AIInsights.FoodAnalysisResult.self, forKey: "list", defaults: defaults) == nil)
+        #expect(defaults.data(forKey: "list.unreadable") != nil)
+    }
+
+    @Test("Saved meals with an unknown source or unit still load")
+    func foodItemUnknownEnums() throws {
+        let defaults = suite()
+        let json = """
+        [{"id": "\(UUID().uuidString)", "timestamp": 700000000, "source": "aiCamera", "mealName": "Cola",
+          "items": [{"name": "Cola", "portion": "330 ml", "carbs": 35, "source": "newSource", "basisUnit": "cup",
+                     "sourceURL": 12}]}]
+        """
+        defaults.set(Data(json.utf8), forKey: "frequent")
+        let meals = try #require(AIInsights.LossyJSONList.load(AIInsights.FoodAnalysisResult.self, forKey: "frequent", defaults: defaults))
+        #expect(meals.count == 1)
+        #expect(meals.first?.items.first?.basisUnit == .unknown)
+        #expect(meals.first?.totalCarbs == 35)
+    }
+
+    @Test("Folders stored as one name, a list or mixed values all read")
+    func folderShapes() {
+        let defaults = suite()
+        defaults.set(["pasta": "Work", "rice": ["Lunch", 3, ""], "soup": 4], forKey: AIInsights.MealFolderStore.assignmentsKey)
+        defaults.set(["Work", 5, "Home"], forKey: AIInsights.MealFolderStore.namesKey)
+        defaults.set(["toast": ["Breakfast"]], forKey: AIInsights.SavedMealFolderStore.assignmentsKey)
+        let store = AIInsights.MealFolderStore(defaults: defaults)
+        #expect(store.assignments() == ["pasta": ["Work"], "rice": ["Lunch"]])
+        #expect(store.folderNames() == ["Home", "Lunch", "Work"])
+        #expect(AIInsights.SavedMealFolderStore(defaults: defaults).assignments() == ["toast": "Breakfast"])
+
+        store.migrateIfNeeded(galleryItems: [], galleryGroupNames: [])
+        #expect(store.folders(forMemberKey: "toast") == ["Breakfast"])
+        #expect(store.folderNames().contains("Breakfast"))
     }
 }

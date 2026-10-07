@@ -159,14 +159,16 @@ extension AIInsights {
         }
 
         /// Archived meals plus the recent meals the archive does not hold (such as the ones without a photo).
+        /// One entry per meal id: the lazy grids require unique ids, and stored lists from earlier builds can repeat one.
         private var historyMeals: [DisplayMeal] {
             let archivedIDs = Set(archivedMeals.map(\.id))
             let recent = fallbackResults
                 .filter { !archivedIDs.contains($0.id) }
                 .map { Self.makeDisplayMeal(result: $0) }
-            return (archivedMeals + recent).sorted { $0.date > $1.date }
+            return (archivedMeals + recent).aiInsightsUniqued(by: \.id).sorted { $0.date > $1.date }
         }
 
+        /// One entry per meal id, like `historyMeals`; a meal kept under two names shows once, as its newest save.
         private var savedDisplayMeals: [DisplayMeal] {
             savedMeals.map { saved in
                 var meal = Self.makeDisplayMeal(result: saved.result)
@@ -174,6 +176,7 @@ extension AIInsights {
                 meal.isUndated = !saved.isKept
                 return meal
             }
+            .aiInsightsUniqued(by: \.id)
         }
 
         /// Every meal once: the history, then the saved meals that are not part of it.
@@ -737,7 +740,7 @@ extension AIInsights {
                 let index = store.loadIndex()
                 let folderStore = MealFolderStore()
                 folderStore.migrateIfNeeded(galleryItems: index, galleryGroupNames: store.loadGroupNames())
-                let meals = index.map { item in
+                let meals = index.aiInsightsUniqued(by: \.id).map { item in
                     Self.makeDisplayMeal(item: item, fallback: fallback.first(where: { $0.id == item.id }))
                 }
                 return (meals, folderStore.folderNames(), folderStore.assignments())

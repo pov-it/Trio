@@ -141,19 +141,33 @@ extension AIInsights {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
                 id = try container.decode(UUID.self, forKey: .id)
                 date = try container.decode(Date.self, forKey: .date)
-                mealName = try container.decodeIfPresent(String.self, forKey: .mealName)
-                totalCarbs = try container.decodeIfPresent(Double.self, forKey: .totalCarbs) ?? 0
-                thumbnailFilename = try container.decode(String.self, forKey: .thumbnailFilename)
-                totalFat = try container.decodeIfPresent(Double.self, forKey: .totalFat) ?? 0
-                totalProtein = try container.decodeIfPresent(Double.self, forKey: .totalProtein) ?? 0
-                totalFiber = try container.decodeIfPresent(Double.self, forKey: .totalFiber) ?? 0
-                totalCalories = try container.decodeIfPresent(Double.self, forKey: .totalCalories) ?? 0
-                tags = MealGalleryStore.normalizedTags(
-                    try container.decodeIfPresent([String].self, forKey: .tags) ?? []
-                )
-                mealSlot = try container.decodeIfPresent(MealSlot.self, forKey: .mealSlot)
-                    ?? MealSlot.from(date: date)
-                items = try container.decodeIfPresent([GalleryFoodSnapshot].self, forKey: .items) ?? []
+                mealName = container.lossyDecode(String.self, forKey: .mealName)
+                totalCarbs = container.lossyNumber(forKey: .totalCarbs) ?? 0
+                thumbnailFilename = container.lossyDecode(String.self, forKey: .thumbnailFilename)
+                    ?? "\(id.uuidString).jpg"
+                totalFat = container.lossyNumber(forKey: .totalFat) ?? 0
+                totalProtein = container.lossyNumber(forKey: .totalProtein) ?? 0
+                totalFiber = container.lossyNumber(forKey: .totalFiber) ?? 0
+                totalCalories = container.lossyNumber(forKey: .totalCalories) ?? 0
+                let storedTags = (try? container.decodeIfPresent([LossyString].self, forKey: .tags)) ?? nil
+                tags = MealGalleryStore.normalizedTags(storedTags?.compactMap(\.value) ?? [])
+                mealSlot = container.lossyDecode(MealSlot.self, forKey: .mealSlot) ?? MealSlot.from(date: date)
+                let storedItems = (try? container.decodeIfPresent([LossySnapshot].self, forKey: .items)) ?? nil
+                items = storedItems?.compactMap(\.value) ?? []
+            }
+
+            private struct LossyString: Decodable {
+                let value: String?
+                init(from decoder: Decoder) throws {
+                    value = try? decoder.singleValueContainer().decode(String.self)
+                }
+            }
+
+            private struct LossySnapshot: Decodable {
+                let value: GalleryFoodSnapshot?
+                init(from decoder: Decoder) throws {
+                    value = try? GalleryFoodSnapshot(from: decoder)
+                }
             }
 
             func resolvedMealSlot(calendar: Calendar = .current) -> MealSlot {
@@ -258,11 +272,10 @@ extension AIInsights {
 
         // MARK: - Index persistence
 
-        /// Returns the gallery index sorted newest-first.
+        /// Returns the gallery index sorted newest-first, one entry per meal. Entries this build cannot read are
+        /// skipped (and their stored bytes kept aside once), so they never cost the rest of the gallery.
         func loadIndex() -> [GalleryItem] {
-            guard let data = defaults.data(forKey: Self.indexKey),
-                  let saved = try? JSONDecoder().decode([GalleryItem].self, from: data)
-            else { return [] }
+            let saved = LossyJSONList.load(GalleryItem.self, forKey: Self.indexKey, defaults: defaults) ?? []
             return saved.sorted { $0.date > $1.date }
         }
 
@@ -279,7 +292,7 @@ extension AIInsights {
         // MARK: - Manual groups / tags
 
         func loadGroupNames() -> [String] {
-            let stored = defaults.stringArray(forKey: Self.groupNamesKey) ?? []
+            let stored = StoredFolders.strings(defaults, Self.groupNamesKey)
             let fromItems = loadIndex().flatMap(\.tags)
             return Self.normalizedTags(stored + fromItems)
         }
@@ -389,7 +402,7 @@ extension AIInsights {
                 let imageData: Data
             }
 
-            let candidates: [Candidate] = results.compactMap { result in
+            let candidates: [Candidate] = results.aiInsightsUniqued(by: \.id).compactMap { result in
                 guard let imageData = result.imageData, !imageData.isEmpty else { return nil }
                 return Candidate(
                     id: result.id,
