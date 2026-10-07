@@ -152,6 +152,8 @@ extension AIInsights {
 
     protocol MealCompanionTransport: Sendable {
         func publish(_ record: SharedMealRecord) async
+        /// Removes meals shared earlier. Returns false when it should be tried again later.
+        func withdraw(mealIDs: [UUID]) async -> Bool
     }
 
     // MARK: - Settings (opt-in, default OFF)
@@ -971,6 +973,8 @@ extension AIInsights {
 
         func publish(payload: SharedMealPayload, thumbnailJPEG: Data?) {
             guard isShareEnabled else { return }
+            // The companion feed and its widget show meals as photos; a meal without one is never shared.
+            guard let thumbnailJPEG, !thumbnailJPEG.isEmpty else { return }
             if let reason = MealSharePrivacy.rejectReason(for: payload) {
                 assertionFailure("Refusing to publish companion meal: \(reason)")
                 return
@@ -981,6 +985,29 @@ extension AIInsights {
                 Task {
                     for transport in transports {
                         await transport.publish(record)
+                    }
+                }
+            }
+        }
+
+        private static let photolessWithdrawnKey = "ai_meal_companion_photoless_withdrawn_v1"
+
+        /// Earlier versions also shared meals without a photo, which the companion widget then showed as its latest
+        /// meal. Takes those out of the outbox and the CloudKit feed, once; retried until every transport managed it.
+        func withdrawPhotolessMealsIfNeeded() {
+            guard isShareEnabled, !defaults.bool(forKey: Self.photolessWithdrawnKey) else { return }
+            let transports = self.transports
+            ioQueue.async { [self] in
+                Task {
+                    let outbox = transports.compactMap { $0 as? SharedMealsOutboxTransport }.first
+                    let ids = outbox?.photolessPublishedIDs() ?? []
+                    var withdrawn = true
+                    for transport in transports {
+                        let done = await transport.withdraw(mealIDs: ids)
+                        if !done { withdrawn = false }
+                    }
+                    if withdrawn {
+                        self.defaults.set(true, forKey: Self.photolessWithdrawnKey)
                     }
                 }
             }
@@ -1057,6 +1084,29 @@ extension AIInsights {
             defaults.stringArray(forKey: Self.publishedIDsKey) ?? []
         }
 
+        /// Published meals whose photo never reached the outbox.
+        func photolessPublishedIDs() -> [UUID] {
+            guard let dir = directoryURL else { return [] }
+            return loadPublishedIDs().compactMap(UUID.init(uuidString:)).filter { id in
+                let jpgURL = dir.appendingPathComponent("\(id.uuidString).jpg", isDirectory: false)
+                return !fileManager.fileExists(atPath: jpgURL.path)
+            }
+        }
+
+        func withdraw(mealIDs: [UUID]) async -> Bool {
+            guard !mealIDs.isEmpty else { return true }
+            let suite = MealCompanionShareSettings.companionAppGroupIdentifier(defaults).flatMap(UserDefaults.init(suiteName:))
+            for id in mealIDs {
+                if let dir = directoryURL {
+                    try? fileManager.removeItem(at: dir.appendingPathComponent("\(id.uuidString).json", isDirectory: false))
+                }
+                suite?.removeObject(forKey: "sharedMeal.\(id.uuidString)")
+            }
+            let withdrawn = Set(mealIDs.map(\.uuidString))
+            defaults.set(loadPublishedIDs().filter { !withdrawn.contains($0) }, forKey: Self.publishedIDsKey)
+            return true
+        }
+
         func loadPayload(id: UUID) -> SharedMealPayload? {
             guard let dir = directoryURL else { return nil }
             let url = dir.appendingPathComponent("\(id.uuidString).json", isDirectory: false)
@@ -1110,6 +1160,29 @@ extension AIInsights {
                 } catch {
                     // Local outbox already holds the meal; CloudKit can catch up later.
                 }
+            #endif
+        }
+
+        func withdraw(mealIDs: [UUID]) async -> Bool {
+            guard !mealIDs.isEmpty else { return true }
+            let containerID = MealCompanionShareSettings.cloudKitContainerIdentifier(defaults)
+            guard !containerID.isEmpty, MealCloudKitEntitlement.check(containerID) == .entitled else { return true }
+
+            #if canImport(CloudKit)
+                do {
+                    let database = try entitledPrivateDatabase(containerID: containerID)
+                    let zoneID = CKRecordZone.ID(zoneName: MealCloudKitContract.zoneName, ownerName: CKCurrentUserDefaultName)
+                    let recordIDs = mealIDs.map { CKRecord.ID(recordName: $0.uuidString, zoneID: zoneID) }
+                    // Not atomic: a meal that never reached CloudKit must not keep the others in the feed.
+                    _ = try await database.modifyRecords(saving: [], deleting: recordIDs, atomically: false)
+                    return true
+                } catch let error as CKError where error.code == .zoneNotFound || error.code == .userDeletedZone {
+                    return true
+                } catch {
+                    return false
+                }
+            #else
+                return true
             #endif
         }
 
@@ -1178,7 +1251,13 @@ extension AIInsights {
                     meal[MealCloudKitContract.photoKey] = asset
                 }
                 // Never write carbs / glucose / IOB / COB / Nightscout onto Meal.
-                _ = try await database.save(meal)
+                // `.changedKeys` so a meal shared before (edited, renamed or sent again) is updated: `save` of a
+                // new CKRecord over an existing one fails with serverRecordChanged and the companion kept the old
+                // photo and title.
+                let saved = try await database.modifyRecords(saving: [meal], deleting: [], savePolicy: .changedKeys)
+                if case let .failure(error)? = saved.saveResults[mealID] {
+                    throw error
+                }
 
                 if MealCompanionShareSettings.shareURLString(defaults) == nil {
                     _ = try? await ensureShare(database: database, feed: feed)
@@ -1779,4 +1858,8 @@ extension AIInsights {
             }
         #endif
     }
+}
+
+extension AIInsights.MealCompanionTransport {
+    func withdraw(mealIDs _: [UUID]) async -> Bool { true }
 }

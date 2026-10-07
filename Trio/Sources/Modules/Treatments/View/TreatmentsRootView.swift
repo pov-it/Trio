@@ -90,10 +90,7 @@ extension Treatments {
         func handleDebouncedInput() {
             debounce?.cancel()
             debounce = DispatchWorkItem { [self] in
-                Task {
-                    await state.updateForecasts()
-                    state.insulinCalculated = await state.calculateInsulin()
-                }
+                Task { await state.recalculateForCurrentEntry() }
             }
             if let debounce = debounce {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: debounce)
@@ -263,11 +260,8 @@ extension Treatments {
                                         .labelsHidden()
                                         .onChange(of: state.date) { _, _ in
                                             // Trigger simulation when date changes to update forecasts for backdated carbs
-                                            Task {
-                                                // `updateForecasts()` does update the `simulatedDetermination` of type `Determination?` var on the main thread, so I can use this to pass its cob value into the bolus calc manager
-                                                await state.updateForecasts()
-                                                state.insulinCalculated = await state.calculateInsulin()
-                                            }
+                                            // the simulation's COB feeds the bolus calculation for backdated carbs
+                                            Task { await state.recalculateForCurrentEntry() }
                                         }
                                     Button {
                                         state.date = state.date.addingTimeInterval(15.minutes.timeInterval)
@@ -427,18 +421,20 @@ extension Treatments {
                 }
             })
             .onAppear {
+                // The first recommendation comes from setup, once settings and the latest determination are loaded.
                 configureView {
                     state.isActive = true
-                    Task { @MainActor in
-                        state.insulinCalculated = await state.calculateInsulin()
-                    }
 
                     if PropertyPersistentFlags.shared.hasSeenFatProteinOrderChange != true {
                         showFatProteinOrderBanner = true
                     }
                 }
+                state.reactivateIfNeeded()
             }
             .onDisappear {
+                // Still the presented modal, only covered: FoodFinder's camera, photo picker, crop and barcode
+                // screens are full-screen covers, which make every view underneath disappear.
+                guard router.mainModalScreen.value != .treatmentView else { return }
                 state.isActive = false
                 state.addButtonPressed = false
 

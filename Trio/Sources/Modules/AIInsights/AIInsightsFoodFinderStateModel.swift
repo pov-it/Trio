@@ -120,23 +120,23 @@ extension AIInsights {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
             name = try container.decode(String.self, forKey: .name)
-            portion = try container.decode(String.self, forKey: .portion)
+            portion = container.lossyDecode(String.self, forKey: .portion) ?? ""
             carbs = try container.decodeIfPresent(Double.self, forKey: .carbs) ?? 0
             fat = try container.decodeIfPresent(Double.self, forKey: .fat) ?? 0
             protein = try container.decodeIfPresent(Double.self, forKey: .protein) ?? 0
             fiber = try container.decodeIfPresent(Double.self, forKey: .fiber) ?? 0
             calories = try container.decodeIfPresent(Double.self, forKey: .calories) ?? 0
             portionMultiplier = try container.decodeIfPresent(Double.self, forKey: .portionMultiplier) ?? 1.0
-            source = try container.decodeIfPresent(FoodSourceID.self, forKey: .source) ?? .aiEstimate
-            sourceURL = try container.decodeIfPresent(URL.self, forKey: .sourceURL)
+            source = container.lossyDecode(FoodSourceID.self, forKey: .source) ?? .aiEstimate
+            sourceURL = container.lossyDecode(URL.self, forKey: .sourceURL)
             sourceVerified = try container.decodeIfPresent(Bool.self, forKey: .sourceVerified) ?? false
             sourceName = try container.decodeIfPresent(String.self, forKey: .sourceName)
             sourceBrand = try container.decodeIfPresent(String.self, forKey: .sourceBrand)
-            sourceImageURL = try container.decodeIfPresent(URL.self, forKey: .sourceImageURL)
+            sourceImageURL = container.lossyDecode(URL.self, forKey: .sourceImageURL)
             sourceScore = try container.decodeIfPresent(Double.self, forKey: .sourceScore)
-            alternateMatches = try container.decodeIfPresent([FoodLookupResult].self, forKey: .alternateMatches) ?? []
+            alternateMatches = container.lossyDecode([FoodLookupResult].self, forKey: .alternateMatches) ?? []
             barcode = try container.decodeIfPresent(String.self, forKey: .barcode)
-            basisUnit = try container.decodeIfPresent(MeasurementUnit.self, forKey: .basisUnit) ?? .unknown
+            basisUnit = container.lossyDecode(MeasurementUnit.self, forKey: .basisUnit) ?? .unknown
             basisAmount = try container.decodeIfPresent(Double.self, forKey: .basisAmount) ?? 0
         }
     }
@@ -280,6 +280,9 @@ extension AIInsights {
         var recentResults: [FoodAnalysisResult] = []
         /// Meals the user has analyzed ≥ 3 times. Latest snapshot per meal.
         var frequentMeals: [FoodAnalysisResult] = []
+        /// The user's glucose unit, set once the model is configured. The view reads this instead of
+        /// `settingsManager`, which is nil during the first body pass (before `configureView` runs in `onAppear`).
+        var glucoseUnits: GlucoseUnits = .mgdL
         var showCamera: Bool = false
         var showBarcodeScanner: Bool = false
         var showPhotoPicker: Bool = false
@@ -416,6 +419,7 @@ extension AIInsights {
             foodFinderDoseGuardEnabled = provider.settings.foodFinderDoseGuardEnabled
             foodFinderDoseGuardSamples = min(3, max(1, provider.settings.foodFinderDoseGuardSamples))
             foodFinderPhotoEngine = provider.settings.foodFinderPhotoEngine
+            glucoseUnits = settingsManager.settings.units
 
             loadDraftDescription()
             loadRecentResults()
@@ -437,9 +441,7 @@ extension AIInsights {
         private static let portionLearningMinDeviation = 0.10
 
         func loadRecentResults() {
-            if let data = UserDefaults.standard.data(forKey: "ai_foodfinder_recent"),
-               var saved = try? JSONDecoder().decode([FoodAnalysisResult].self, from: data)
-            {
+            if var saved = LossyJSONList.load(FoodAnalysisResult.self, forKey: "ai_foodfinder_recent") {
                 // A photo model still running when the app stopped will not report back.
                 var settled = false
                 for index in saved.indices {
@@ -531,13 +533,9 @@ extension AIInsights {
             // store is idempotent (already-archived ids are skipped) and does its
             // downscale + write off the main thread, so this is cheap here.
             AIInsights.MealGalleryStore.shared.archive(recentResults)
-            // Companion share (opt-in, default off) for meals that have no photo
-            // and therefore never enter the gallery archive. Photographed meals
-            // are published from `archive` after the thumbnail hits disk.
-            // Local-first: the publisher returns immediately if sharing is off.
-            for result in recentResults where result.imageData == nil || result.imageData?.isEmpty == true {
-                AIInsights.MealCompanionPublisher.shared.publish(result: result, thumbnailJPEG: nil)
-            }
+            // Companion share (opt-in, default off) only carries photographed meals; `archive` publishes them once
+            // the photo is on disk. Local-first: the publisher returns immediately if sharing is off.
+            AIInsights.MealCompanionPublisher.shared.withdrawPhotolessMealsIfNeeded()
         }
 
         private func loadDraftDescription() {
@@ -554,9 +552,7 @@ extension AIInsights {
         }
 
         func loadFrequentMeals() {
-            if let data = UserDefaults.standard.data(forKey: Self.frequentMealsKey),
-               var saved = try? JSONDecoder().decode([FoodAnalysisResult].self, from: data)
-            {
+            if var saved = LossyJSONList.load(FoodAnalysisResult.self, forKey: Self.frequentMealsKey) {
                 for index in saved.indices {
                     guard var comparison = saved[index].photoComparison, comparison.settleInterruptedSides() else { continue }
                     saved[index].photoComparison = comparison
@@ -596,7 +592,7 @@ extension AIInsights {
             guard !key.isEmpty else { return }
             let count = bumpMealUsage(for: nameRaw)
             guard count >= Self.frequentThreshold else { return }
-            frequentMeals.removeAll { Self.normalizeMealKey($0.mealName ?? "") == key }
+            frequentMeals.removeAll { $0.id == result.id || Self.normalizeMealKey($0.mealName ?? "") == key }
             frequentMeals.insert(result, at: 0)
             saveFrequentMeals()
         }
@@ -656,10 +652,7 @@ extension AIInsights {
         /// Load recent FoodFinder analyses without instantiating the full state
         /// model. Used by the chat prompt builder to inject meal history.
         static func loadStoredRecentResults() -> [FoodAnalysisResult] {
-            guard let data = UserDefaults.standard.data(forKey: "ai_foodfinder_recent"),
-                  let saved = try? JSONDecoder().decode([FoodAnalysisResult].self, from: data)
-            else { return [] }
-            return saved
+            LossyJSONList.load(FoodAnalysisResult.self, forKey: "ai_foodfinder_recent") ?? []
         }
 
         /// Build a chat prompt section describing recent FoodFinder analyses.
@@ -1736,10 +1729,15 @@ extension AIInsights {
             // presentation. `removeDuplicates` on Main then ignores a second +
             // tap because the subject is already `.treatmentView`. Clear, wait
             // for sheets to finish, then present.
+            // Holds the router, not `self`: this model belongs to the FoodFinder modal being dismissed here
+            // and can be gone before the delay ends.
+            guard let router = self.router else { return }
             let alreadyTreatments = router.mainModalScreen.value == .treatmentView
             router.mainModalScreen.send(nil)
-            DispatchQueue.main.asyncAfter(deadline: .now() + (alreadyTreatments ? 0.05 : 0.4)) { [weak self] in
-                self?.showModal(for: .treatmentView)
+            DispatchQueue.main.asyncAfter(deadline: .now() + (alreadyTreatments ? 0.05 : 0.4)) {
+                if router.mainModalScreen.value != .treatmentView {
+                    router.mainModalScreen.send(.treatmentView)
+                }
             }
         }
 
