@@ -1251,7 +1251,13 @@ extension AIInsights {
                     meal[MealCloudKitContract.photoKey] = asset
                 }
                 // Never write carbs / glucose / IOB / COB / Nightscout onto Meal.
-                _ = try await database.save(meal)
+                // `.changedKeys` so a meal shared before (edited, renamed or sent again) is updated: `save` of a
+                // new CKRecord over an existing one fails with serverRecordChanged and the companion kept the old
+                // photo and title.
+                let saved = try await database.modifyRecords(saving: [meal], deleting: [], savePolicy: .changedKeys)
+                if case let .failure(error)? = saved.saveResults[mealID] {
+                    throw error
+                }
 
                 if MealCompanionShareSettings.shareURLString(defaults) == nil {
                     _ = try? await ensureShare(database: database, feed: feed)
