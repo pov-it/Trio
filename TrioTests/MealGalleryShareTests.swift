@@ -716,7 +716,8 @@ struct MealGalleryShareTests {
         #expect(abs(image.size.width - 1536) < 1)
 
         let small = try #require(Self.jpeg(width: 800, height: 600))
-        let kept = try #require(UIImage(data: try #require(AIInsights.MealGalleryStore.makePhotoJPEG(from: small))))
+        let keptPhoto = try #require(AIInsights.MealGalleryStore.makePhotoJPEG(from: small))
+        let kept = try #require(UIImage(data: keptPhoto))
         #expect(abs(kept.size.width - 800) < 1)
         #expect(abs(kept.size.height - 600) < 1)
     }
