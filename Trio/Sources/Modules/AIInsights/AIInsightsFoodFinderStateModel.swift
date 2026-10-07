@@ -1732,10 +1732,15 @@ extension AIInsights {
             // presentation. `removeDuplicates` on Main then ignores a second +
             // tap because the subject is already `.treatmentView`. Clear, wait
             // for sheets to finish, then present.
+            // Holds the router, not `self`: this model belongs to the FoodFinder modal being dismissed here
+            // and can be gone before the delay ends.
+            let router: Router = router
             let alreadyTreatments = router.mainModalScreen.value == .treatmentView
             router.mainModalScreen.send(nil)
-            DispatchQueue.main.asyncAfter(deadline: .now() + (alreadyTreatments ? 0.05 : 0.4)) { [weak self] in
-                self?.showModal(for: .treatmentView)
+            DispatchQueue.main.asyncAfter(deadline: .now() + (alreadyTreatments ? 0.05 : 0.4)) {
+                if router.mainModalScreen.value != .treatmentView {
+                    router.mainModalScreen.send(.treatmentView)
+                }
             }
         }
 

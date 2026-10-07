@@ -287,8 +287,39 @@ extension Treatments {
                     self.setupDeterminationController()
                     self.setupLastBolusController()
                 }
-                await self.applyFoodFinderHandoffIfNeeded()
+                guard !Task.isCancelled else { return }
+                let appliedHandoff = await self.applyFoodFinderHandoffIfNeeded()
+                // Reactivated with a meal already entered: the run that would have covered it was cancelled.
+                if !appliedHandoff, await MainActor.run(body: { self.carbs > 0 || self.amount > 0 }) {
+                    await self.recalculateForCurrentEntry()
+                }
             }
+        }
+
+        /// Brings back an instance whose view disappeared and came back, e.g. under a full-screen cover.
+        /// `configureView` only runs once per view, so without this the calculator stays torn down:
+        /// no forecasts (`updateForecasts` needs `isActive`), no determination updates and no observers.
+        func reactivateIfNeeded() {
+            guard hasCleanedUp else { return }
+            hasCleanedUp = false
+            isActive = true
+            debug(.bolusState, "reactivating after cleanup")
+            subscribe()
+        }
+
+        /// Simulates the entered meal and bolus, then recommends, the same as typing carbs by hand.
+        /// One run at a time: a newer run, or a new determination, cancels this one.
+        @MainActor func recalculateForCurrentEntry() async {
+            determinationUpdateTask?.cancel()
+            let task = Task { @MainActor in
+                await self.updateForecasts()
+                guard !Task.isCancelled else { return }
+                let insulin = await self.calculateInsulin()
+                guard !Task.isCancelled else { return }
+                self.insulinCalculated = insulin
+            }
+            determinationUpdateTask = task
+            await task.value
         }
 
         /// Mirrors `apsManager.bolusProgress` (a `CurrentValueSubject<Decimal?, Never>`) directly into the
@@ -352,13 +383,15 @@ extension Treatments {
             }
         }
 
-        @MainActor func applyFoodFinderHandoffIfNeeded() async {
-            guard let handoff = AIInsights.FoodBolusHandoff.consume() else { return }
+        /// Returns whether a FoodFinder meal was waiting and has been entered.
+        @discardableResult @MainActor func applyFoodFinderHandoffIfNeeded() async -> Bool {
+            guard let handoff = AIInsights.FoodBolusHandoff.consume() else { return false }
             foodFinderHandoff = handoff
 
-            carbs = min(Decimal(handoff.carbs), maxCarbs)
-            fat = min(Decimal(handoff.fat), maxFat)
-            protein = min(Decimal(handoff.protein), maxProtein)
+            // Whole grams, as the fields show them; otherwise the field rewrites the value and starts another run.
+            carbs = min(Self.wholeGrams(handoff.carbs), maxCarbs)
+            fat = min(Self.wholeGrams(handoff.fat), maxFat)
+            protein = min(Self.wholeGrams(handoff.protein), maxProtein)
             note = String(handoff.note.prefix(25))
             // `date` stays as it is: `handoff.createdAt` is when FoodFinder sent the meal, and any `date` more
             // than a second away from `defaultDate` makes the calculator treat the meal as backdated and leave
@@ -375,12 +408,14 @@ extension Treatments {
                 useSuperBolus = false
             }
 
-            // Same order as typed carbs: simulate the meal first so minPredBG and COB include it, then
-            // recommend. The initial determination run would otherwise publish a result without the meal.
-            determinationUpdateTask?.cancel()
-            await updateForecasts()
-            guard !Task.isCancelled else { return }
-            insulinCalculated = await calculateInsulin()
+            // Not tied to the caller's task: when this runs from setup, a cancelled setup must not drop the meal.
+            await recalculateForCurrentEntry()
+            return true
+        }
+
+        static func wholeGrams(_ grams: Double) -> Decimal {
+            guard grams.isFinite, grams > 0 else { return 0 }
+            return Decimal(grams.rounded())
         }
 
         private func registerObservers() {
@@ -918,11 +953,13 @@ extension Treatments.StateModel {
     @MainActor private func scheduleInsulinAndForecastUpdate() {
         determinationUpdateTask?.cancel()
         determinationUpdateTask = Task { @MainActor in
+            // With a meal or bolus entered, the loop's own forecast leaves it out; simulate it instead.
+            let hasEntry = self.carbs > 0 || self.amount > 0
+            await self.updateForecasts(with: hasEntry ? nil : self.mapForecastsFromController())
+            guard !Task.isCancelled else { return }
             let insulinCalculated = await self.calculateInsulin()
             guard !Task.isCancelled else { return }
             self.insulinCalculated = insulinCalculated
-            let forecastData = self.mapForecastsFromController()
-            await self.updateForecasts(with: forecastData)
         }
     }
 

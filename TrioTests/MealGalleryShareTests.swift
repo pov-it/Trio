@@ -1013,3 +1013,89 @@ struct MealGalleryShareTests {
         #expect(gemini25?["thinkingBudget"] as? Int == 0)
     }
 }
+
+// MARK: - FoodFinder → bolus calculator handoff
+
+/// Runs the real calculator state through the app container, the way `Treatments.RootView` drives it.
+/// The recommendation itself can be 0 here (no glucose or loop in the test store), so the check is the
+/// calculation breakdown: `wholeCob` only includes the meal when a calculation ran with its carbs.
+@Suite("FoodFinder meal handed to the bolus calculator", .serialized)
+struct FoodFinderBolusHandoffTests {
+    let resolver = TrioApp().resolver
+
+    private func storeHandoff(carbs: Double) {
+        AIInsights.FoodBolusHandoff.store(AIInsights.FoodBolusHandoff(
+            carbs: carbs,
+            fat: 0,
+            protein: 0,
+            note: "Test meal",
+            createdAt: Date().addingTimeInterval(-90),
+            useReducedBolus: false
+        ))
+    }
+
+    /// What `configureView` does on the first appear.
+    private func present(_ state: Treatments.StateModel) {
+        state.isActive = true
+        state.resolver = resolver
+    }
+
+    private func waitUntil(_ timeout: TimeInterval = 30, _ condition: @escaping @MainActor () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if await MainActor.run(body: condition) { return true }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        return await MainActor.run(body: condition)
+    }
+
+    private func tearDown(_ state: Treatments.StateModel) {
+        state.isActive = false
+        state.cleanupTreatmentState()
+        UserDefaults.standard.removeObject(forKey: AIInsights.FoodBolusHandoff.userDefaultsKey)
+    }
+
+    @Test("Opening the calculator with a meal calculates with its carbs, not as a backdated entry")
+    func handoffOnOpenCalculatesWithMealCarbs() async {
+        storeHandoff(carbs: 42.4)
+        let state = Treatments.StateModel()
+        present(state)
+
+        let calculated = await waitUntil { state.carbs == 42 && state.wholeCob > 0 }
+        #expect(calculated)
+        #expect(abs(state.date.timeIntervalSince(state.defaultDate)) <= 1)
+        #expect(UserDefaults.standard.data(forKey: AIInsights.FoodBolusHandoff.userDefaultsKey) == nil)
+        tearDown(state)
+    }
+
+    @Test("A calculator torn down by a covering screen comes back and calculates the meal")
+    func reactivatedCalculatorCalculatesMeal() async {
+        storeHandoff(carbs: 30)
+        let state = Treatments.StateModel()
+        present(state)
+        // What a full-screen cover used to do to the calculator underneath: `onDisappear` cleanup mid-setup.
+        state.isActive = false
+        state.cleanupTreatmentState()
+
+        state.reactivateIfNeeded()
+
+        let calculated = await waitUntil { state.isActive && state.carbs == 30 && state.wholeCob > 0 }
+        #expect(calculated)
+        tearDown(state)
+    }
+
+    @Test("A meal arriving after the calculator is set up (FoodFinder sheet dismissed) calculates")
+    func handoffAfterSetupCalculates() async {
+        UserDefaults.standard.removeObject(forKey: AIInsights.FoodBolusHandoff.userDefaultsKey)
+        let state = Treatments.StateModel()
+        present(state)
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+
+        storeHandoff(carbs: 25)
+        let applied = await state.applyFoodFinderHandoffIfNeeded()
+        #expect(applied)
+        #expect(state.carbs == 25)
+        #expect(state.wholeCob > 0)
+        tearDown(state)
+    }
+}
