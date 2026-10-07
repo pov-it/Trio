@@ -117791,6 +117791,23 @@
         }
       }
     },
+    "Drinks" : {
+      "comment" : "FoodFinder automatic folder with every drink (meals measured in ml, cl or l)",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Getränke"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drankjes"
+          }
+        }
+      }
+    },
     "Drives the outer-ring + tag on the home screen's glucose bobble." : {
       "localizations" : {
         "bg" : {

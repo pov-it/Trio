@@ -84,6 +84,8 @@ extension AIInsights {
         var fiber: Double
         var calories: Double
         var portionMultiplier: Double
+        /// `FoodItem.basisUnit`; nil in snapshots stored before it was kept.
+        var basisUnit: MeasurementUnit? = nil
 
         init(
             name: String,
@@ -93,7 +95,8 @@ extension AIInsights {
             protein: Double,
             fiber: Double,
             calories: Double,
-            portionMultiplier: Double = 1.0
+            portionMultiplier: Double = 1.0,
+            basisUnit: MeasurementUnit? = nil
         ) {
             self.name = name
             self.portion = portion
@@ -103,6 +106,7 @@ extension AIInsights {
             self.fiber = fiber
             self.calories = calories
             self.portionMultiplier = portionMultiplier
+            self.basisUnit = basisUnit
         }
 
         init(item: FoodItem) {
@@ -114,7 +118,8 @@ extension AIInsights {
                 protein: item.protein,
                 fiber: item.fiber,
                 calories: item.calories,
-                portionMultiplier: item.portionMultiplier
+                portionMultiplier: item.portionMultiplier,
+                basisUnit: item.basisUnit == .unknown ? nil : item.basisUnit
             )
         }
 
@@ -412,23 +417,31 @@ extension AIInsights {
         }
     }
 
-    /// How the gallery root is presented.
-    enum GalleryBrowseMode: String, CaseIterable, Identifiable {
-        case all
-        case mealSlot
-        case groups
+    /// The automatic Drinks folder of the meal library. Nothing is stored: a meal is a drink when every ingredient is
+    /// measured as a liquid, from its unit (`FoodItem.basisUnit`) or its portion text ("250 ml", "1 glass (200 ml)",
+    /// a barcode product's "330 ml"). A meal with a drink on the side stays out.
+    enum DrinkClassifier {
+        static var folderTitle: String {
+            String(localized: "Drinks", comment: "FoodFinder automatic folder with every drink (meals measured in ml, cl or l)")
+        }
 
-        var id: String { rawValue }
+        /// A number followed by a volume unit: ml, cl, dl, l, liter/litre(s), fl oz.
+        private static let liquidPortion = try! NSRegularExpression(
+            pattern: #"(?<![\p{L}\d])\d+(?:[.,]\d+)?\s*(?:ml|cl|dl|l|ltr|liters?|litres?|fl\.?\s*oz)(?![\p{L}])"#,
+            options: [.caseInsensitive]
+        )
 
-        var localizedTitle: String {
-            switch self {
-            case .all:
-                return String(localized: "All", comment: "Meal gallery browse-all mode")
-            case .mealSlot:
-                return String(localized: "By meal", comment: "Meal gallery browse-by-slot mode")
-            case .groups:
-                return String(localized: "Folders", comment: "Meal library browse-by-folder mode")
-            }
+        static func isLiquidPortion(_ portion: String) -> Bool {
+            let range = NSRange(portion.startIndex..., in: portion)
+            return liquidPortion.firstMatch(in: portion, options: [], range: range) != nil
+        }
+
+        static func isDrink(_ items: [FoodItem]) -> Bool {
+            !items.isEmpty && items.allSatisfy { $0.basisUnit == .milliliter || isLiquidPortion($0.portion) }
+        }
+
+        static func isDrink(_ snapshots: [GalleryFoodSnapshot]) -> Bool {
+            !snapshots.isEmpty && snapshots.allSatisfy { $0.basisUnit == .milliliter || isLiquidPortion($0.portion) }
         }
     }
 }

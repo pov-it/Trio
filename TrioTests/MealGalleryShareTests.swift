@@ -334,6 +334,37 @@ struct MealGalleryShareTests {
         defaults.removePersistentDomain(forName: suite)
     }
 
+    @Test("Liquid portions are recognised in every spelling FoodFinder stores")
+    func liquidPortions() {
+        for portion in ["250 ml", "250ml", "1 glass (200 ml)", "33 cl", "0,5 l", "1.5L", "1 liter", "2 litres", "12 fl oz", "per 100 mL"] {
+            #expect(AIInsights.DrinkClassifier.isLiquidPortion(portion), "\(portion)")
+        }
+        for portion in ["150 g", "1 slice", "2 large eggs", "1 lb", "1 bowl", "", "100 gl"] {
+            #expect(!AIInsights.DrinkClassifier.isLiquidPortion(portion), "\(portion)")
+        }
+    }
+
+    @Test("A meal is a drink only when every ingredient is a liquid")
+    func drinkMeals() {
+        let cola = AIInsights.FoodItem(name: "Cola", portion: "330 ml", carbs: 35, fat: 0, protein: 0, fiber: 0, calories: 139)
+        let pizza = AIInsights.FoodItem(name: "Pizza", portion: "2 slices", carbs: 60, fat: 20, protein: 18, fiber: 3, calories: 520)
+        var juice = AIInsights.FoodItem(name: "Juice", portion: "1 glass", carbs: 22, fat: 0, protein: 0, fiber: 0, calories: 95)
+        #expect(AIInsights.DrinkClassifier.isDrink([cola]))
+        #expect(!AIInsights.DrinkClassifier.isDrink([cola, pizza]))
+        #expect(!AIInsights.DrinkClassifier.isDrink([juice]))
+        juice.basisUnit = .milliliter
+        #expect(AIInsights.DrinkClassifier.isDrink([juice, cola]))
+        #expect(!AIInsights.DrinkClassifier.isDrink([AIInsights.FoodItem]()))
+
+        let snapshots = [AIInsights.GalleryFoodSnapshot(item: juice), AIInsights.GalleryFoodSnapshot(item: cola)]
+        #expect(AIInsights.DrinkClassifier.isDrink(snapshots))
+        let decoded = try? JSONDecoder().decode(
+            AIInsights.GalleryFoodSnapshot.self,
+            from: Data(#"{"name":"Tea","portion":"1 cup","carbs":0,"fat":0,"protein":0,"fiber":0,"calories":0,"portionMultiplier":1}"#.utf8)
+        )
+        #expect(decoded?.basisUnit == nil)
+    }
+
     @Test("A meal without a photo is never sent to the companion")
     func companionSkipsMealsWithoutPhoto() async throws {
         final class Recorder: AIInsights.MealCompanionTransport, @unchecked Sendable {
