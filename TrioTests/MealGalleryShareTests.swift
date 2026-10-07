@@ -1162,7 +1162,9 @@ struct FoodFinderStartPageLegacyDataTests {
         AIInsights.MealFolderStore.migratedKey,
         AIInsights.SavedMealFolderStore.namesKey,
         AIInsights.SavedMealFolderStore.assignmentsKey,
-        "ai_foodfinder_saved_meals_expanded"
+        "ai_foodfinder_saved_meals_expanded",
+        "ai_foodfinder_recent",
+        "ai_foodfinder_frequent"
     ]
 
     private func withStoredValues(_ values: [String: Any], _ body: () -> Void) {
@@ -1177,7 +1179,11 @@ struct FoodFinderStartPageLegacyDataTests {
     }
 
     private func render(recent: [AIInsights.FoodAnalysisResult] = [], saved: [AIInsights.LibrarySavedMeal] = []) {
-        let controller = UIHostingController(rootView: Host(recent: recent, saved: saved))
+        host(Host(recent: recent, saved: saved))
+    }
+
+    private func host<Content: View>(_ content: Content, cycles: Int = 25) {
+        let controller = UIHostingController(rootView: content)
         let window: UIWindow
         if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
             window = UIWindow(windowScene: scene)
@@ -1187,7 +1193,7 @@ struct FoodFinderStartPageLegacyDataTests {
         window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         window.rootViewController = controller
         window.makeKeyAndVisible()
-        for _ in 0 ..< 25 {
+        for _ in 0 ..< cycles {
             window.layoutIfNeeded()
             RunLoop.main.run(until: Date().addingTimeInterval(0.08))
         }
@@ -1223,6 +1229,48 @@ struct FoodFinderStartPageLegacyDataTests {
         ]
         extra.forEach { entry[$0.key] = $0.value }
         return entry
+    }
+
+    private static func photo(_ color: UIColor) -> Data? {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 1200, height: 900), format: format).image { context in
+            color.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 1200, height: 900))
+        }
+        return image.jpegData(compressionQuality: 0.8)
+    }
+
+    @Test("The whole FoodFinder screen opens with photographed, saved and repeated meals stored")
+    func wholeScreenOpens() throws {
+        let repeated = UUID()
+        var recent = (0 ..< 12).map { index in
+            var result = meal(index.isMultiple(of: 3) ? "Cola" : "Meal \(index)", minutesAgo: Double(index * 90),
+                              portion: index.isMultiple(of: 3) ? "330 ml" : "1 plate")
+            if index.isMultiple(of: 2) { result.imageData = Self.photo(index.isMultiple(of: 4) ? .red : .blue) }
+            return result
+        }
+        recent.insert(meal("Pasta", id: repeated, minutesAgo: 5), at: 0)
+        recent.insert(meal("Pasta pesto", id: repeated, minutesAgo: 5), at: 1)
+        let frequent = [meal("Pasta", id: repeated), meal("Pasta pesto", id: repeated)] + recent.prefix(5)
+        let recentData = try JSONEncoder().encode(recent)
+        let frequentData = try JSONEncoder().encode(Array(frequent))
+        withStoredValues([
+            "ai_foodfinder_recent": recentData,
+            "ai_foodfinder_frequent": frequentData,
+            AIInsights.SavedMealFolderStore.assignmentsKey: ["pasta": "Work"],
+            AIInsights.MealGalleryStore.groupNamesKey: ["Home"]
+        ]) {
+            let resolver = TrioApp().resolver
+            host(
+                NavigationStack {
+                    AIInsights.FoodFinderView(resolver: resolver)
+                }
+                .environment(\.managedObjectContext, CoreDataStack.shared.persistentContainer.viewContext)
+                .environment(AppState()),
+                cycles: 60
+            )
+        }
     }
 
     @Test("Plain saved, gallery and recent meals render")
