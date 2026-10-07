@@ -277,7 +277,7 @@ extension AIInsights {
                         onDeleteRecent: { result in
                             state.deleteRecentResult(result)
                         },
-                        units: state.settingsManager.settings.units,
+                        units: state.glucoseUnits,
                         searchFocus: $isLibrarySearchFocused
                     )
                 }
@@ -470,7 +470,7 @@ extension AIInsights {
                     title: String(localized: "Glucose after this meal", comment: "Meal detail response card title"),
                     mealIDs: keys.mealIDs,
                     foodResultIDs: keys.foodResultIDs,
-                    units: state.settingsManager.settings.units,
+                    units: state.glucoseUnits,
                     cardFill: colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white,
                     currentCarbs: result.totalCarbs
                 )
@@ -1446,7 +1446,7 @@ extension AIInsights {
         }
 
         private func postMealFooter(_ summary: FoodFinderPostMealSummary) -> String {
-            let units = state.settingsManager.settings.units
+            let units = state.glucoseUnits
             let low = summary.limits.lowMgdl.formatted(for: units)
             let high = summary.limits.highMgdl.formatted(for: units)
             let range = "\(low)–\(high) \(units.rawValue)"

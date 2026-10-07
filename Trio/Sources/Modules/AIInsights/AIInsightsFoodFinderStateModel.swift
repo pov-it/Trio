@@ -280,6 +280,9 @@ extension AIInsights {
         var recentResults: [FoodAnalysisResult] = []
         /// Meals the user has analyzed ≥ 3 times. Latest snapshot per meal.
         var frequentMeals: [FoodAnalysisResult] = []
+        /// The user's glucose unit, set once the model is configured. The view reads this instead of
+        /// `settingsManager`, which is nil during the first body pass (before `configureView` runs in `onAppear`).
+        var glucoseUnits: GlucoseUnits = .mgdL
         var showCamera: Bool = false
         var showBarcodeScanner: Bool = false
         var showPhotoPicker: Bool = false
@@ -416,6 +419,7 @@ extension AIInsights {
             foodFinderDoseGuardEnabled = provider.settings.foodFinderDoseGuardEnabled
             foodFinderDoseGuardSamples = min(3, max(1, provider.settings.foodFinderDoseGuardSamples))
             foodFinderPhotoEngine = provider.settings.foodFinderPhotoEngine
+            glucoseUnits = settingsManager.settings.units
 
             loadDraftDescription()
             loadRecentResults()
