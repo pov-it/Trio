@@ -1734,7 +1734,7 @@ extension AIInsights {
             // for sheets to finish, then present.
             // Holds the router, not `self`: this model belongs to the FoodFinder modal being dismissed here
             // and can be gone before the delay ends.
-            let router: Router = router
+            guard let router = self.router else { return }
             let alreadyTreatments = router.mainModalScreen.value == .treatmentView
             router.mainModalScreen.send(nil)
             DispatchQueue.main.asyncAfter(deadline: .now() + (alreadyTreatments ? 0.05 : 0.4)) {

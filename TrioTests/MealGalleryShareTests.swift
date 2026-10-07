@@ -1066,28 +1066,28 @@ struct FoodFinderBolusHandoffTests {
     }
 
     /// What `configureView` does on the first appear.
-    private func present(_ state: Treatments.StateModel) {
+    @MainActor private func present(_ state: Treatments.StateModel) {
         state.isActive = true
         state.resolver = resolver
     }
 
-    private func waitUntil(_ timeout: TimeInterval = 30, _ condition: @escaping @MainActor () -> Bool) async -> Bool {
+    @MainActor private func waitUntil(_ timeout: TimeInterval = 30, _ condition: () -> Bool) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if await MainActor.run(body: condition) { return true }
+            if condition() { return true }
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
-        return await MainActor.run(body: condition)
+        return condition()
     }
 
-    private func tearDown(_ state: Treatments.StateModel) {
+    @MainActor private func tearDown(_ state: Treatments.StateModel) {
         state.isActive = false
         state.cleanupTreatmentState()
         UserDefaults.standard.removeObject(forKey: AIInsights.FoodBolusHandoff.userDefaultsKey)
     }
 
     @Test("Opening the calculator with a meal calculates with its carbs, not as a backdated entry")
-    func handoffOnOpenCalculatesWithMealCarbs() async {
+    @MainActor func handoffOnOpenCalculatesWithMealCarbs() async {
         storeHandoff(carbs: 42.4)
         let state = Treatments.StateModel()
         present(state)
@@ -1100,7 +1100,7 @@ struct FoodFinderBolusHandoffTests {
     }
 
     @Test("A calculator torn down by a covering screen comes back and calculates the meal")
-    func reactivatedCalculatorCalculatesMeal() async {
+    @MainActor func reactivatedCalculatorCalculatesMeal() async {
         storeHandoff(carbs: 30)
         let state = Treatments.StateModel()
         present(state)
@@ -1116,7 +1116,7 @@ struct FoodFinderBolusHandoffTests {
     }
 
     @Test("A meal arriving after the calculator is set up (FoodFinder sheet dismissed) calculates")
-    func handoffAfterSetupCalculates() async {
+    @MainActor func handoffAfterSetupCalculates() async {
         UserDefaults.standard.removeObject(forKey: AIInsights.FoodBolusHandoff.userDefaultsKey)
         let state = Treatments.StateModel()
         present(state)
