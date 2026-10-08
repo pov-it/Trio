@@ -27,11 +27,12 @@ final class CriticalAlertAudioPlayer {
     /// LoopFollow / Jonas loop-failure alarm. `.playback` audio session gives
     /// the app a privileged background state so the alarm continues even if
     /// the user has the screen locked.
-    func play(soundNamed soundName: String = "critical.caf") {
+    func play(soundNamed requestedSoundName: String = "critical.caf") {
         stop()
 
         startVibration()
 
+        let soundName = AlarmSoundCatalog.bundledFilename(for: requestedSoundName)
         let resource = (soundName as NSString).deletingPathExtension
         let ext = (soundName as NSString).pathExtension.isEmpty ? "caf" : (soundName as NSString).pathExtension
         let url = Bundle.main.url(forResource: resource, withExtension: ext)
