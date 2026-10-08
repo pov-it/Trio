@@ -77,13 +77,14 @@ enum GlucoseAlertType: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    /// Default bundled sound filename. See `Trio/Resources/Sounds/`.
+    /// Default tone. Low, urgent-low and high use the iOS notification sound;
+    /// the rest a bundled file from `Trio/Resources/Sounds/`.
     var defaultSoundFilename: String {
         switch self {
-        case .urgentLow: return "urgent_low.caf"
-        case .low: return "trill.caf"
+        case .high,
+             .low,
+             .urgentLow: return AlarmSoundCatalog.systemDefault
         case .forecastedLow: return "bloom.caf"
-        case .high: return "chime.caf"
         case .carbsRequired: return "bloop.caf"
         }
     }
