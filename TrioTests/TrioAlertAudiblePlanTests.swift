@@ -78,6 +78,94 @@ import Testing
         #expect(plan.notificationSound == .named("chime.caf", critical: false))
         #expect(!plan.startFallback)
     }
+
+    @Test("System default on a non-critical alert uses the default iOS notification sound")
+    func systemDefaultNonCritical() {
+        let plan = TrioAlertAudiblePlan.make(
+            interruptionLevel: .timeSensitive,
+            soundFilename: AlarmSoundCatalog.systemDefault,
+            muted: false,
+            criticalAlertsAuthorized: false
+        )
+        #expect(plan.notificationSound == .systemDefault(critical: false))
+        #expect(!plan.startFallback)
+    }
+
+    @Test("System default on an authorized critical alert uses the default critical sound only")
+    func systemDefaultAuthorizedCritical() {
+        let plan = TrioAlertAudiblePlan.make(
+            interruptionLevel: .critical,
+            soundFilename: AlarmSoundCatalog.systemDefault,
+            muted: true,
+            criticalAlertsAuthorized: true
+        )
+        #expect(plan.notificationSound == .systemDefault(critical: true))
+        #expect(!plan.startFallback)
+        #expect(!plan.silenceNotification)
+    }
+
+    @Test("System default on a denied critical alert still starts the fallback")
+    func systemDefaultDeniedCriticalUsesFallback() {
+        let plan = TrioAlertAudiblePlan.make(
+            interruptionLevel: .critical,
+            soundFilename: AlarmSoundCatalog.systemDefault,
+            muted: false,
+            criticalAlertsAuthorized: false
+        )
+        #expect(plan.notificationSound == .none)
+        #expect(plan.startFallback)
+        #expect(plan.silenceNotification)
+    }
+
+    @Test("Muted non-critical system default stays silent")
+    func systemDefaultMutedNonCritical() {
+        let sound = TrioAlertAudiblePlan.notificationSound(
+            isCritical: false,
+            soundFilename: AlarmSoundCatalog.systemDefault,
+            muted: true
+        )
+        #expect(sound == .none)
+    }
+
+    @Test("Fallback channels play a bundled file for system default and the chosen file otherwise")
+    func fallbackFilename() {
+        let fallback = TrioAlertAudiblePlan.fallbackSoundFilename(for: AlarmSoundCatalog.systemDefault)
+        #expect(fallback == AlarmSoundCatalog.systemDefaultBundledFallback)
+        #expect(AlarmSoundCatalog.allFilenames.contains(fallback))
+        #expect(TrioAlertAudiblePlan.fallbackSoundFilename(for: "trill.caf") == "trill.caf")
+    }
+}
+
+@Suite("Trio Alerts: system default tone option") struct AlarmSoundCatalogSystemDefaultTests {
+    @Test("Picker lists system default first, then every bundled tone")
+    func pickerOptions() {
+        #expect(AlarmSoundCatalog.pickerOptions.first == AlarmSoundCatalog.systemDefault)
+        #expect(Array(AlarmSoundCatalog.pickerOptions.dropFirst()) == AlarmSoundCatalog.allFilenames)
+        #expect(!AlarmSoundCatalog.allFilenames.contains(AlarmSoundCatalog.systemDefault))
+    }
+
+    @Test("System default has its own display name")
+    func displayName() {
+        #expect(AlarmSoundCatalog.displayName(for: AlarmSoundCatalog.systemDefault) != AlarmSoundCatalog.systemDefault)
+    }
+
+    @Test("Low, urgent-low and high default to system default; the rest keep bundled tones")
+    func typeDefaults() {
+        #expect(GlucoseAlertType.low.defaultSoundFilename == AlarmSoundCatalog.systemDefault)
+        #expect(GlucoseAlertType.urgentLow.defaultSoundFilename == AlarmSoundCatalog.systemDefault)
+        #expect(GlucoseAlertType.high.defaultSoundFilename == AlarmSoundCatalog.systemDefault)
+        #expect(AlarmSoundCatalog.allFilenames.contains(GlucoseAlertType.forecastedLow.defaultSoundFilename))
+        #expect(AlarmSoundCatalog.allFilenames.contains(GlucoseAlertType.carbsRequired.defaultSoundFilename))
+    }
+
+    @Test("A stored system default tone round-trips through Codable")
+    func codableRoundTrip() throws {
+        var alert = GlucoseAlert(type: .forecastedLow)
+        alert.soundFilename = AlarmSoundCatalog.systemDefault
+        let data = try JSONEncoder().encode(alert)
+        let decoded = try JSONDecoder().decode(GlucoseAlert.self, from: data)
+        #expect(decoded.soundFilename == AlarmSoundCatalog.systemDefault)
+    }
 }
 
 @Suite("Trio Alerts: fallback ownership under home-bell snooze") struct FallbackAudioOwnershipTests {
