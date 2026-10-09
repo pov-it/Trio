@@ -88,8 +88,11 @@ final class CriticalAlertAlarmScheduler {
             // Activity is required. `AlertSound.named` resolves the same way
             // `UNNotificationSoundName` does — main bundle root or
             // Library/Sounds — which is where Trio's tones now live.
+            // AlarmKit cannot play the iOS notification sound, and its
+            // `.default` is the Clock alarm tone, so "System default" rings
+            // the soft bundled fallback instead.
             let sound: AlertConfiguration.AlertSound = alert.sound?.filename
-                .map { .named($0) } ?? .default
+                .map { .named(TrioAlertAudiblePlan.fallbackSoundFilename(for: $0)) } ?? .default
             let configuration = AlarmManager.AlarmConfiguration<EmptyAlarmMetadata>.alarm(
                 schedule: .fixed(Date().addingTimeInterval(Self.immediateFireDelay)),
                 attributes: attributes,

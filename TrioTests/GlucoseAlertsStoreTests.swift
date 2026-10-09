@@ -171,6 +171,53 @@ import Testing
         #expect(store.configuration.forceTrioAlertsWhenCGMProvidesOwn == true)
     }
 
+    @Test("One-time migration moves bundled low/urgentLow/high tones to system default")
+    func migratesBundledTonesToSystemDefault() {
+        var low = GlucoseAlert(type: .low)
+        low.soundFilename = "trill.caf"
+        var urgent = GlucoseAlert(type: .urgentLow)
+        urgent.soundFilename = "urgent_low.caf"
+        var high = GlucoseAlert(type: .high)
+        high.soundFilename = "chime.caf"
+        high.playsSound = false
+        var forecast = GlucoseAlert(type: .forecastedLow)
+        forecast.soundFilename = "bloom.caf"
+        var carbs = GlucoseAlert(type: .carbsRequired)
+        carbs.soundFilename = "bloop.caf"
+        let store = Self.makeStore(seed: [low, urgent, high, forecast, carbs])
+
+        #expect(store.alerts.first { $0.type == .low }?.soundFilename == AlarmSoundCatalog.systemDefault)
+        #expect(store.alerts.first { $0.type == .urgentLow }?.soundFilename == AlarmSoundCatalog.systemDefault)
+        #expect(store.alerts.first { $0.type == .high }?.soundFilename == AlarmSoundCatalog.systemDefault)
+        #expect(store.alerts.first { $0.type == .high }?.playsSound == false)
+        #expect(store.alerts.first { $0.type == .forecastedLow }?.soundFilename == "bloom.caf")
+        #expect(store.alerts.first { $0.type == .carbsRequired }?.soundFilename == "bloop.caf")
+        #expect(store.alerts.first { $0.type == .low }?.overridesSilenceAndDND == true)
+        #expect(store.alerts.first { $0.type == .urgentLow }?.overridesSilenceAndDND == true)
+    }
+
+    @Test("System default tone migration runs once, so a later bundled pick sticks")
+    func systemDefaultToneMigrationRunsOnce() {
+        let suiteName = "GlucoseAlertsStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        var low = GlucoseAlert(type: .low)
+        low.soundFilename = "trill.caf"
+        defaults.set(try? JSONEncoder().encode([low]), forKey: "alerts")
+
+        let first = GlucoseAlertsStore(defaults: defaults, alertsKey: "alerts", configKey: "config")
+        #expect(first.alerts.first { $0.type == .low }?.soundFilename == AlarmSoundCatalog.systemDefault)
+        #expect(defaults.bool(forKey: GlucoseAlertsStore.systemDefaultToneMigrationKey))
+
+        var picked = first.alerts
+        let index = picked.firstIndex { $0.type == .low }!
+        picked[index].soundFilename = "trill.caf"
+        defaults.set(try? JSONEncoder().encode(picked), forKey: "alerts")
+
+        let second = GlucoseAlertsStore(defaults: defaults, alertsKey: "alerts", configKey: "config")
+        #expect(second.alerts.first { $0.type == .low }?.soundFilename == "trill.caf")
+    }
+
     @Test("Fresh configuration defaults to Trio-owned glucose alerts")
     func freshConfigTrioOwnsAlerts() {
         let store = Self.makeStore()

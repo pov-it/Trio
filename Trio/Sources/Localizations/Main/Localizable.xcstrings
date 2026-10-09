@@ -1089,6 +1089,28 @@
         }
       }
     },
+    "System default" : {
+      "comment" : "Alarm tone option that uses the standard iOS notification sound",
+      "localizations" : {
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iOS standaard"
+          }
+        }
+      }
+    },
+    "System default plays the standard iOS notification sound, or the iOS critical alert sound for alarms that override Silence & Focus. Without Critical Alerts permission the alarm rings with Bloom instead." : {
+      "comment" : "Footer of the alarm tone picker",
+      "localizations" : {
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iOS standaard speelt het gewone iOS-meldingsgeluid, of het iOS-geluid voor kritieke meldingen bij alarmen die Stil & Focus doorbreken. Zonder toestemming voor kritieke meldingen klinkt het alarm met Bloom."
+          }
+        }
+      }
+    },
     " " : {
       "localizations" : {
         "bg" : {

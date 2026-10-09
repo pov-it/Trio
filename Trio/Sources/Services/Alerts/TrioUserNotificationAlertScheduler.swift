@@ -69,18 +69,22 @@ final class TrioUserNotificationAlertScheduler {
         // Alerts not authorized), the caller passes `silenced: true` and this
         // method is not used — otherwise the notification and the fallback
         // would stack as two different sounds.
-        if muted, !isCritical {
+        let resolved = TrioAlertAudiblePlan.notificationSound(
+            isCritical: isCritical,
+            soundFilename: alert.sound?.filename,
+            muted: muted
+        )
+        switch resolved {
+        case .none:
             return nil
-        }
-        switch alert.sound {
-        case .none,
-             .vibrate:
+        case .criticalSilent:
             // Honor playsSound: false — still a critical UN, but silent.
-            return isCritical ? .defaultCriticalSound(withAudioVolume: 0) : nil
-        case let .sound(name):
-            let filename = soundURL?.lastPathComponent ?? name
-            let soundName = UNNotificationSoundName(rawValue: filename)
-            if isCritical {
+            return .defaultCriticalSound(withAudioVolume: 0)
+        case let .systemDefault(critical):
+            return critical ? .defaultCritical : .default
+        case let .named(name, critical):
+            let soundName = UNNotificationSoundName(rawValue: soundURL?.lastPathComponent ?? name)
+            if critical {
                 // One audible channel: the chosen .caf as a critical sound.
                 // Requires the critical-alerts entitlement and the user having
                 // allowed Critical Alerts. Callers must not also start
@@ -103,6 +107,8 @@ struct TrioAlertAudiblePlan: Equatable {
         case none
         /// Critical interruption with no tone (`playsSound` off).
         case criticalSilent
+        /// `UNNotificationSound.default`, or `.defaultCritical` when critical.
+        case systemDefault(critical: Bool)
         case named(String, critical: Bool)
     }
 
@@ -120,28 +126,37 @@ struct TrioAlertAudiblePlan: Equatable {
         criticalAlertsAuthorized: Bool
     ) -> TrioAlertAudiblePlan {
         let isCritical = interruptionLevel == .critical
-        guard let filename = soundFilename else {
-            if isCritical {
-                return TrioAlertAudiblePlan(notificationSound: .criticalSilent, startFallback: false)
-            }
-            return TrioAlertAudiblePlan(notificationSound: .none, startFallback: false)
-        }
-        if !isCritical {
-            if muted {
-                return TrioAlertAudiblePlan(notificationSound: .none, startFallback: false)
-            }
-            return TrioAlertAudiblePlan(notificationSound: .named(filename, critical: false), startFallback: false)
-        }
+        let sound = notificationSound(isCritical: isCritical, soundFilename: soundFilename, muted: muted)
         // Critical + a chosen tone. Mute does not silence it: per-type snooze
         // retracts glucose alarms the home bell covers, and urgent-low is
         // left outside that bulk snooze.
-        if criticalAlertsAuthorized {
-            return TrioAlertAudiblePlan(
-                notificationSound: .named(filename, critical: true),
-                startFallback: false
-            )
+        if isCritical, soundFilename != nil, !criticalAlertsAuthorized {
+            return TrioAlertAudiblePlan(notificationSound: .none, startFallback: true)
         }
-        return TrioAlertAudiblePlan(notificationSound: .none, startFallback: true)
+        return TrioAlertAudiblePlan(notificationSound: sound, startFallback: false)
+    }
+
+    /// The tone the user notification carries when it is the audible channel.
+    /// `AlarmSoundCatalog.systemDefault` maps to the iOS default sounds instead
+    /// of a named file.
+    static func notificationSound(isCritical: Bool, soundFilename: String?, muted: Bool) -> NotificationSound {
+        guard let filename = soundFilename else {
+            return isCritical ? .criticalSilent : .none
+        }
+        if muted, !isCritical {
+            return .none
+        }
+        if AlarmSoundCatalog.isSystemDefault(filename) {
+            return .systemDefault(critical: isCritical)
+        }
+        return .named(filename, critical: isCritical)
+    }
+
+    /// The bundled file AlarmKit and `CriticalAlertAudioPlayer` play. Neither
+    /// can play the iOS notification sound, so system default uses a soft
+    /// bundled tone.
+    static func fallbackSoundFilename(for soundFilename: String) -> String {
+        AlarmSoundCatalog.bundledFilename(for: soundFilename)
     }
 }
 

@@ -44,7 +44,35 @@ final class GlucoseAlertsStore: ObservableObject {
         ) ?? GlucoseAlertConfiguration()
         migrateLowFamilySilenceOverrideIfNeeded()
         migrateTrioOwnsGlucoseAlertsIfNeeded()
+        migrateToSystemDefaultToneIfNeeded()
         bind()
+    }
+
+    /// Until the bundled tones moved to the app bundle root, every glucose
+    /// alarm played the iOS notification sound whatever tone was picked.
+    /// Once the bundled tones started playing, low / urgent-low / high
+    /// alarms sounded very different from before. Put those three back on
+    /// the iOS sound once. Only bundled catalog tones are replaced; the
+    /// critical / Silence & Focus flag and Play Sound are left as they are.
+    /// The user can pick a bundled tone again afterwards and it sticks.
+    static let systemDefaultToneMigrationKey = "trio.glucoseAlerts.systemDefaultTone.v1"
+    static let systemDefaultToneMigrationTypes: Set<GlucoseAlertType> = [.urgentLow, .low, .high]
+
+    private func migrateToSystemDefaultToneIfNeeded() {
+        guard !defaults.bool(forKey: Self.systemDefaultToneMigrationKey) else { return }
+        var changed = false
+        for index in alerts.indices {
+            guard Self.systemDefaultToneMigrationTypes.contains(alerts[index].type),
+                  AlarmSoundCatalog.allFilenames.contains(alerts[index].soundFilename)
+            else { continue }
+            alerts[index].soundFilename = AlarmSoundCatalog.systemDefault
+            changed = true
+        }
+        defaults.set(true, forKey: Self.systemDefaultToneMigrationKey)
+        // bind() uses dropFirst(), so persist now or the change never hits disk.
+        if changed {
+            encode(alerts, to: alertsKey)
+        }
     }
 
     /// One-time repair after the upstream/dev alert rewrite. Stock Low

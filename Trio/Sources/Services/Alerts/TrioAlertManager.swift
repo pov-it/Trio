@@ -227,7 +227,8 @@ final class BaseTrioAlertManager: TrioAlertManager, Injectable {
     ) async {
         await refreshCriticalAlertAuthorization()
         guard fallbackAudio.isCurrent(generation: generation, identifier: alert.identifier) else { return }
-        guard let soundName = alert.sound?.filename else { return }
+        guard let chosen = alert.sound?.filename else { return }
+        let soundName = TrioAlertAudiblePlan.fallbackSoundFilename(for: chosen)
         if criticalAlertsAuthorized {
             // Drop any looping player left by an earlier fallback so it cannot
             // stack on the critical notification.

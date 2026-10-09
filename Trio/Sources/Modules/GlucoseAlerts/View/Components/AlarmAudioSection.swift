@@ -1,3 +1,4 @@
+import AudioToolbox
 import AVFoundation
 import SwiftUI
 
@@ -46,13 +47,17 @@ private struct TonePickerSheet: View {
         NavigationStack {
             List {
                 Section {
-                    ForEach(AlarmSoundCatalog.allFilenames, id: \.self) { filename in
+                    ForEach(AlarmSoundCatalog.pickerOptions, id: \.self) { filename in
                         TonePickerRow(
                             filename: filename,
                             selected: $selected,
                             previewer: previewer
                         )
                     }
+                } footer: {
+                    Text(
+                        "System default plays the standard iOS notification sound, or the iOS critical alert sound for alarms that override Silence & Focus. Without Critical Alerts permission the alarm rings with Bloom instead."
+                    )
                 }.listRowBackground(Color.chart)
             }
             .scrollContentBackground(.hidden).background(appState.trioBackgroundColor(for: colorScheme))
@@ -137,6 +142,10 @@ private struct TonePickerRow: View {
 
     func play(filename: String) {
         stop()
+        if AlarmSoundCatalog.isSystemDefault(filename) {
+            playSystemDefault()
+            return
+        }
         let resource = (filename as NSString).deletingPathExtension
         let ext = (filename as NSString).pathExtension.isEmpty ? "caf" : (filename as NSString).pathExtension
         guard let url = Bundle.main.url(forResource: resource, withExtension: ext) else {
@@ -153,6 +162,22 @@ private struct TonePickerRow: View {
             playing = filename
         } catch {
             debug(.service, "Audio preview failed for \(filename): \(error)")
+        }
+    }
+
+    /// iOS has no public API to play the user's current default notification
+    /// sound, so the preview uses the classic iOS tri-tone. It follows the
+    /// silent switch like the bundled previews and cannot be stopped early.
+    private static let systemDefaultPreviewSoundID: SystemSoundID = 1007
+
+    private func playSystemDefault() {
+        let filename = AlarmSoundCatalog.systemDefault
+        playing = filename
+        AudioServicesPlaySystemSoundWithCompletion(Self.systemDefaultPreviewSoundID) { [weak self] in
+            Task { @MainActor in
+                guard let self, self.playing == filename else { return }
+                self.playing = nil
+            }
         }
     }
 

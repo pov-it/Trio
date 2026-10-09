@@ -39,7 +39,7 @@
 	url = https://github.com/loopandlearn/EversenseKit
 [submodule "LibreCRKit"]
 	path = LibreCRKit
-	url = https://github.com/loopandlearn/LibreCRKit.git
+	url = https://github.com/pov-it/LibreCRKit.git
 	branch = trio
 [submodule "LibreLoop"]
 	path = LibreLoop
