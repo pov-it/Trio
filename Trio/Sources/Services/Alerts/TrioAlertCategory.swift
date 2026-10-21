@@ -100,7 +100,6 @@ enum TrioAlertCategory: Equatable {
              .deliveryUncertain,
              .glucoseUrgentLow,
              .hardwareFault,
-             .notLooping,
              .occlusion,
              .reservoirEmpty,
              .sensorFailure:
@@ -113,6 +112,7 @@ enum TrioAlertCategory: Equatable {
              .glucoseHigh,
              .glucoseLow,
              .manualTempBasalActive,
+             .notLooping,
              .podShutdownImminent,
              .reservoirLow,
              .suspendTimeExpired:

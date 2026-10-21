@@ -56,8 +56,8 @@ final class SpyAlertManager: TrioAlertManager {
     )
 
     @Test(
-        "A single loop success retracts then issues a fresh delayed critical alarm"
-    ) func singleLoopSuccessRetractsThenIssuesDelayedCritical() {
+        "A single loop success retracts then issues a fresh delayed time-sensitive alarm"
+    ) func singleLoopSuccessRetractsThenIssuesDelayedTimeSensitive() {
         let subject = PassthroughSubject<Date, Never>()
         let spy = SpyAlertManager()
         let monitor = NotLoopingMonitor(loopDates: subject.eraseToAnyPublisher(), trioAlertManager: spy)
@@ -73,7 +73,10 @@ final class SpyAlertManager: TrioAlertManager {
         #expect(spy.callLog == [.retract(expectedID), .issue(issued)])
         #expect(issued.identifier == expectedID)
         #expect(issued.trigger == .delayed(interval: 1200))
-        #expect(issued.interruptionLevel == .critical)
+        #expect(issued.interruptionLevel == .timeSensitive)
+        #expect(issued.sound == .sound(name: DeviceAlertSeverity.timeSensitive.defaultSoundFilename))
+        #expect(issued.sound?.filename == "chime.caf")
+        #expect(issued.sound?.filename != "honk.caf")
 
         _ = monitor // retain through the synchronous send
     }
@@ -119,7 +122,8 @@ final class SpyAlertManager: TrioAlertManager {
         ])
         for issued in spy.issuedAlerts {
             #expect(issued.trigger == .delayed(interval: 1200))
-            #expect(issued.interruptionLevel == .critical)
+            #expect(issued.interruptionLevel == .timeSensitive)
+            #expect(issued.sound?.filename == "chime.caf")
         }
 
         _ = monitor
