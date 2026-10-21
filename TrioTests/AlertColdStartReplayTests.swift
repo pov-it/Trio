@@ -97,6 +97,22 @@ import Testing
         #expect(alert.interruptionLevel == .active)
     }
 
+    @Test("Catalog keeps Trio Not Active time-sensitive even if history stored critical")
+    func notActiveCatalogDoesNotReEscalate() {
+        let decision = decide(entry(
+            manager: "trio.aps",
+            alert: "loop.notActive",
+            level: 3,
+            issuedAgo: 60
+        ))
+        guard case let .replay(alert) = decision else {
+            Issue.record("expected replay, got \(decision)")
+            return
+        }
+        #expect(alert.interruptionLevel == .timeSensitive)
+        #expect(alert.sound == nil)
+    }
+
     @Test("Unknown identifier falls back to stored level, then timeSensitive") func levelFallbacks() {
         guard case let .replay(stored) = decide(entry(manager: "x", alert: "y", level: 3)) else {
             Issue.record("expected replay")
@@ -113,7 +129,9 @@ import Testing
 
     @Test("Tier snooze skips catalog non-critical, critical pierces") func tierSnoozeGate() {
         #expect(decide(entry(), tierSnoozed: true) == .skip)
-        let critical = entry(manager: "trio.aps", alert: "loop.notActive", issuedAgo: 60)
+        let timeSensitive = entry(manager: "trio.aps", alert: "loop.notActive", issuedAgo: 60)
+        #expect(decide(timeSensitive, tierSnoozed: true) == .skip)
+        let critical = entry(manager: "Dana", alert: "occlusion", issuedAgo: 60)
         if case .replay = decide(critical, tierSnoozed: true) {} else {
             Issue.record("critical should pierce tier snooze")
         }
@@ -121,7 +139,9 @@ import Testing
 
     @Test("Mute skips non-critical, critical pierces") func muteGate() {
         #expect(decide(entry(), muted: true) == .skip)
-        let critical = entry(manager: "trio.aps", alert: "loop.notActive", issuedAgo: 60)
+        let timeSensitive = entry(manager: "trio.aps", alert: "loop.notActive", issuedAgo: 60)
+        #expect(decide(timeSensitive, muted: true) == .skip)
+        let critical = entry(manager: "Dana", alert: "occlusion", issuedAgo: 60)
         if case .replay = decide(critical, muted: true) {} else {
             Issue.record("critical should pierce mute")
         }
