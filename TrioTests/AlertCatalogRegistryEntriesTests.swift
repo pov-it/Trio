@@ -33,8 +33,7 @@ import Testing
             ("Medtrum", "com.nightscout.medtrumkit.patch-occlussion"), // double-s (current MedtrumKit)
             ("Medtrum", "com.nightscout.medtrumkit.patch-occlusion"), // single-s (future MedtrumKit)
             ("Medtrum", "com.nightscout.medtrumkit.patch-fault"),
-            ("Medtrum", "com.nightscout.medtrumkit.patch-empty"),
-            ("trio.aps", "loop.notActive")
+            ("Medtrum", "com.nightscout.medtrumkit.patch-empty")
         ]
     ) func criticalEntries(manager: String, alertID: String) {
         #expect(AlertCatalogRegistry.lookup(id(manager, alertID))?.interruptionLevel == .critical)
@@ -58,7 +57,10 @@ import Testing
             ("LibreLoopCGMManager", "sensorExpiry.warning2h"),
             ("LibreLoopCGMManager", "sensorExpiry.sessionEnded"),
             ("LibreLoopCGMManager", "sensorAttention"),
-            ("trio.aps", "glucoseDataStale")
+            ("trio.aps", "glucoseDataStale"),
+            // Time-Sensitive so it respects Silent mode / Focus; listed under
+            // the Time-Sensitive Device Alarms tier rather than Critical.
+            ("trio.aps", "loop.notActive")
         ]
     ) func timeSensitiveEntries(manager: String, alertID: String) {
         #expect(AlertCatalogRegistry.lookup(id(manager, alertID))?.interruptionLevel == .timeSensitive)

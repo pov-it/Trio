@@ -12,7 +12,7 @@ import Swinject
 /// Replaces the legacy `scheduleMissingLoopNotifiactions` direct-UN path
 /// in `BaseUserNotificationsManager`. The alert now flows through
 /// `TrioAlertManager` and inherits tier config from Device Alarms
-/// (Critical tier by default).
+/// (Time-Sensitive tier by default — obeys Silent mode and Focus).
 final class NotLoopingMonitor: Injectable {
     @Injected() private var apsManager: APSManager!
     @Injected() private var trioAlertManager: TrioAlertManager!
@@ -78,8 +78,8 @@ final class NotLoopingMonitor: Injectable {
             foregroundContent: content,
             backgroundContent: content,
             trigger: .delayed(interval: TimeInterval(Self.gracePeriodMinutes * 60)),
-            interruptionLevel: .critical,
-            sound: .sound(name: "honk.caf")
+            interruptionLevel: .timeSensitive,
+            sound: .sound(name: DeviceAlertSeverity.timeSensitive.defaultSoundFilename)
         )
         trioAlertManager.issueAlert(alert)
     }

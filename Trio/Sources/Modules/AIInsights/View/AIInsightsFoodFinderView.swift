@@ -399,6 +399,8 @@ extension AIInsights {
                 macroSummaryCard(result)
             }
 
+            bolusHandoffSection(result)
+
             Section {
                 ForEach(result.items) { item in
                     foodItemRow(item)
@@ -419,6 +421,28 @@ extension AIInsights {
                 Text(String(localized: "Ingredients", comment: "FoodFinder ingredients section"))
             }
 
+            if let summary = state.postMealSummaries[result.id] {
+                postMealSection(summary)
+            }
+
+            Section {
+                let keys = MealResponseKeys(results: [result])
+                MealResponseCard(
+                    title: String(localized: "Glucose after this meal", comment: "Meal detail response card title"),
+                    mealIDs: keys.mealIDs,
+                    foodResultIDs: keys.foodResultIDs,
+                    units: state.glucoseUnits,
+                    cardFill: colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white,
+                    currentCarbs: result.totalCarbs
+                )
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+            }
+        }
+
+        /// Sits under the portion control and above the ingredient list. Opens the bolus calculator
+        /// with the current macros; it does not deliver insulin.
+        @ViewBuilder private func bolusHandoffSection(_ result: FoodAnalysisResult) -> some View {
             Section {
                 Button {
                     state.sendToBolusCalculator(openBolusCalculator: onHandoffComplete == nil)
@@ -458,24 +482,6 @@ extension AIInsights {
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
-            }
-
-            if let summary = state.postMealSummaries[result.id] {
-                postMealSection(summary)
-            }
-
-            Section {
-                let keys = MealResponseKeys(results: [result])
-                MealResponseCard(
-                    title: String(localized: "Glucose after this meal", comment: "Meal detail response card title"),
-                    mealIDs: keys.mealIDs,
-                    foodResultIDs: keys.foodResultIDs,
-                    units: state.glucoseUnits,
-                    cardFill: colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white,
-                    currentCarbs: result.totalCarbs
-                )
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
             }
         }
 
@@ -2533,7 +2539,8 @@ private struct EditableDoubleField: View {
 
 /// Editable portion-multiplier field. Shows "X.XX×" and, when tapped, lets the
 /// user type any factor directly instead of being limited to ±0.25 steps.
-private struct EditableMultiplierField: View {
+/// Shared by FoodFinder and the saved-meal sheet so both portion rows behave the same.
+struct EditableMultiplierField: View {
     let multiplier: Double
     let onCommit: (Double) -> Void
 

@@ -1425,3 +1425,98 @@ struct FoodFinderStoredDataToleranceTests {
         #expect(store.folderNames().contains("Breakfast"))
     }
 }
+
+@Suite("Whole-meal portion scaling")
+struct MealPortionScalingTests {
+    private func meal(override: AIInsights.MacroOverride? = nil) -> AIInsights.FoodAnalysisResult {
+        AIInsights.FoodAnalysisResult(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            items: [
+                AIInsights.FoodItem(
+                    name: "Bread",
+                    portion: "1 slice (30 g)",
+                    carbs: 15,
+                    fat: 1,
+                    protein: 3,
+                    fiber: 1,
+                    calories: 80,
+                    portionMultiplier: 2
+                ),
+                AIInsights.FoodItem(
+                    name: "Cheese",
+                    portion: "1 slice",
+                    carbs: 1,
+                    fat: 5,
+                    protein: 4,
+                    fiber: 0,
+                    calories: 60
+                )
+            ],
+            rawResponse: nil,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            source: .aiText,
+            manualMacroOverride: override,
+            carbEstimateLowerRatio: 0.8,
+            carbEstimateUpperRatio: 1.2
+        )
+    }
+
+    @Test("A larger portion scales every ingredient and the carb band")
+    func scalesIngredientsAndBounds() {
+        let result = meal()
+        #expect(result.totalCarbs == 31)
+        #expect(result.appliedMealPortionMultiplier == 1)
+
+        let larger = result.scaledToMealPortion(2)
+        #expect(larger.id == result.id)
+        #expect(larger.mealPortionMultiplier == 2)
+        #expect(abs(larger.items[0].portionMultiplier - 4) < 0.0001)
+        #expect(abs(larger.items[1].portionMultiplier - 2) < 0.0001)
+        #expect(abs(larger.totalCarbs - 62) < 0.0001)
+        #expect(abs(larger.totalProtein - 20) < 0.0001)
+        #expect(abs((larger.carbEstimateLowerBound ?? 0) - 49.6) < 0.0001)
+        #expect(abs((larger.carbEstimateUpperBound ?? 0) - 74.4) < 0.0001)
+        #expect(abs((larger.carbEstimateUncertaintyUnits ?? 0) - 2.48) < 0.0001)
+
+        let restored = larger.scaledToMealPortion(1)
+        #expect(restored.mealPortionMultiplier == nil)
+        #expect(abs(restored.items[0].portionMultiplier - 2) < 0.0001)
+        #expect(abs(restored.totalCarbs - 31) < 0.0001)
+    }
+
+    @Test("Steps land on the absolute portion, and the range is clamped")
+    func stepsAndClamp() {
+        let result = meal()
+        let oneAndAQuarter = result.scaledToMealPortion(1 + AIInsights.FoodAnalysisResult.mealPortionStep)
+        #expect(abs(oneAndAQuarter.appliedMealPortionMultiplier - 1.25) < 0.0001)
+        #expect(abs(oneAndAQuarter.totalCarbs - 38.75) < 0.0001)
+
+        let halfAgain = oneAndAQuarter.scaledToMealPortion(1.5)
+        #expect(abs(halfAgain.appliedMealPortionMultiplier - 1.5) < 0.0001)
+        #expect(abs(halfAgain.items[0].portionMultiplier - 3) < 0.0001)
+
+        let tiny = result.scaledToMealPortion(0.01)
+        #expect(tiny.mealPortionMultiplier == AIInsights.FoodAnalysisResult.mealPortionRange.lowerBound)
+        let huge = result.scaledToMealPortion(99)
+        #expect(huge.mealPortionMultiplier == AIInsights.FoodAnalysisResult.mealPortionRange.upperBound)
+
+        let unchanged = result.scaledToMealPortion(1)
+        #expect(unchanged.mealPortionMultiplier == nil)
+        #expect(unchanged.items[0].portionMultiplier == 2)
+        #expect(unchanged.carbEstimateLowerBound == nil)
+    }
+
+    @Test("An edited total scales with the portion and still wins over the ingredients")
+    func scalesManualOverride() {
+        let result = meal(override: AIInsights.MacroOverride(carbs: 40, fat: 8, protein: nil, fiber: nil, calories: nil))
+        #expect(result.totalCarbs == 40)
+        #expect(result.totalFat == 8)
+        #expect(result.totalProtein == 10)
+
+        let doubled = result.scaledToMealPortion(2)
+        #expect(doubled.totalCarbs == 80)
+        #expect(doubled.totalFat == 16)
+        #expect(abs(doubled.totalProtein - 20) < 0.0001)
+        #expect(abs((doubled.carbEstimateLowerBound ?? 0) - 64) < 0.0001)
+    }
+}

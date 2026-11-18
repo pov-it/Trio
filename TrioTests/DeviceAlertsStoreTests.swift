@@ -377,6 +377,54 @@ import Testing
         #expect(effective.interruptionLevel == .active)
     }
 
+    @Test("Trio Not Active stays time-sensitive and uses the time-sensitive default tone")
+    func notActiveStaysTimeSensitiveWithChime() throws {
+        let identifier = Alert.Identifier(managerIdentifier: "trio.aps", alertIdentifier: "loop.notActive")
+        let entry = try #require(AlertCatalogRegistry.lookup(identifier))
+        #expect(entry.interruptionLevel == .timeSensitive, "Catalog tier is Time-Sensitive")
+        #expect(DeviceAlertSeverity(level: entry.interruptionLevel) == .timeSensitive)
+
+        let config = DeviceAlertSeverityConfig(severity: .timeSensitive)
+        #expect(config.overridesSilenceAndDND == false)
+        #expect(config.soundFilename == "chime.caf")
+
+        let content = Alert.Content(title: "t", body: "b", acknowledgeActionButtonLabel: "OK")
+        let issued = Alert(
+            identifier: identifier,
+            foregroundContent: content,
+            backgroundContent: content,
+            trigger: .delayed(interval: 1200),
+            interruptionLevel: .timeSensitive,
+            sound: .sound(name: DeviceAlertSeverity.timeSensitive.defaultSoundFilename)
+        )
+        let effective = BaseTrioAlertManager.applyDeviceSeverityConfig(config, entry: entry, to: issued)
+        #expect(effective.interruptionLevel == .timeSensitive)
+        #expect(effective.sound == .sound(name: "chime.caf"))
+        #expect(effective.sound?.filename != "honk.caf")
+        #expect(effective.trigger == .delayed(interval: 1200))
+    }
+
+    @Test("Occlusion, pump fault, empty reservoir stay critical under Device Alarms overlay")
+    func otherCriticalDeviceAlarmsStayCritical() throws {
+        let identifiers = [
+            Alert.Identifier(managerIdentifier: "Dana", alertIdentifier: "occlusion"),
+            Alert.Identifier(managerIdentifier: "Medtrum", alertIdentifier: "com.nightscout.medtrumkit.patch-fault"),
+            Alert.Identifier(managerIdentifier: "Medtrum", alertIdentifier: "com.nightscout.medtrumkit.patch-empty")
+        ]
+        var config = DeviceAlertSeverityConfig(severity: .critical)
+        config.overridesSilenceAndDND = false
+        for identifier in identifiers {
+            let entry = try #require(AlertCatalogRegistry.lookup(identifier))
+            #expect(entry.interruptionLevel == .critical)
+            let effective = BaseTrioAlertManager.applyDeviceSeverityConfig(
+                config,
+                entry: entry,
+                to: Self.pluginAlert(identifier)
+            )
+            #expect(effective.interruptionLevel == .critical)
+        }
+    }
+
     // MARK: - Enabled / day-night gating
 
     @Test("Disabled tier resolves to no config, so the alarm is dropped") func disabledTierDrops() {
@@ -406,6 +454,9 @@ import Testing
 
     @Test("Selected tones resolve to bundled sound files") func tonesExistInCatalog() {
         #expect(AlarmSoundCatalog.allFilenames.contains("synth.caf"))
+        #expect(DeviceAlertSeverity.critical.defaultSoundFilename == "alarm.caf")
+        #expect(DeviceAlertSeverity.timeSensitive.defaultSoundFilename == "chime.caf")
+        #expect(DeviceAlertSeverity.normal.defaultSoundFilename == "bloop.caf")
         for severity in DeviceAlertSeverity.allCases {
             #expect(
                 AlarmSoundCatalog.allFilenames.contains(severity.defaultSoundFilename),

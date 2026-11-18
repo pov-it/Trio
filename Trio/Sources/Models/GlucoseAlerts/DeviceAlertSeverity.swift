@@ -45,11 +45,11 @@ enum DeviceAlertSeverity: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .critical:
             return String(
-                localized: "For situations that require prompt attention. These break through Silent Mode, Do Not Disturb, and any Focus you have enabled. Examples: a pump fault, an occlusion, or Trio not looping for too long. Heads up: if your build of Trio has Apple's Critical Alerts entitlement, iOS plays its own critical alert sound and the sound you picked for this alert category is ignored."
+                localized: "For situations that require prompt attention. These break through Silent Mode, Do Not Disturb, and any Focus you have enabled. Examples: a pump fault, an occlusion, or an empty reservoir. Heads up: if your build of Trio has Apple's Critical Alerts entitlement, iOS plays its own critical alert sound and the sound you picked for this alert category is ignored."
             )
         case .timeSensitive:
             return String(
-                localized: "For things you should know about soon, but not 'act right now'. These can break through banner suppression on the lock screen, but they still obey Silent Mode and Focus by default. Examples: reservoir running low, pod or patch expiring soon, or glucose data going stale."
+                localized: "For things you should know about soon, but not 'act right now'. These can break through banner suppression on the lock screen, but they still obey Silent Mode and Focus by default. Examples: reservoir running low, glucose data going stale, or Trio not looping."
             )
         case .normal:
             return String(

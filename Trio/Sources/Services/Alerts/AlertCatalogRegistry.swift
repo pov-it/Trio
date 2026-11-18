@@ -235,10 +235,12 @@ private extension AlertCatalogRegistry {
     /// match what `APSManager.issueAlertFor…` / `NotLoopingMonitor` set at
     /// construction; the catalog presence is what lets these surface in the
     /// Device Alarms screen alongside pump and CGM entries.
-    /// `loop.notActive` matches `NotLoopingMonitor.alertID`; other slugs
-    /// come from `TrioAlertCategory.alertIdentifier`.
+    /// `loop.notActive` is Time-Sensitive so it respects Silent mode / Focus
+    /// and lists under that Device Alarms tier; it matches
+    /// `NotLoopingMonitor.alertID`. Other slugs come from
+    /// `TrioAlertCategory.alertIdentifier`.
     static let trioAlgorithmEntries: [Alert.CatalogEntry] = [
-        addEntry("trio.aps", "loop.notActive", .critical, "Trio Not Looping", "Algorithm", .notLooping),
+        addEntry("trio.aps", "loop.notActive", .timeSensitive, "Trio Not Looping", "Algorithm", .notLooping),
         addEntry("trio.aps", "algorithmError", .active, "Algorithm Error", "Algorithm", .algorithmError),
         addEntry("trio.aps", "glucoseDataStale", .timeSensitive, "Glucose Data Stale", "Algorithm", .glucoseDataStale)
     ]
