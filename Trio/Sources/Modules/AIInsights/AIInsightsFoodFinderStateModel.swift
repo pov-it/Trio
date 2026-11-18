@@ -196,6 +196,62 @@ extension AIInsights {
             !(manualMacroOverride?.isEmpty ?? true)
         }
 
+        /// Whole-meal portion currently applied. A missing multiplier is one serving.
+        var appliedMealPortionMultiplier: Double { mealPortionMultiplier ?? 1 }
+
+        /// Allowed whole-meal portion. FoodFinder's − / + control and the saved-meal sheet both use this.
+        static let mealPortionRange: ClosedRange<Double> = 0.25 ... 10
+        static let mealPortionStep = 0.25
+
+        /// Scales every ingredient and any edited totals to `multiplier`.
+        /// Same ratio as FoodFinder's whole-meal − / + control, including the 0.25…10 clamp.
+        /// Carb confidence bounds are re-derived so a gallery handoff matches a portion change made in FoodFinder.
+        func scaledToMealPortion(_ multiplier: Double) -> FoodAnalysisResult {
+            var result = self
+            let current = appliedMealPortionMultiplier
+            let clamped = min(
+                Self.mealPortionRange.upperBound,
+                max(Self.mealPortionRange.lowerBound, multiplier)
+            )
+            guard current > 0, abs(clamped - current) > 0.0001 else { return self }
+            let ratio = clamped / current
+            for index in result.items.indices {
+                result.items[index].portionMultiplier = max(0.01, result.items[index].portionMultiplier * ratio)
+            }
+            if var override = result.manualMacroOverride {
+                override.carbs = override.carbs.map { $0 * ratio }
+                override.fat = override.fat.map { $0 * ratio }
+                override.protein = override.protein.map { $0 * ratio }
+                override.fiber = override.fiber.map { $0 * ratio }
+                override.calories = override.calories.map { $0 * ratio }
+                result.manualMacroOverride = override
+            }
+            result.mealPortionMultiplier = abs(clamped - 1) < 0.0001 ? nil : clamped
+            result.rescaleCarbEstimateBounds()
+            return result
+        }
+
+        /// Re-derive the absolute carb confidence band from the stored relative spread and the current total.
+        /// No-op until a band has been captured.
+        mutating func rescaleCarbEstimateBounds() {
+            guard let lowerRatio = carbEstimateLowerRatio,
+                  let upperRatio = carbEstimateUpperRatio
+            else { return }
+            let center = totalCarbs
+            guard center > 0 else {
+                carbEstimateLowerBound = nil
+                carbEstimateUpperBound = nil
+                carbEstimateUncertaintyUnits = nil
+                return
+            }
+            let lower = max(0, center * lowerRatio)
+            let upper = max(lower, center * upperRatio)
+            carbEstimateLowerBound = lower
+            carbEstimateUpperBound = upper
+            // Carb spread translated to insulin units at I:C 1:10 (matches the dose-guard at analysis time).
+            carbEstimateUncertaintyUnits = max(0, (upper - lower) / 10.0)
+        }
+
         enum FoodSource: String, Codable {
             case aiText
             case aiVoice
@@ -1309,30 +1365,17 @@ extension AIInsights {
             recordPortionLearning(itemName: result.items[idx].name, multiplier: clamped)
         }
 
-        static let mealPortionRange: ClosedRange<Double> = 0.25 ... 10
-        static let mealPortionStep = 0.25
+        static let mealPortionRange = FoodAnalysisResult.mealPortionRange
+        static let mealPortionStep = FoodAnalysisResult.mealPortionStep
 
         /// Scales the whole meal: every ingredient and any edited totals, by the new portion over the current one.
         /// Per-ingredient portion learning is left alone, since this changes how much was eaten, not an ingredient.
+        /// The carb math lives on `FoodAnalysisResult.scaledToMealPortion` so the meal gallery uses the same scaling.
         func updateMealPortion(multiplier: Double) {
-            guard var result = currentResult else { return }
-            let current = result.mealPortionMultiplier ?? 1
-            let clamped = min(Self.mealPortionRange.upperBound, max(Self.mealPortionRange.lowerBound, multiplier))
-            guard current > 0, abs(clamped - current) > 0.0001 else { return }
-            let ratio = clamped / current
-            for index in result.items.indices {
-                result.items[index].portionMultiplier = max(0.01, result.items[index].portionMultiplier * ratio)
-            }
-            if var override = result.manualMacroOverride {
-                override.carbs = override.carbs.map { $0 * ratio }
-                override.fat = override.fat.map { $0 * ratio }
-                override.protein = override.protein.map { $0 * ratio }
-                override.fiber = override.fiber.map { $0 * ratio }
-                override.calories = override.calories.map { $0 * ratio }
-                result.manualMacroOverride = override
-            }
-            result.mealPortionMultiplier = abs(clamped - 1) < 0.0001 ? nil : clamped
-            storeUpdatedResult(result)
+            guard let current = currentResult else { return }
+            let scaled = current.scaledToMealPortion(multiplier)
+            guard abs(scaled.appliedMealPortionMultiplier - current.appliedMealPortionMultiplier) > 0.0001 else { return }
+            storeUpdatedResult(scaled)
         }
 
         /// Set an ingredient's portion by absolute weight in grams.
@@ -1655,23 +1698,7 @@ extension AIInsights {
         /// "x–y g range / ±E" chip moves when the user re-scales a portion or
         /// adds/removes an ingredient. No-op until a band has been captured.
         private func rescaleCarbEstimateBounds(_ result: inout FoodAnalysisResult) {
-            guard let lowerRatio = result.carbEstimateLowerRatio,
-                  let upperRatio = result.carbEstimateUpperRatio
-            else { return }
-            let center = result.totalCarbs
-            guard center > 0 else {
-                result.carbEstimateLowerBound = nil
-                result.carbEstimateUpperBound = nil
-                result.carbEstimateUncertaintyUnits = nil
-                return
-            }
-            let lower = max(0, center * lowerRatio)
-            let upper = max(lower, center * upperRatio)
-            result.carbEstimateLowerBound = lower
-            result.carbEstimateUpperBound = upper
-            // Carb spread translated to insulin units at I:C 1:10 (matches the
-            // metric reported by the dose-guard at analysis time).
-            result.carbEstimateUncertaintyUnits = max(0, (upper - lower) / 10.0)
+            result.rescaleCarbEstimateBounds()
         }
 
         func discardCapturedImage() {

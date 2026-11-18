@@ -6,8 +6,9 @@
 //  meals (kept FoodFinder meals and Trio meal presets), every photographed
 //  meal from the durable `MealGalleryStore` and the recent FoodFinder meals.
 //  Tapping a meal opens a detail sheet with the larger image, meal name,
-//  timestamp, macros, folders, a share card and actions to reload FoodFinder
-//  or `FoodBolusHandoff` ("Use in Bolus Calculator").
+//  timestamp, macros, folders and a share card. Portion +/− and
+//  "Use in Bolus Calculator" sit at the top; the toolbar shares the meal.
+//  Opening FoodFinder or the bolus calculator uses the adjusted portion.
 //
 //  Chips narrow the meals to the automatic Drinks folder, a folder of
 //  `MealFolderStore` (shared by saved and photographed meals) or a meal slot
@@ -855,6 +856,10 @@ extension AIInsights {
         @Environment(\.colorScheme) private var colorScheme
         @State private var folders: [String]
         @State private var newFolder: String = ""
+        /// Portion the user is about to dose. Starts as the saved meal and scales with the same
+        /// whole-meal math as FoodFinder (`FoodAnalysisResult.scaledToMealPortion`). Not written
+        /// back to the library: the saved meal stays what was recorded.
+        @State private var workingResult: FoodAnalysisResult
         /// HD photo from the gallery store, for meals whose capture has left the recent list.
         @State private var photoData: Data?
 
@@ -882,6 +887,7 @@ extension AIInsights {
             self.onUseInBolusCalculator = onUseInBolusCalculator
             self.onFoldersChanged = onFoldersChanged
             _folders = State(initialValue: folders)
+            _workingResult = State(initialValue: result)
         }
 
         private var dateText: String {
@@ -904,11 +910,11 @@ extension AIInsights {
             MealShareContent(
                 title: meal.title,
                 subtitle: subtitleText,
-                carbs: meal.totalCarbs,
-                fat: meal.totalFat,
-                protein: meal.totalProtein,
-                fiber: meal.totalFiber,
-                calories: meal.totalCalories,
+                carbs: workingResult.totalCarbs,
+                fat: workingResult.totalFat,
+                protein: workingResult.totalProtein,
+                fiber: workingResult.totalFiber,
+                calories: workingResult.totalCalories,
                 photo: displayImageData
             )
         }
@@ -917,11 +923,13 @@ extension AIInsights {
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        photoOrIdentityCard
+                        quickDoseCard
 
-                        macroCard
+                        if displayImageData != nil {
+                            photoOrIdentityCard
+                        }
 
-                        if !meal.items.isEmpty {
+                        if !workingResult.items.isEmpty {
                             itemsCard
                         }
 
@@ -929,7 +937,7 @@ extension AIInsights {
 
                         foldersCard
 
-                        actions
+                        companionAction
                     }
                     .padding(16)
                 }
@@ -1011,33 +1019,126 @@ extension AIInsights {
             }
         }
 
-        private var macroCard: some View {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(String(localized: "Totals", comment: "FoodFinder totals card header"))
-                    .font(.subheadline.bold())
-                    .padding(.top, 11)
+        /// Portion, macros and the bolus handoff, above the photo so a saved meal can be adjusted and
+        /// sent to the calculator without scrolling. Does not deliver insulin: the calculator still confirms.
+        private var quickDoseCard: some View {
+            VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(meal.title)
+                        .font(.headline)
+                        .lineLimit(2)
+                    if let subtitleText {
+                        Text(subtitleText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
 
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(String(format: "%.0f", meal.totalCarbs))
+                portionStepper
+
+                HStack(alignment: .center, spacing: 6) {
+                    Text(String(format: "%.0f", workingResult.totalCarbs))
                         .font(.system(size: 40, weight: .bold, design: .rounded))
                         .foregroundStyle(.blue)
                     Text(String(localized: "g carbs", comment: "FoodFinder carbs hero unit"))
                         .font(.headline)
                         .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
+                    Spacer(minLength: 8)
+                    openInFoodFinderButton
                 }
 
                 HStack(spacing: 16) {
-                    galleryMacroChip(label: String(localized: "Fat", comment: "Fat macro"), value: meal.totalFat, unit: "g", color: .yellow)
-                    galleryMacroChip(label: String(localized: "Protein", comment: "Protein macro"), value: meal.totalProtein, unit: "g", color: .red)
-                    galleryMacroChip(label: String(localized: "Fiber", comment: "Fiber macro"), value: meal.totalFiber, unit: "g", color: .green)
-                    galleryMacroChip(label: String(localized: "Calories", comment: "Calories label"), value: meal.totalCalories, unit: "kcal", color: .secondary)
+                    galleryMacroChip(label: String(localized: "Fat", comment: "Fat macro"), value: workingResult.totalFat, unit: "g", color: .yellow)
+                    galleryMacroChip(label: String(localized: "Protein", comment: "Protein macro"), value: workingResult.totalProtein, unit: "g", color: .red)
+                    galleryMacroChip(label: String(localized: "Fiber", comment: "Fiber macro"), value: workingResult.totalFiber, unit: "g", color: .green)
+                    galleryMacroChip(label: String(localized: "Calories", comment: "Calories label"), value: workingResult.totalCalories, unit: "kcal", color: .secondary)
                     Spacer(minLength: 0)
                 }
-                .padding(.bottom, 12)
+
+                if onUseInBolusCalculator != nil {
+                    Button {
+                        onUseInBolusCalculator?(workingResult)
+                        dismiss()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.forward.circle.fill")
+                            Text(String(localized: "Use in Bolus Calculator", comment: "FoodFinder bolus handoff button"))
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(
+                        workingResult.totalCarbs == 0
+                            && workingResult.totalFat == 0
+                            && workingResult.totalProtein == 0
+                            && workingResult.items.isEmpty
+                    )
+                }
+
+                Label(
+                    String(localized: "AI estimates may be inaccurate. Always verify carb counts before dosing.", comment: "FoodFinder disclaimer"),
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
             }
             .padding(.horizontal)
+            .padding(.vertical, 12)
             .background(RoundedRectangle(cornerRadius: 12).fill(cardFill))
+        }
+
+        /// Same − / value / + control as FoodFinder's whole-meal portion row.
+        private var portionStepper: some View {
+            let multiplier = workingResult.appliedMealPortionMultiplier
+            let range = FoodAnalysisResult.mealPortionRange
+            let step = FoodAnalysisResult.mealPortionStep
+            return HStack(spacing: 8) {
+                Text(String(localized: "Portion", comment: "FoodFinder whole-meal portion label"))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Button {
+                    workingResult = workingResult.scaledToMealPortion(multiplier - step)
+                } label: {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.title3)
+                }
+                .buttonStyle(.borderless)
+                .disabled(multiplier <= range.lowerBound)
+                .accessibilityLabel(String(localized: "Smaller portion", comment: "FoodFinder whole-meal portion minus"))
+
+                EditableMultiplierField(multiplier: multiplier) { newValue in
+                    workingResult = workingResult.scaledToMealPortion(newValue)
+                }
+
+                Button {
+                    workingResult = workingResult.scaledToMealPortion(multiplier + step)
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title3)
+                }
+                .buttonStyle(.borderless)
+                .disabled(multiplier >= range.upperBound)
+                .accessibilityLabel(String(localized: "Larger portion", comment: "FoodFinder whole-meal portion plus"))
+            }
+        }
+
+        @ViewBuilder private var openInFoodFinderButton: some View {
+            if onOpenInFoodFinder != nil {
+                Button {
+                    onOpenInFoodFinder?(workingResult)
+                    dismiss()
+                } label: {
+                    Image(systemName: "fork.knife")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 44, height: 36)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel(String(localized: "Open in FoodFinder", comment: "Reload gallery meal into FoodFinder"))
+            }
         }
 
         private func galleryMacroChip(label: String, value: Double, unit: String, color: Color) -> some View {
@@ -1058,18 +1159,18 @@ extension AIInsights {
                 Text(String(localized: "Ingredients", comment: "FoodFinder ingredients section"))
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
-                ForEach(meal.items) { item in
+                ForEach(workingResult.items) { item in
                     HStack {
                         Text(item.name)
                             .lineLimit(1)
                         Spacer()
-                        Text("\(Int(item.carbs.rounded())) g")
+                        Text("\(Int(item.adjustedCarbs.rounded())) g")
                             .foregroundStyle(.blue)
                             .fontWeight(.semibold)
                     }
                     .font(.subheadline)
                     .padding(.vertical, 4)
-                    if item.id != meal.items.last?.id {
+                    if item.id != workingResult.items.last?.id {
                         Divider()
                     }
                 }
@@ -1086,7 +1187,7 @@ extension AIInsights {
                 foodResultIDs: keys.foodResultIDs,
                 units: units,
                 cardFill: cardFill,
-                currentCarbs: result.totalCarbs
+                currentCarbs: workingResult.totalCarbs
             )
         }
 
@@ -1096,63 +1197,21 @@ extension AIInsights {
                 .background(RoundedRectangle(cornerRadius: 12).fill(cardFill))
         }
 
-        private var actions: some View {
-            VStack(spacing: 10) {
-                if onUseInBolusCalculator != nil {
-                    Button {
-                        onUseInBolusCalculator?(result)
-                        dismiss()
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "arrow.forward.circle.fill")
-                            Text(String(localized: "Use in Bolus Calculator", comment: "FoodFinder bolus handoff button"))
-                        }
+        /// Share stays in the toolbar. Companion publishing stays on the page, under the folders.
+        @ViewBuilder private var companionAction: some View {
+            if shareEnabled, let source = displayImageData {
+                Button {
+                    let payload = SharedMealPayload(result: workingResult, thumbnailFilename: nil)
+                    Task.detached(priority: .userInitiated) {
+                        let photo = MealGalleryStore.makePhotoJPEG(from: source) ?? source
+                        MealCompanionPublisher.shared.publish(payload: payload, thumbnailJPEG: photo)
+                    }
+                } label: {
+                    Text(String(localized: "Send to companion", comment: "Manually publish one gallery meal to companion outbox"))
                         .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(meal.totalCarbs == 0 && meal.totalFat == 0 && meal.totalProtein == 0 && meal.items.isEmpty)
                 }
-
-                if onOpenInFoodFinder != nil {
-                    Button {
-                        onOpenInFoodFinder?(result)
-                        dismiss()
-                    } label: {
-                        Text(String(localized: "Open in FoodFinder", comment: "Reload gallery meal into FoodFinder"))
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                }
-
-                MealShareButton(content: shareContent, showsTitle: true)
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-
-                // The companion only receives photographed meals.
-                if shareEnabled, let source = displayImageData {
-                    Button {
-                        let payload = SharedMealPayload(result: result, thumbnailFilename: nil)
-                        Task.detached(priority: .userInitiated) {
-                            let photo = MealGalleryStore.makePhotoJPEG(from: source) ?? source
-                            MealCompanionPublisher.shared.publish(payload: payload, thumbnailJPEG: photo)
-                        }
-                    } label: {
-                        Text(String(localized: "Send to companion", comment: "Manually publish one gallery meal to companion outbox"))
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                }
-
-                Label(
-                    String(localized: "AI estimates may be inaccurate. Always verify carb counts before dosing.", comment: "FoodFinder disclaimer"),
-                    systemImage: "exclamationmark.triangle.fill"
-                )
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
+                .buttonStyle(.bordered)
+                .controlSize(.large)
             }
         }
 
