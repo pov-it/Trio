@@ -32,7 +32,9 @@ extension AIInsights {
         @State private var touchStarted: Date?
         @State private var anchorY: CGFloat?
         @State private var latestY: CGFloat?
-        @State private var gestureOpen = false
+        @State private var holdTask: Task<Void, Never>?
+        /// Resets when a scroll view cancels the drag, which does not call `onEnded`.
+        @GestureState private var fingerDown = false
 
         var body: some View {
             label()
@@ -56,7 +58,6 @@ extension AIInsights {
                 }
                 .contentShape(Rectangle())
                 .simultaneousGesture(pointer)
-                .simultaneousGesture(hold)
                 .onAppear {
                     live = multiplier
                     withAnimation(.easeOut(duration: 1.05).repeatCount(3, autoreverses: false)) {
@@ -65,6 +66,13 @@ extension AIInsights {
                 }
                 .onChange(of: multiplier) { _, newValue in
                     if !armed { live = newValue }
+                }
+                .onChange(of: fingerDown) { _, down in
+                    if down {
+                        beginHold()
+                    } else {
+                        finishTouch()
+                    }
                 }
                 .sensoryFeedback(.impact(weight: .light, intensity: 0.55), trigger: touchTick)
                 .sensoryFeedback(.selection, trigger: stepTick)
@@ -83,16 +91,13 @@ extension AIInsights {
                 }
         }
 
-        /// Tracks the finger without taking the scroll gesture. A short lift is a tap.
+        /// Follows the finger without taking the scroll. The hold timer, not this drag, arms the control.
         private var pointer: some Gesture {
             DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                .updating($fingerDown) { _, state, _ in
+                    state = true
+                }
                 .onChanged { value in
-                    if touchStarted == nil {
-                        touchStarted = Date()
-                        gestureOpen = true
-                        pressed = true
-                        touchTick += 1
-                    }
                     latestY = value.location.y
                     touchTravel = max(touchTravel, hypot(value.translation.width, value.translation.height))
                     guard armed, let origin else { return }
@@ -118,32 +123,36 @@ extension AIInsights {
                 }
         }
 
-        /// Arms only after the finger has stayed still for the hold. A scroll moves too far and never arms.
-        private var hold: some Gesture {
-            LongPressGesture(minimumDuration: 0.35, maximumDistance: 24)
-                .onChanged { recognized in
-                    guard recognized else { return }
-                    armIfHeld()
+        /// Starts a fresh hold. `LongPressGesture.onChanged` runs at touch-down, so the arm waits on this timer instead.
+        private func beginHold() {
+            holdTask?.cancel()
+            touchTravel = 0
+            touchStarted = Date()
+            origin = nil
+            anchorY = nil
+            armed = false
+            pressed = true
+            touchTick += 1
+            holdTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                guard !Task.isCancelled, fingerDown, touchTravel < 24 else { return }
+                origin = multiplier
+                live = multiplier
+                anchorY = latestY
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                    armed = true
                 }
-        }
-
-        private func armIfHeld() {
-            guard !armed, touchTravel < 24 else { return }
-            guard let touchStarted, Date().timeIntervalSince(touchStarted) >= 0.32 else { return }
-            origin = multiplier
-            live = multiplier
-            anchorY = latestY
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                armed = true
             }
         }
 
-        /// Clears every touch flag. A second end event from the other gesture is a no-op.
+        /// Clears every touch flag. A scroll cancellation and a normal lift both land here; the second call does nothing.
         private func finishTouch() {
-            guard gestureOpen || armed || pressed else { return }
+            guard pressed || armed || holdTask != nil else { return }
+            holdTask?.cancel()
+            holdTask = nil
             let travel = touchTravel
             let wasArmed = armed
-            gestureOpen = false
+            let elapsed = touchStarted.map { Date().timeIntervalSince($0) } ?? 0
             touchStarted = nil
             touchTravel = 0
             latestY = nil
@@ -153,7 +162,7 @@ extension AIInsights {
                 armed = false
                 pressed = false
             }
-            if !wasArmed, travel < 12 {
+            if !wasArmed, travel < 12, elapsed < 0.32 {
                 onTap?()
             }
         }
