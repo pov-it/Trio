@@ -39,6 +39,36 @@ struct FoodFinderSourceLookupTests {
         item = AIInsights.FoodFinderSourceMerge.applying(lookups: [lookup], webItems: [], webCitations: [], to: item)
         #expect(item.source == .openFoodFacts)
         #expect(item.carbs == 60)
+        #expect(item.sourceVerified)
+        #expect((item.sourceScore ?? 0) >= 0.92)
+
+        let web = AIInsights.FoodFinderWebNutritionItem(
+            name: "Dinner pasta",
+            carbsPer100g: 80,
+            fatPer100g: 1,
+            proteinPer100g: 1,
+            fiberPer100g: 0,
+            kcalPer100g: 330,
+            sourceURL: URL(string: "https://recipes.example.com/pasta")
+        )
+        let withWeb = AIInsights.FoodFinderSourceMerge.applying(
+            lookups: [lookup],
+            webItems: [web],
+            webCitations: [],
+            to: AIInsights.FoodItem(
+                name: "Dinner pasta",
+                portion: "200 g",
+                carbs: 70,
+                fat: 4,
+                protein: 10,
+                fiber: 2,
+                calories: 400,
+                barcode: "8076802085738"
+            )
+        )
+        #expect(withWeb.source == .openFoodFacts)
+        #expect(withWeb.carbs == 60)
+        #expect(withWeb.sourceVerified)
     }
 
     @Test("Search-a-licious queries drop words and retry the name alone")

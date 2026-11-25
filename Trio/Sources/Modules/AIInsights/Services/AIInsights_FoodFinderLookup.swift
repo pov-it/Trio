@@ -343,7 +343,10 @@ extension AIInsights {
                 .filter { $0.1 >= 0.52 }
                 .sorted { $0.1 > $1.1 }
 
-            if let best = ranked.first?.0 {
+            if var best = ranked.first?.0 {
+                if confirmsBarcode(item, best) {
+                    best.verifiedScore = max(best.verifiedScore, 0.92)
+                }
                 updated = applyingLookup(best, to: updated)
             }
 

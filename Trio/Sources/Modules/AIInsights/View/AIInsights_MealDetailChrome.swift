@@ -29,7 +29,10 @@ extension AIInsights {
         @State private var pressed = false
         @State private var hintPulse = false
         @State private var touchTravel: CGFloat = 0
-        @State private var suppressTap = false
+        @State private var touchStarted: Date?
+        @State private var anchorY: CGFloat?
+        @State private var latestY: CGFloat?
+        @State private var gestureOpen = false
 
         var body: some View {
             label()
@@ -52,9 +55,8 @@ extension AIInsights {
                     }
                 }
                 .contentShape(Rectangle())
-                .simultaneousGesture(touchFeedback)
-                .simultaneousGesture(tap)
-                .gesture(holdThenDrag)
+                .simultaneousGesture(pointer)
+                .simultaneousGesture(hold)
                 .onAppear {
                     live = multiplier
                     withAnimation(.easeOut(duration: 1.05).repeatCount(3, autoreverses: false)) {
@@ -81,72 +83,79 @@ extension AIInsights {
                 }
         }
 
-        /// Touch-down cue only. It does not claim the scroll view's drag.
-        private var touchFeedback: some Gesture {
-            DragGesture(minimumDistance: 0)
+        /// Tracks the finger without taking the scroll gesture. A short lift is a tap.
+        private var pointer: some Gesture {
+            DragGesture(minimumDistance: 0, coordinateSpace: .global)
                 .onChanged { value in
-                    touchTravel = max(touchTravel, hypot(value.translation.width, value.translation.height))
-                    if !pressed {
+                    if touchStarted == nil {
+                        touchStarted = Date()
+                        gestureOpen = true
                         pressed = true
                         touchTick += 1
                     }
-                }
-        }
-
-        private var tap: some Gesture {
-            TapGesture().onEnded {
-                if !suppressTap, touchTravel < 12 {
-                    onTap?()
-                }
-                suppressTap = false
-                touchTravel = 0
-            }
-        }
-
-        /// The drag starts only after the hold, so a normal scroll keeps the list.
-        /// Global coordinates stay stable when the track appears beside the control.
-        private var holdThenDrag: some Gesture {
-            LongPressGesture(minimumDuration: 0.35)
-                .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
-                .onChanged { value in
-                    switch value {
-                    case .first(true):
-                        if !armed {
-                            origin = multiplier
-                            live = multiplier
-                            suppressTap = true
-                            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                                armed = true
-                            }
-                        }
-                    case .second(true, let drag?):
-                        guard let origin else { return }
-                        let next = PortionDragMath.multiplier(
-                            start: origin,
-                            translationY: drag.translation.height,
-                            step: step,
-                            range: range
-                        )
-                        if abs(next - live) > 0.001 {
-                            stepTick += 1
-                            live = next
-                            onChange(next)
-                        }
-                    default:
-                        break
+                    latestY = value.location.y
+                    touchTravel = max(touchTravel, hypot(value.translation.width, value.translation.height))
+                    guard armed, let origin else { return }
+                    if anchorY == nil {
+                        anchorY = value.location.y
+                        return
+                    }
+                    guard let anchorY else { return }
+                    let next = PortionDragMath.multiplier(
+                        start: origin,
+                        translationY: value.location.y - anchorY,
+                        step: step,
+                        range: range
+                    )
+                    if abs(next - live) > 0.001 {
+                        stepTick += 1
+                        live = next
+                        onChange(next)
                     }
                 }
                 .onEnded { _ in
-                    let wasArmed = armed
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        armed = false
-                        pressed = false
-                    }
-                    origin = nil
-                    if !wasArmed {
-                        suppressTap = false
-                    }
+                    finishTouch()
                 }
+        }
+
+        /// Arms only after the finger has stayed still for the hold. A scroll moves too far and never arms.
+        private var hold: some Gesture {
+            LongPressGesture(minimumDuration: 0.35, maximumDistance: 24)
+                .onChanged { recognized in
+                    guard recognized else { return }
+                    armIfHeld()
+                }
+        }
+
+        private func armIfHeld() {
+            guard !armed, touchTravel < 24 else { return }
+            guard let touchStarted, Date().timeIntervalSince(touchStarted) >= 0.32 else { return }
+            origin = multiplier
+            live = multiplier
+            anchorY = latestY
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                armed = true
+            }
+        }
+
+        /// Clears every touch flag. A second end event from the other gesture is a no-op.
+        private func finishTouch() {
+            guard gestureOpen || armed || pressed else { return }
+            let travel = touchTravel
+            let wasArmed = armed
+            gestureOpen = false
+            touchStarted = nil
+            touchTravel = 0
+            latestY = nil
+            origin = nil
+            anchorY = nil
+            withAnimation(.easeOut(duration: 0.18)) {
+                armed = false
+                pressed = false
+            }
+            if !wasArmed, travel < 12 {
+                onTap?()
+            }
         }
     }
 
