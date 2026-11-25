@@ -118,9 +118,9 @@ extension AIInsights {
             return components?.url
         }
 
-        static func products(matching query: String, langs: String = "nl") async throws -> [[String: Any]] {
-            let attempts = FoodFinderSearchQuery.attempts(brand: nil, name: query)
-            let phrases = attempts.isEmpty ? [query] : attempts
+        static func products(matching name: String, brand: String? = nil, langs: String = "nl") async throws -> [[String: Any]] {
+            let attempts = FoodFinderSearchQuery.attempts(brand: brand, name: name)
+            let phrases = attempts.isEmpty ? [name] : attempts
             for phrase in phrases {
                 let hits = try await FoodFinderSignpost.measure("FoodFinder.searchalicious") {
                     try await fetchProducts(query: phrase, langs: langs)
@@ -336,8 +336,9 @@ extension AIInsights {
             var updated = item
             let ranked = lookups
                 .map { match -> (FoodLookupResult, Double) in
-                    let name = FoodFinderNameMatch.score(item.name, match.name)
-                    return (match, match.verifiedScore * name)
+                    let identity = confirmsBarcode(item, match) ? 1 : FoodFinderNameMatch.score(item.name, match.name)
+                    let verified = confirmsBarcode(item, match) ? max(match.verifiedScore, 0.92) : match.verifiedScore
+                    return (match, verified * identity)
                 }
                 .filter { $0.1 >= 0.52 }
                 .sorted { $0.1 > $1.1 }
@@ -469,6 +470,12 @@ extension AIInsights {
             updated.sourceName = citation.title
             updated.sourceVerified = citation.score >= 0.6 && citation.source != .aiEstimate
             return updated
+        }
+
+        /// A product page whose URL contains this item's barcode is that product, even when the names differ.
+        static func confirmsBarcode(_ item: FoodItem, _ match: FoodLookupResult) -> Bool {
+            guard let code = item.barcode?.filter(\.isNumber), (8 ... 14).contains(code.count) else { return false }
+            return match.sourceURL?.absoluteString.contains(code) == true
         }
 
         private static func bestWebItem(

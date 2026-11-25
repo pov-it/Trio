@@ -1216,7 +1216,7 @@ extension AIInsights {
             return itemByApplyingLookup(best, to: item, alternates: matches)
         }
 
-        private func lookupFoodSources(query: String) async -> [FoodLookupResult] {
+        private func lookupFoodSources(query: String, brand: String? = nil) async -> [FoodLookupResult] {
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return [] }
 
@@ -1229,7 +1229,7 @@ extension AIInsights {
                         do {
                             switch source {
                             case .openFoodFacts:
-                                return try await lookupOpenFoodFactsResults(trimmed)
+                                return try await lookupOpenFoodFactsResults(trimmed, brand: brand)
                             case .usda:
                                 return try await lookupUSDAResults(trimmed)
                             case .ah:
@@ -2249,11 +2249,7 @@ extension AIInsights {
             await withTaskGroup(of: (UUID, FoodItem).self) { group in
                 for item in targets {
                     group.addTask { [self] in
-                        let query = [item.sourceBrand, item.name]
-                            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                            .filter { !$0.isEmpty }
-                            .joined(separator: " ")
-                        var lookups = await lookupFoodSources(query: query.isEmpty ? item.name : query)
+                        var lookups = await lookupFoodSources(query: item.name, brand: item.sourceBrand)
                         if let code = item.barcode, let product = await self.barcodeLookupResult(code) {
                             lookups.insert(product, at: 0)
                         }
@@ -2358,7 +2354,10 @@ extension AIInsights {
             guard let url = URL(string: openFoodFactsProductURL(for: barcode).absoluteString) else { return nil }
             var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
             components?.queryItems = [
-                URLQueryItem(name: "fields", value: "code,product_name,brands,nutriments,serving_size,image_url,url")
+                URLQueryItem(
+                    name: "fields",
+                    value: "code,product_name,brands,nutriments,serving_size,serving_quantity,nutrition_data_completeness,image_url,url"
+                )
             ]
             guard let requestURL = components?.url else { return nil }
             var request = URLRequest(url: requestURL)
@@ -3265,8 +3264,8 @@ extension AIInsights {
             return parseFoodAnalysis(from: responseText).items.first
         }
 
-        private func lookupOpenFoodFactsResults(_ query: String) async throws -> [FoodLookupResult] {
-            let products = try await FoodFinderSearchALicious.products(matching: query, langs: "nl")
+        private func lookupOpenFoodFactsResults(_ query: String, brand: String? = nil) async throws -> [FoodLookupResult] {
+            let products = try await FoodFinderSearchALicious.products(matching: query, brand: brand, langs: "nl")
             return FoodFinderSearchALicious.lookupResults(from: products, fallbackName: query)
         }
 

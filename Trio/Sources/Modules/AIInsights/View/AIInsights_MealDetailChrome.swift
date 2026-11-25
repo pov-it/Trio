@@ -28,104 +28,123 @@ extension AIInsights {
         @State private var stepTick = 0
         @State private var pressed = false
         @State private var hintPulse = false
+        @State private var touchTravel: CGFloat = 0
+        @State private var suppressTap = false
 
         var body: some View {
-            HStack(alignment: .bottom, spacing: 8) {
-                if armed {
-                    PortionDragTrack(multiplier: live, range: range, onPhoto: trackOnPhoto)
-                        .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .bottom)))
-                }
-                label()
-                    .scaleEffect(pressed ? 1.06 : 1)
-                    .overlay {
-                        if !armed {
-                            Circle()
-                                .stroke(hintColor.opacity(hintPulse ? 0 : 0.55), lineWidth: 2)
-                                .scaleEffect(hintPulse ? 1.22 : 0.92)
-                                .allowsHitTesting(false)
-                        }
-                    }
-            }
-            .contentShape(Rectangle())
-            .highPriorityGesture(drag)
-            .simultaneousGesture(hold)
-            .onAppear {
-                live = multiplier
-                withAnimation(.easeOut(duration: 1.05).repeatCount(3, autoreverses: false)) {
-                    hintPulse = true
-                }
-            }
-            .onChange(of: multiplier) { _, newValue in
-                if !armed { live = newValue }
-            }
-            .sensoryFeedback(.impact(weight: .light, intensity: 0.55), trigger: touchTick)
-            .sensoryFeedback(.selection, trigger: stepTick)
-            .accessibilityElement(children: .combine)
-            .accessibilityAdjustableAction { direction in
-                let next: Double
-                switch direction {
-                case .increment:
-                    next = min(range.upperBound, multiplier + step)
-                case .decrement:
-                    next = max(range.lowerBound, multiplier - step)
-                @unknown default:
-                    return
-                }
-                onChange(next)
-            }
-        }
-
-        private var hold: some Gesture {
-            LongPressGesture(minimumDuration: 0.35)
-                .onEnded { _ in
+            label()
+                .scaleEffect(pressed ? 1.06 : 1)
+                .overlay {
                     if !armed {
-                        origin = multiplier
-                        live = multiplier
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                            armed = true
-                        }
+                        Circle()
+                            .stroke(hintColor.opacity(hintPulse ? 0 : 0.55), lineWidth: 2)
+                            .scaleEffect(hintPulse ? 1.22 : 0.92)
+                            .allowsHitTesting(false)
                     }
+                }
+                .overlay(alignment: .bottomLeading) {
+                    if armed {
+                        PortionDragTrack(multiplier: live, range: range, onPhoto: trackOnPhoto)
+                            .fixedSize()
+                            .offset(x: -84)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                    }
+                }
+                .contentShape(Rectangle())
+                .simultaneousGesture(touchFeedback)
+                .simultaneousGesture(tap)
+                .gesture(holdThenDrag)
+                .onAppear {
+                    live = multiplier
+                    withAnimation(.easeOut(duration: 1.05).repeatCount(3, autoreverses: false)) {
+                        hintPulse = true
+                    }
+                }
+                .onChange(of: multiplier) { _, newValue in
+                    if !armed { live = newValue }
+                }
+                .sensoryFeedback(.impact(weight: .light, intensity: 0.55), trigger: touchTick)
+                .sensoryFeedback(.selection, trigger: stepTick)
+                .accessibilityElement(children: .combine)
+                .accessibilityAdjustableAction { direction in
+                    let next: Double
+                    switch direction {
+                    case .increment:
+                        next = min(range.upperBound, multiplier + step)
+                    case .decrement:
+                        next = max(range.lowerBound, multiplier - step)
+                    @unknown default:
+                        return
+                    }
+                    onChange(next)
                 }
         }
 
-        private var drag: some Gesture {
+        /// Touch-down cue only. It does not claim the scroll view's drag.
+        private var touchFeedback: some Gesture {
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
-                    if origin == nil {
-                        origin = multiplier
-                        live = multiplier
+                    touchTravel = max(touchTravel, hypot(value.translation.width, value.translation.height))
+                    if !pressed {
+                        pressed = true
                         touchTick += 1
-                        withAnimation(.easeOut(duration: 0.12)) { pressed = true }
-                    }
-                    let distance = hypot(value.translation.width, value.translation.height)
-                    if !armed, distance > 10 {
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                            armed = true
-                        }
-                    }
-                    guard armed, let origin else { return }
-                    let next = PortionDragMath.multiplier(
-                        start: origin,
-                        translationY: value.translation.height,
-                        step: step,
-                        range: range
-                    )
-                    if abs(next - live) > 0.001 {
-                        stepTick += 1
-                        live = next
-                        onChange(next)
                     }
                 }
-                .onEnded { value in
-                    let moved = abs(value.translation.height) > 10 || abs(value.translation.width) > 10
+        }
+
+        private var tap: some Gesture {
+            TapGesture().onEnded {
+                if !suppressTap, touchTravel < 12 {
+                    onTap?()
+                }
+                suppressTap = false
+                touchTravel = 0
+            }
+        }
+
+        /// The drag starts only after the hold, so a normal scroll keeps the list.
+        /// Global coordinates stay stable when the track appears beside the control.
+        private var holdThenDrag: some Gesture {
+            LongPressGesture(minimumDuration: 0.35)
+                .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
+                .onChanged { value in
+                    switch value {
+                    case .first(true):
+                        if !armed {
+                            origin = multiplier
+                            live = multiplier
+                            suppressTap = true
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                                armed = true
+                            }
+                        }
+                    case .second(true, let drag?):
+                        guard let origin else { return }
+                        let next = PortionDragMath.multiplier(
+                            start: origin,
+                            translationY: drag.translation.height,
+                            step: step,
+                            range: range
+                        )
+                        if abs(next - live) > 0.001 {
+                            stepTick += 1
+                            live = next
+                            onChange(next)
+                        }
+                    default:
+                        break
+                    }
+                }
+                .onEnded { _ in
                     let wasArmed = armed
                     withAnimation(.easeOut(duration: 0.18)) {
                         armed = false
                         pressed = false
                     }
                     origin = nil
-                    if !wasArmed, !moved {
-                        onTap?()
+                    if !wasArmed {
+                        suppressTap = false
                     }
                 }
         }

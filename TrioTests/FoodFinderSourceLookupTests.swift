@@ -8,6 +8,39 @@ import UniformTypeIdentifiers
 
 @Suite("FoodFinder source lookup")
 struct FoodFinderSourceLookupTests {
+    @Test("A barcode page replaces the estimate even when the names do not overlap")
+    func barcodeMatchBypassesWeakName() {
+        var item = AIInsights.FoodItem(
+            name: "Dinner pasta",
+            portion: "200 g",
+            carbs: 70,
+            fat: 4,
+            protein: 10,
+            fiber: 2,
+            calories: 400,
+            barcode: "8076802085738"
+        )
+        let lookup = AIInsights.FoodLookupResult(
+            sourceID: .openFoodFacts,
+            name: "Rigatoni 89",
+            brand: "Example",
+            portion: "100 g",
+            portionGrams: 100,
+            carbs: 30,
+            fat: 1,
+            protein: 5,
+            fiber: 2,
+            calories: 160,
+            sourceURL: URL(string: "https://world.openfoodfacts.org/product/8076802085738"),
+            verifiedScore: 0.35,
+            imageURL: nil
+        )
+        #expect(AIInsights.FoodFinderSourceMerge.confirmsBarcode(item, lookup))
+        item = AIInsights.FoodFinderSourceMerge.applying(lookups: [lookup], webItems: [], webCitations: [], to: item)
+        #expect(item.source == .openFoodFacts)
+        #expect(item.carbs == 60)
+    }
+
     @Test("Search-a-licious queries drop words and retry the name alone")
     func searchQueriesShrink() {
         let queries = AIInsights.FoodFinderSearchQuery.attempts(brand: "Barilla", name: "pumpkin rigatoni")
