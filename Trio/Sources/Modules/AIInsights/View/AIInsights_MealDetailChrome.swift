@@ -33,6 +33,8 @@ extension AIInsights {
         @State private var anchorY: CGFloat?
         @State private var latestY: CGFloat?
         @State private var holdTask: Task<Void, Never>?
+        /// Bumped when a touch is finished, so a deferred cancellation reset cannot also fire the tap.
+        @State private var touchEpoch = 0
         /// Resets when a scroll view cancels the drag, which does not call `onEnded`.
         @GestureState private var fingerDown = false
 
@@ -71,7 +73,14 @@ extension AIInsights {
                     if down {
                         beginHold()
                     } else {
-                        finishTouch()
+                        // A scroll cancellation never calls `onEnded`. Wait one turn so a real
+                        // lift can claim the tap first; if it does not, only reset the control.
+                        let epoch = touchEpoch
+                        Task { @MainActor in
+                            await Task.yield()
+                            guard epoch == touchEpoch else { return }
+                            finishTouch(allowTap: false)
+                        }
                     }
                 }
                 .sensoryFeedback(.impact(weight: .light, intensity: 0.55), trigger: touchTick)
@@ -119,7 +128,7 @@ extension AIInsights {
                     }
                 }
                 .onEnded { _ in
-                    finishTouch()
+                    finishTouch(allowTap: true)
                 }
         }
 
@@ -145,14 +154,15 @@ extension AIInsights {
             }
         }
 
-        /// Clears every touch flag. A scroll cancellation and a normal lift both land here; the second call does nothing.
-        private func finishTouch() {
+        /// Clears every touch flag. Only a real finger-lift may open the editor or the bolus calculator.
+        private func finishTouch(allowTap: Bool) {
             guard pressed || armed || holdTask != nil else { return }
             holdTask?.cancel()
             holdTask = nil
             let travel = touchTravel
             let wasArmed = armed
             let elapsed = touchStarted.map { Date().timeIntervalSince($0) } ?? 0
+            touchEpoch += 1
             touchStarted = nil
             touchTravel = 0
             latestY = nil
@@ -162,7 +172,7 @@ extension AIInsights {
                 armed = false
                 pressed = false
             }
-            if !wasArmed, travel < 12, elapsed < 0.32 {
+            if allowTap, !wasArmed, travel < 12, elapsed < 0.32 {
                 onTap?()
             }
         }
