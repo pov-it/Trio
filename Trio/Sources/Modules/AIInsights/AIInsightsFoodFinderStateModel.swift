@@ -1906,7 +1906,7 @@ extension AIInsights {
                 return
             }
 
-            let device = await deviceTask?.value ?? onDevicePlaceholder
+            let device = await deviceTask?.value ?? PhotoEngineSnapshot(side: onDevicePlaceholder)
             guard var comparison = FoodFinderPhotoComparison.make(onDevice: device.side, gemini: cloud.side) else {
                 errorMessage = bothPhotoEnginesFailedMessage(onDevice: device.side, gemini: cloud.side)
                 return
