@@ -17,6 +17,7 @@ extension AIInsights {
         /// The meal library's search field on the start page; the composer steps aside while it is in use.
         @FocusState private var isLibrarySearchFocused: Bool
         @State private var editingFoodItem: FoodItem?
+        @State private var editingGramsItem: FoodItem?
         @State private var selectedSourceItem: FoodItem?
         @State private var compactInputMeasuredHeight: CGFloat = 0
         @State private var compactInputSingleLineHeight: CGFloat = 0
@@ -160,6 +161,11 @@ extension AIInsights {
             }
             .sheet(item: $selectedSourceItem) { item in
                 FoodSourceDetailSheet(item: item)
+            }
+            .sheet(item: $editingGramsItem) { item in
+                GramAmountEditor(name: item.name, text: PortionDragTrack.label(item.adjustedCarbs)) { newValue in
+                    state.setAdjustedCarbs(for: item.id, carbs: newValue)
+                }
             }
         }
 
@@ -397,6 +403,21 @@ extension AIInsights {
                 }
 
                 macroSummaryCard(result)
+
+                if state.searchingSourcesResultID == result.id {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text(String(localized: "Still searching sources…", comment: "FoodFinder source lookup still running"))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(colorScheme == .dark ? Color.bgDarkerDarkBlue.opacity(0.8) : Color.white)
+                    )
+                }
             }
 
             bolusHandoffSection(result)
@@ -1049,13 +1070,24 @@ extension AIInsights {
                 }
 
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(String(format: "%.0f", item.adjustedCarbs))
-                            .font(.title3.weight(.bold))
-                            .foregroundStyle(.blue)
-                        Text(String(localized: "g carbs", comment: "FoodFinder carbs hero unit"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    PortionDragControl(
+                        multiplier: max(0.1, item.portionMultiplier),
+                        range: 0.1 ... 10,
+                        onTap: { editingGramsItem = item },
+                        onChange: { newValue in
+                            state.updatePortion(for: item.id, multiplier: newValue)
+                        },
+                        hintColor: .blue,
+                        trackOnPhoto: false
+                    ) {
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text(PortionDragTrack.label(item.adjustedCarbs))
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(.blue)
+                            Text(String(localized: "g carbs", comment: "FoodFinder carbs hero unit"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     Spacer(minLength: 8)
                     HStack(spacing: 10) {
@@ -1087,41 +1119,47 @@ extension AIInsights {
 
         @ViewBuilder
         private func sourceBadge(for item: FoodItem) -> some View {
-            Button {
-                selectedSourceItem = item
-            } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: item.source.systemImage)
-                        .font(.caption2)
-                    Text(item.source.shortTitle)
-                        .font(.caption2.weight(.semibold))
-                    if item.sourceVerified {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 8, weight: .bold))
+            HStack(spacing: 4) {
+                ForEach(item.displayCitations.prefix(3)) { citation in
+                    Button {
+                        selectedSourceItem = item
+                    } label: {
+                        HStack(spacing: 3) {
+                            FoodSourceBadgeIcon(source: citation.source)
+                            Text(citation.badgeTitle)
+                                .font(.caption2.weight(.semibold))
+                                .lineLimit(1)
+                            if citation.score >= 0.6, citation.source != .aiEstimate {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 8, weight: .bold))
+                            }
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule()
+                                .fill(sourceTint(citation.source).opacity(colorScheme == .dark ? 0.28 : 0.14))
+                        )
+                        .foregroundStyle(sourceTint(citation.source))
                     }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(citation.badgeTitle)
                 }
-                .padding(.horizontal, 7)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule()
-                        .fill(sourceTint(for: item).opacity(colorScheme == .dark ? 0.28 : 0.14))
-                )
-                .foregroundStyle(sourceTint(for: item))
             }
-            .buttonStyle(.borderless)
-            .accessibilityLabel(item.source.localizedTitle)
         }
 
-        private func sourceTint(for item: FoodItem) -> Color {
-            switch item.source {
+        private func sourceTint(_ source: FoodSourceID) -> Color {
+            switch source {
             case .aiEstimate:
                 return .orange
             case .openFoodFacts:
-                return item.sourceVerified ? .green : .secondary
+                return .green
             case .usda:
                 return .blue
             case .ah:
                 return .cyan
+            case .web:
+                return .indigo
             }
         }
 
@@ -2111,6 +2149,19 @@ private struct FoodSourceDetailSheet: View {
                         LabeledContent(String(localized: "Brand", comment: "FoodFinder source detail"), value: brand)
                     }
                     LabeledContent(String(localized: "Source", comment: "FoodFinder source detail"), value: item.source.localizedTitle)
+                    if item.displayCitations.count > 1 {
+                        ForEach(item.displayCitations) { citation in
+                            Button {
+                                if let url = citation.url { openURL(url) }
+                            } label: {
+                                LabeledContent(citation.badgeTitle) {
+                                    Text(citation.domain)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .disabled(citation.url == nil)
+                        }
+                    }
                     LabeledContent(String(localized: "Confidence", comment: "FoodFinder source detail")) {
                         Text(sourceConfidenceText)
                     }
@@ -2327,7 +2378,8 @@ private struct FoodItemEditSheet: View {
             alternateMatches: item.alternateMatches,
             barcode: item.barcode,
             basisUnit: basisUnit,
-            basisAmount: enteredAmount
+            basisAmount: enteredAmount,
+            citations: item.citations
         )
     }
 

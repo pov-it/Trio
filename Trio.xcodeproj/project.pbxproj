@@ -44,6 +44,9 @@
 		BD11A001000000000000A018 /* MealOutcomeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD11A000000000000000A018 /* MealOutcomeTests.swift */; };
 		AABBCC00000000000000C0FB /* TreatmentsStateModel+FoodFinderMealEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0FB /* TreatmentsStateModel+FoodFinderMealEvent.swift */; };
 		A1F00D01000000000000C0E1 /* AIInsights_FoodFinderOnDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F00D01000000000000B0E1 /* AIInsights_FoodFinderOnDevice.swift */; };
+		A1FF0D02000000000000C101 /* AIInsights_FoodFinderLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1FF0D02000000000000B101 /* AIInsights_FoodFinderLookup.swift */; };
+		A1FF0D02000000000000C102 /* AIInsights_MealDetailChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1FF0D02000000000000B102 /* AIInsights_MealDetailChrome.swift */; };
+		A1FF0D02000000000000C103 /* FoodFinderSourceLookupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1FF0D02000000000000B103 /* FoodFinderSourceLookupTests.swift */; };
 		A1F00D01000000000000C0E2 /* FoodFinderPhotoRouteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F00D01000000000000B0E2 /* FoodFinderPhotoRouteTests.swift */; };
 		AABBCC00000000000000C0F3 /* AIInsightsMealGalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCC00000000000000B0F3 /* AIInsightsMealGalleryView.swift */; };
 		C7C8D8354E63450CA571EC7F /* AIInsightsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */; };
@@ -1201,6 +1204,9 @@
 		BD11A000000000000000A018 /* MealOutcomeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MealOutcomeTests.swift; sourceTree = "<group>"; };
 		AABBCC00000000000000B0FB /* TreatmentsStateModel+FoodFinderMealEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TreatmentsStateModel+FoodFinderMealEvent.swift"; sourceTree = "<group>"; };
 		A1F00D01000000000000B0E1 /* AIInsights_FoodFinderOnDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_FoodFinderOnDevice.swift; sourceTree = SOURCE_ROOT; };
+		A1FF0D02000000000000B101 /* AIInsights_FoodFinderLookup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/Services/AIInsights_FoodFinderLookup.swift; sourceTree = SOURCE_ROOT; };
+		A1FF0D02000000000000B102 /* AIInsights_MealDetailChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/View/AIInsights_MealDetailChrome.swift; sourceTree = SOURCE_ROOT; };
+		A1FF0D02000000000000B103 /* FoodFinderSourceLookupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodFinderSourceLookupTests.swift; sourceTree = "<group>"; };
 		A1F00D01000000000000B0E2 /* FoodFinderPhotoRouteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodFinderPhotoRouteTests.swift; sourceTree = "<group>"; };
 		AABBCC00000000000000B0F3 /* AIInsightsMealGalleryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/View/AIInsightsMealGalleryView.swift; sourceTree = SOURCE_ROOT; };
 		9BD4BF081F5C445AB2E44B7D /* AIInsightsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Trio/Sources/Modules/AIInsights/AIInsightsProvider.swift; sourceTree = SOURCE_ROOT; };
@@ -3322,6 +3328,7 @@
 				CA02000000000000000010C1 /* DeliveryLimitsSyncTests.swift */,
 				CA08000000000000000010C1 /* MealGalleryShareTests.swift */,
 				A1F00D01000000000000B0E2 /* FoodFinderPhotoRouteTests.swift */,
+				A1FF0D02000000000000B103 /* FoodFinderSourceLookupTests.swift */,
 				CA07000000000000000010C1 /* TelemetrySendGateTests.swift */,
 				3BAAE60B2DE776630049589B /* DynamicISFEnableTests.swift */,
 				38FCF3F825E902C20078B0D1 /* FileStorageTests.swift */,
@@ -4958,6 +4965,7 @@
 				AABBCC00000000000000B0F3 /* AIInsightsMealGalleryView.swift */,
 				AABBCC00000000000000B0FF /* AIInsightsMealResponseView.swift */,
 				AABBCC00000000000000B100 /* AIInsightsFoodFinderMealGrid.swift */,
+				A1FF0D02000000000000B102 /* AIInsights_MealDetailChrome.swift */,
 				AABBCC00000000000000B0BE /* AIInsightsRecapView.swift */,
 				C2E69494986447F4BF5EC179 /* AIInsightsRootView.swift */,
 				E5F6A7B8C9D0E1F2A3B4C5D6 /* AIInsightsSettingsView.swift */,
@@ -4972,6 +4980,7 @@
 			children = (
 				A7B8C9D0E1F2A3B4C5D6E7F8 /* AIInsights_AIServiceAdapter.swift */,
 				A1F00D01000000000000B0E1 /* AIInsights_FoodFinderOnDevice.swift */,
+				A1FF0D02000000000000B101 /* AIInsights_FoodFinderLookup.swift */,
 				AABBCC00000000000000B0B9 /* AIInsights_AlcoholTracker.swift */,
 				AF6617AE4D486199D4B4BFA3 /* AIInsights_BackgroundMonitor.swift */,
 				AABBCC00000000000000B0B6 /* AIInsights_CaffeineTracker.swift */,
@@ -5440,6 +5449,8 @@
 			files = (
 				B8C9D0E1F2A3B4C5D6E7F8A9 /* AIInsights_AIServiceAdapter.swift in Sources */,
 				A1F00D01000000000000C0E1 /* AIInsights_FoodFinderOnDevice.swift in Sources */,
+				A1FF0D02000000000000C101 /* AIInsights_FoodFinderLookup.swift in Sources */,
+				A1FF0D02000000000000C102 /* AIInsights_MealDetailChrome.swift in Sources */,
 				AABBCC00000000000000C0CA /* AIInsightsAlcoholLogView.swift in Sources */,
 				AABBCC00000000000000C0C9 /* AIInsights_AlcoholTracker.swift in Sources */,
 				5DF1E896A440773414E19B3A /* AIInsights_BackgroundMonitor.swift in Sources */,
@@ -6271,6 +6282,7 @@
 				CA02000000000000000010C2 /* DeliveryLimitsSyncTests.swift in Sources */,
 				CA08000000000000000010C2 /* MealGalleryShareTests.swift in Sources */,
 				A1F00D01000000000000C0E2 /* FoodFinderPhotoRouteTests.swift in Sources */,
+				A1FF0D02000000000000C103 /* FoodFinderSourceLookupTests.swift in Sources */,
 				CA07000000000000000010C2 /* TelemetrySendGateTests.swift in Sources */,
 				BD8FC0622D6619E600B95AED /* OverrideStorageTests.swift in Sources */,
 				BD8FC0592D66189700B95AED /* TestAssembly.swift in Sources */,

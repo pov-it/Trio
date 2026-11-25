@@ -24,6 +24,8 @@ enum AIInsights {
         case openFoodFacts
         case usda
         case ah
+        /// A page found by web search. The badge shows the site, not a downloaded icon.
+        case web
 
         var id: String { rawValue }
 
@@ -33,6 +35,7 @@ enum AIInsights {
             case .openFoodFacts: return String(localized: "OFF", comment: "OpenFoodFacts short source")
             case .usda: return String(localized: "USDA", comment: "USDA short source")
             case .ah: return String(localized: "AH", comment: "Albert Heijn short source")
+            case .web: return String(localized: "Web", comment: "FoodFinder web source")
             }
         }
 
@@ -46,6 +49,8 @@ enum AIInsights {
                 return String(localized: "USDA FoodData Central", comment: "USDA FoodData Central source")
             case .ah:
                 return String(localized: "Albert Heijn", comment: "Albert Heijn source")
+            case .web:
+                return String(localized: "Web page", comment: "FoodFinder web page source")
             }
         }
 
@@ -55,6 +60,7 @@ enum AIInsights {
             case .openFoodFacts: return "checkmark.seal.fill"
             case .usda: return "building.columns.fill"
             case .ah: return "cart.fill"
+            case .web: return "globe"
             }
         }
     }
@@ -200,9 +206,12 @@ enum AIInsights {
 
         var id: String { rawValue }
 
-        /// Canonical Google Gemini Flash alias. Keep this as the project default;
-        /// do not substitute a dated snapshot id (e.g. gemini-3.6-flash) here.
+        /// Canonical Google Gemini Flash alias. Chat still defaults here.
         static let geminiFlashLatest = "gemini-flash-latest"
+
+        /// FoodFinder vision model. `gemini-3.8-flash` thinks at MEDIUM unless the request sets LOW.
+        /// MINIMAL is rejected by this model. Override with `foodFinderGeminiModel` in settings.
+        static let geminiFoodFinderModel = "gemini-3.8-flash"
 
         static func geminiGenerateContentURL(model: String) -> String {
             "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent"

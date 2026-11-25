@@ -840,8 +840,7 @@ extension AIInsights {
 
     // MARK: - Detail
 
-    /// Full-size view of a single gallery meal. Visual language matches
-    /// FoodFinder's result cards (photo overlay, carbs hero, macro chips).
+    /// Full-size view of a single gallery meal. The photo is full-bleed; the title sits under it.
     struct MealDetailView: View {
         let meal: MealLibrarySection.DisplayMeal
         let result: FoodAnalysisResult
@@ -862,6 +861,9 @@ extension AIInsights {
         @State private var workingResult: FoodAnalysisResult
         /// HD photo from the gallery store, for meals whose capture has left the recent list.
         @State private var photoData: Data?
+        @State private var showStickyTitle = false
+        @State private var showPhoto = false
+        @State private var editingItem: FoodItem?
 
         private var displayImageData: Data? {
             result.imageData ?? photoData ?? meal.fullImageData
@@ -890,16 +892,30 @@ extension AIInsights {
             _workingResult = State(initialValue: result)
         }
 
-        private var dateText: String {
+        /// Date and meal slot; a meal preset has no meal time.
+        private var subtitleText: String? {
+            guard !meal.isUndated else { return nil }
+            return String(
+                format: String(localized: "%1$@ at %2$@ · %3$@", comment: "Meal detail date, time, and slot"),
+                dateOnlyText,
+                timeOnlyText,
+                meal.mealSlot.localizedTitle
+            )
+        }
+
+        private var dateOnlyText: String {
             let formatter = DateFormatter()
-            formatter.dateStyle = .medium
-            formatter.timeStyle = .short
+            formatter.locale = .current
+            formatter.setLocalizedDateFormatFromTemplate("d MMM yyyy")
             return formatter.string(from: meal.date)
         }
 
-        /// Date and meal slot; a meal preset has no meal time.
-        private var subtitleText: String? {
-            meal.isUndated ? nil : "\(dateText) · \(meal.mealSlot.localizedTitle)"
+        private var timeOnlyText: String {
+            let formatter = DateFormatter()
+            formatter.locale = .current
+            formatter.timeStyle = .short
+            formatter.dateStyle = .none
+            return formatter.string(from: meal.date)
         }
 
         private var cardFill: Color {
@@ -922,24 +938,28 @@ extension AIInsights {
         var body: some View {
             NavigationStack {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        quickDoseCard
-
-                        if displayImageData != nil {
-                            photoOrIdentityCard
+                    VStack(alignment: .leading, spacing: 0) {
+                        hero
+                        VStack(alignment: .leading, spacing: 16) {
+                            titleBlock
+                            if !workingResult.items.isEmpty {
+                                itemsCard
+                            }
+                            responseCard
+                            foldersCard
+                            companionAction
                         }
-
-                        if !workingResult.items.isEmpty {
-                            itemsCard
-                        }
-
-                        responseCard
-
-                        foldersCard
-
-                        companionAction
+                        .padding(16)
                     }
-                    .padding(16)
+                }
+                .coordinateSpace(name: "mealDetail")
+                .onPreferenceChange(MealTitleMinYKey.self) { minY in
+                    let next = minY < 8
+                    if next != showStickyTitle {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showStickyTitle = next
+                        }
+                    }
                 }
                 .background(colorScheme == .dark ? Color.clear : Color(UIColor.systemGroupedBackground))
                 .task {
@@ -950,11 +970,16 @@ extension AIInsights {
                         return store.photoData(forMealID: id) ?? store.thumbnailData(forMealID: id)
                     }.value
                 }
-                .navigationTitle(String(localized: "Meal", comment: "Meal detail navigation title"))
+                .navigationTitle("")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         MealShareButton(content: shareContent)
+                    }
+                    ToolbarItem(placement: .principal) {
+                        Text(showStickyTitle ? meal.title : String(localized: "Meal", comment: "Meal detail navigation title"))
+                            .font(.headline)
+                            .lineLimit(1)
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
@@ -964,111 +989,99 @@ extension AIInsights {
                         }
                     }
                 }
+                .fullScreenCover(isPresented: $showPhoto) {
+                    if let image = heroImage {
+                        MealPhotoViewer(image: image, title: meal.title, subtitle: subtitleText)
+                    }
+                }
+                .sheet(item: $editingItem) { item in
+                    GramAmountEditor(name: item.name, text: PortionDragTrack.label(item.adjustedCarbs)) { newValue in
+                        setAdjustedCarbs(newValue, for: item.id)
+                    }
+                }
             }
         }
 
-        @ViewBuilder private var photoOrIdentityCard: some View {
-            if let data = displayImageData, let image = UIImage(data: data) {
-                ZStack(alignment: .bottomLeading) {
+        private var heroImage: UIImage? {
+            displayImageData.flatMap { UIImage(data: $0) }
+        }
+
+        private var hero: some View {
+            ZStack(alignment: .bottom) {
+                if let image = heroImage {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
                         .frame(maxWidth: .infinity)
-                        .aspectRatio(1.45, contentMode: .fit)
+                        .frame(height: 460)
                         .clipped()
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(meal.title)
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .lineLimit(2)
-                        if let subtitleText {
-                            Text(subtitleText)
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.85))
-                                .lineLimit(1)
-                        }
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        LinearGradient(
-                            colors: [.black.opacity(0), .black.opacity(0.62)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture { showPhoto = true }
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityLabel(String(localized: "Meal photo", comment: "Open the full-screen meal photo"))
+                } else {
+                    Color(UIColor.secondarySystemBackground)
+                        .frame(height: 220)
+                }
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.15), .black.opacity(0.62)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 200)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .allowsHitTesting(false)
+                HStack(alignment: .bottom, spacing: 12) {
+                    MealMacroOverlay(
+                        carbs: workingResult.totalCarbs,
+                        fat: workingResult.totalFat,
+                        protein: workingResult.totalProtein,
+                        fiber: workingResult.totalFiber,
+                        calories: workingResult.totalCalories
                     )
+                    Spacer(minLength: 8)
+                    heroButtons
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .padding(6)
-                .background(RoundedRectangle(cornerRadius: 14).fill(cardFill))
-            } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(meal.title)
-                        .font(.headline)
-                        .lineLimit(2)
-                    if let subtitleText {
-                        Text(subtitleText)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
-                .background(RoundedRectangle(cornerRadius: 12).fill(cardFill))
+                .padding(16)
             }
+            .frame(maxWidth: .infinity)
+            .clipped()
         }
 
-        /// Portion, macros and the bolus handoff, above the photo so a saved meal can be adjusted and
-        /// sent to the calculator without scrolling. Does not deliver insulin: the calculator still confirms.
-        private var quickDoseCard: some View {
-            VStack(alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(meal.title)
-                        .font(.headline)
-                        .lineLimit(2)
-                    if let subtitleText {
-                        Text(subtitleText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                portionStepper
-
-                HStack(alignment: .center, spacing: 6) {
-                    Text(String(format: "%.0f", workingResult.totalCarbs))
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
-                        .foregroundStyle(.blue)
-                    Text(String(localized: "g carbs", comment: "FoodFinder carbs hero unit"))
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 8)
-                    openInFoodFinderButton
-                }
-
-                HStack(spacing: 16) {
-                    galleryMacroChip(label: String(localized: "Fat", comment: "Fat macro"), value: workingResult.totalFat, unit: "g", color: .yellow)
-                    galleryMacroChip(label: String(localized: "Protein", comment: "Protein macro"), value: workingResult.totalProtein, unit: "g", color: .red)
-                    galleryMacroChip(label: String(localized: "Fiber", comment: "Fiber macro"), value: workingResult.totalFiber, unit: "g", color: .green)
-                    galleryMacroChip(label: String(localized: "Calories", comment: "Calories label"), value: workingResult.totalCalories, unit: "kcal", color: .secondary)
-                    Spacer(minLength: 0)
-                }
-
-                if onUseInBolusCalculator != nil {
+        private var heroButtons: some View {
+            HStack(alignment: .bottom, spacing: 10) {
+                if onOpenInFoodFinder != nil {
                     Button {
-                        onUseInBolusCalculator?(workingResult)
+                        onOpenInFoodFinder?(workingResult)
                         dismiss()
                     } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "arrow.forward.circle.fill")
-                            Text(String(localized: "Use in Bolus Calculator", comment: "FoodFinder bolus handoff button"))
-                        }
-                        .frame(maxWidth: .infinity)
+                        MealGlassIconButton(
+                            systemImage: "fork.knife",
+                            accessibilityLabel: String(localized: "Open in FoodFinder", comment: "Reload gallery meal into FoodFinder")
+                        )
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .buttonStyle(.plain)
+                }
+                if onUseInBolusCalculator != nil {
+                    PortionDragControl(
+                        multiplier: workingResult.appliedMealPortionMultiplier,
+                        onTap: {
+                            onUseInBolusCalculator?(workingResult)
+                            dismiss()
+                        },
+                        onChange: { newValue in
+                            workingResult = workingResult.scaledToMealPortion(newValue)
+                        }
+                    ) {
+                        MealGlassIconButton(
+                            systemImage: "syringe.fill",
+                            filled: true,
+                            accessibilityLabel: String(
+                                localized: "Use in Bolus Calculator. Hold and drag up or down to change the portion.",
+                                comment: "Meal detail bolus button. Does not deliver insulin."
+                            )
+                        )
+                    }
                     .disabled(
                         workingResult.totalCarbs == 0
                             && workingResult.totalFat == 0
@@ -1076,81 +1089,28 @@ extension AIInsights {
                             && workingResult.items.isEmpty
                     )
                 }
-
-                Label(
-                    String(localized: "AI estimates may be inaccurate. Always verify carb counts before dosing.", comment: "FoodFinder disclaimer"),
-                    systemImage: "exclamationmark.triangle.fill"
-                )
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(cardFill))
-        }
-
-        /// Same − / value / + control as FoodFinder's whole-meal portion row.
-        private var portionStepper: some View {
-            let multiplier = workingResult.appliedMealPortionMultiplier
-            let range = FoodAnalysisResult.mealPortionRange
-            let step = FoodAnalysisResult.mealPortionStep
-            return HStack(spacing: 8) {
-                Text(String(localized: "Portion", comment: "FoodFinder whole-meal portion label"))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Button {
-                    workingResult = workingResult.scaledToMealPortion(multiplier - step)
-                } label: {
-                    Image(systemName: "minus.circle.fill")
-                        .font(.title3)
-                }
-                .buttonStyle(.borderless)
-                .disabled(multiplier <= range.lowerBound)
-                .accessibilityLabel(String(localized: "Smaller portion", comment: "FoodFinder whole-meal portion minus"))
-
-                EditableMultiplierField(multiplier: multiplier) { newValue in
-                    workingResult = workingResult.scaledToMealPortion(newValue)
-                }
-
-                Button {
-                    workingResult = workingResult.scaledToMealPortion(multiplier + step)
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title3)
-                }
-                .buttonStyle(.borderless)
-                .disabled(multiplier >= range.upperBound)
-                .accessibilityLabel(String(localized: "Larger portion", comment: "FoodFinder whole-meal portion plus"))
             }
         }
 
-        @ViewBuilder private var openInFoodFinderButton: some View {
-            if onOpenInFoodFinder != nil {
-                Button {
-                    onOpenInFoodFinder?(workingResult)
-                    dismiss()
-                } label: {
-                    Image(systemName: "fork.knife")
-                        .font(.body.weight(.semibold))
-                        .frame(width: 44, height: 36)
+        private var titleBlock: some View {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(meal.title)
+                    .font(.title2.bold())
+                    .foregroundStyle(.primary)
+                if let subtitleText {
+                    Text(subtitleText)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.bordered)
-                .accessibilityLabel(String(localized: "Open in FoodFinder", comment: "Reload gallery meal into FoodFinder"))
             }
-        }
-
-        private func galleryMacroChip(label: String, value: Double, unit: String, color: Color) -> some View {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("\(String(format: "%.0f", value)) \(unit)")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(color)
-                    .lineLimit(1)
-                Text(label)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: MealTitleMinYKey.self,
+                        value: geo.frame(in: .named("mealDetail")).minY
+                    )
+                }
             }
         }
 
@@ -1163,10 +1123,22 @@ extension AIInsights {
                     HStack {
                         Text(item.name)
                             .lineLimit(1)
-                        Spacer()
-                        Text("\(Int(item.adjustedCarbs.rounded())) g")
-                            .foregroundStyle(.blue)
-                            .fontWeight(.semibold)
+                        Spacer(minLength: 8)
+                        PortionDragControl(
+                            multiplier: max(0.1, item.portionMultiplier),
+                            range: 0.1 ... 10,
+                            onTap: { editingItem = item },
+                            onChange: { newValue in
+                                setIngredientMultiplier(newValue, for: item.id)
+                            },
+                            hintColor: .blue,
+                            trackOnPhoto: false
+                        ) {
+                            Text("\(PortionDragTrack.label(item.adjustedCarbs)) g")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.blue)
+                                .frame(minWidth: 52, alignment: .trailing)
+                        }
                     }
                     .font(.subheadline)
                     .padding(.vertical, 4)
@@ -1174,9 +1146,27 @@ extension AIInsights {
                         Divider()
                     }
                 }
+                Label(
+                    String(localized: "AI estimates may be inaccurate. Always verify carb counts before dosing.", comment: "FoodFinder disclaimer"),
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .padding(.top, 4)
             }
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 12).fill(cardFill))
+        }
+
+        private func setIngredientMultiplier(_ multiplier: Double, for id: UUID) {
+            guard let index = workingResult.items.firstIndex(where: { $0.id == id }) else { return }
+            workingResult.items[index].portionMultiplier = max(0.1, multiplier)
+        }
+
+        private func setAdjustedCarbs(_ carbs: Double, for id: UUID) {
+            guard let index = workingResult.items.firstIndex(where: { $0.id == id }) else { return }
+            let multiplier = max(0.01, workingResult.items[index].portionMultiplier)
+            workingResult.items[index].carbs = max(0, carbs) / multiplier
         }
 
         private var responseCard: some View {

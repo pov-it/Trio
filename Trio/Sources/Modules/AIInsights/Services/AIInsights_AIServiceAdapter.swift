@@ -28,6 +28,8 @@ extension AIInsights {
             /// reasoning — slower and prone to truncating the JSON answer. Only
             /// affects Gemini; ignored by other providers.
             var disableThinking: Bool = false
+            /// FoodFinder requests use about 20 seconds, then one retry.
+            var timeout: TimeInterval? = nil
 
             /// All images this request carries, in order — convenience for the
             /// provider serializers.
@@ -83,6 +85,8 @@ extension AIInsights {
             /// Non-empty when the model asked to call one or more tools instead
             /// of (or in addition to) emitting final text.
             var toolCalls: [ToolCall] = []
+            /// Pages cited by Google Search grounding or URL context.
+            var groundingCitations: [FoodFinderGrounding.Citation] = []
 
             struct Usage {
                 let promptTokens: Int?
@@ -152,7 +156,9 @@ extension AIInsights {
             baseURL: String,
             apiKey: String,
             tools: [ToolSpec],
-            geminiGrounding: Bool
+            geminiGrounding: Bool,
+            urlContext: Bool = false,
+            includeServerSideToolInvocations: Bool = false
         ) async throws -> AIResponse {
             guard !apiKey.isEmpty else { throw AIError.noAPIKey }
 
@@ -160,7 +166,10 @@ extension AIInsights {
             case .google:
                 return try await sendGemini(
                     request: request, baseURL: baseURL, apiKey: apiKey,
-                    tools: tools, grounding: geminiGrounding
+                    tools: tools,
+                    grounding: geminiGrounding,
+                    urlContext: urlContext,
+                    includeServerSideToolInvocations: includeServerSideToolInvocations
                 )
             case .openai, .tilly, .custom:
                 return try await sendOpenAICompatible(
@@ -410,7 +419,9 @@ extension AIInsights {
             baseURL: String,
             apiKey: String,
             tools: [ToolSpec] = [],
-            grounding: Bool = false
+            grounding: Bool = false,
+            urlContext: Bool = false,
+            includeServerSideToolInvocations: Bool = false
         ) async throws -> AIResponse {
             // Build the URL: baseURL should end with the model-specific endpoint
             // e.g. https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent
@@ -427,6 +438,7 @@ extension AIInsights {
 
             var urlRequest = URLRequest(url: url)
             urlRequest.httpMethod = "POST"
+            urlRequest.timeoutInterval = request.timeout ?? 60
             urlRequest.addValue("application/json", forHTTPHeaderField: "Content-Type")
 
             // Build Gemini request body. Gemini uses "user"/"model" roles only;
@@ -523,8 +535,17 @@ extension AIInsights {
             if grounding {
                 toolEntries.append(["google_search": [String: Any]()])
             }
+            if urlContext {
+                toolEntries.append(["url_context": [String: Any]()])
+            }
             if !toolEntries.isEmpty {
                 body["tools"] = toolEntries
+            }
+            // Gemini 3 can combine Google Search / URL context with function declarations
+            // when this flag is set. Older comments that said the combination returns HTTP 400
+            // apply to models before that flag existed.
+            if includeServerSideToolInvocations || (grounding && !tools.isEmpty) || (urlContext && !tools.isEmpty) {
+                body["toolConfig"] = ["includeServerSideToolInvocations": true]
             }
 
             // Generation config. Note: Gemini rejects responseMimeType=json when
@@ -603,7 +624,8 @@ extension AIInsights {
                 ))
             }
 
-            guard !text.isEmpty || !toolCalls.isEmpty else {
+            let citations = FoodFinderGrounding.citations(from: json)
+            guard !text.isEmpty || !toolCalls.isEmpty || !citations.isEmpty else {
                 let finishReason = (candidates.first?["finishReason"] as? String) ?? "unknown"
                 throw AIError.parsingError("Gemini returned an empty candidate (finishReason: \(finishReason)). Body: \(bodyPreview)")
             }
@@ -621,24 +643,30 @@ extension AIInsights {
                 text: text,
                 model: json["modelVersion"] as? String,
                 usage: usage,
-                toolCalls: toolCalls
+                toolCalls: toolCalls,
+                groundingCitations: citations
             )
         }
 
         private static func usesModernGeminiParameters(model: String, baseURL: String) -> Bool {
             let identifier = "\(model) \(baseURL)".lowercased()
             return identifier.contains("gemini-flash-latest")
+                || identifier.contains("gemini-3.8")
                 || identifier.contains("gemini-3.6-")
                 || identifier.contains("gemini-3.5-flash-lite")
         }
 
-        /// Payload to turn thinking off. `gemini-flash-latest` rejects
+        /// Payload to turn thinking down. `gemini-flash-latest` rejects
         /// `thinkingLevel: MINIMAL` (400 INVALID_ARGUMENT); omit thinkingConfig
-        /// for that SKU. Gemini 3 uses thinkingLevel; 2.x uses thinkingBudget.
+        /// for that SKU. `gemini-3.8-flash` rejects MINIMAL and defaults to MEDIUM,
+        /// so the lowest accepted level is LOW. Earlier Gemini 3 models still accept MINIMAL.
         static func geminiThinkingConfigWhenDisabling(model: String, baseURL: String = "") -> [String: Any]? {
             let identifier = "\(model) \(baseURL)".lowercased()
             if identifier.contains("gemini-flash-latest") {
                 return nil
+            }
+            if identifier.contains("gemini-3.8") {
+                return ["thinkingLevel": "LOW"]
             }
             if identifier.contains("gemini-3.") {
                 return ["thinkingLevel": "minimal"]

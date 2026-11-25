@@ -591,7 +591,7 @@ struct MealGalleryShareTests {
         AIInsights.MealCompanionShareSettings.persistShareURL(nil, defaults: defaults)
         #expect(AIInsights.MealCompanionShareSettings.shareURLString(defaults) == nil)
 
-        let real = "https://www.icloud.com/share/MarijnToken"
+        let real = "https://www.icloud.com/share/ExampleToken"
         AIInsights.MealCompanionShareSettings.persistShareURLString(real, defaults: defaults)
         #expect(AIInsights.MealCompanionShareSettings.shareURLString(defaults) == real)
 
@@ -1016,9 +1016,9 @@ struct MealGalleryShareTests {
         )
         #expect(
             AIInsights.MealCompanionShareSettings.ownerDisplayNameForSave(
-                existingCloudValue: "Marijn",
+                existingCloudValue: "Owner",
                 defaults: defaults
-            ) == "Marijn"
+            ) == "Owner"
         )
         AIInsights.MealCompanionShareSettings.setOwnerDisplayName("Alex", defaults: defaults)
         #expect(
@@ -1044,6 +1044,8 @@ struct MealGalleryShareTests {
         #expect(gemini3?["thinkingLevel"] as? String == "minimal")
         let gemini25 = AIInsights.AIServiceAdapter.geminiThinkingConfigWhenDisabling(model: "gemini-2.5-flash")
         #expect(gemini25?["thinkingBudget"] as? Int == 0)
+        let gemini38 = AIInsights.AIServiceAdapter.geminiThinkingConfigWhenDisabling(model: "gemini-3.8-flash")
+        #expect(gemini38?["thinkingLevel"] as? String == "LOW")
     }
 }
 

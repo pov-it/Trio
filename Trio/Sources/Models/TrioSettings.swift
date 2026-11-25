@@ -91,8 +91,10 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var foodFinderPreferredSource: AIInsights.FoodSourceID = .openFoodFacts
     var foodFinderDoseGuardEnabled: Bool = true
     var foodFinderDoseGuardSamples: Int = 2
-    /// Kept so older settings decode. Meal photos always compare both engines; this no longer hides a column.
+    /// `.cloud` skips the on-device model. `.onDevice` skips Gemini. `.automatic` uses both when each is available.
     var foodFinderPhotoEngine: AIInsights.FoodFinderPhotoEnginePreference = .automatic
+    /// FoodFinder Gemini model. Empty values are treated as `gemini-3.8-flash`.
+    var foodFinderGeminiModel: String = AIInsights.AIProvider.geminiFoodFinderModel
     /// Inject reverse-geocoded venue/locality into AI chat prompt. Off by default; first use triggers iOS Location permission prompt.
     var aiLocationContextEnabled: Bool = false
     /// Read dietaryCaffeine from Apple Health and merge with manual caffeine entries.
@@ -512,6 +514,13 @@ extension TrioSettings: Decodable {
             forKey: .foodFinderPhotoEngine
         ) {
             settings.foodFinderPhotoEngine = foodFinderPhotoEngine
+        }
+
+        if let foodFinderGeminiModel = try? container.decode(String.self, forKey: .foodFinderGeminiModel) {
+            let trimmed = foodFinderGeminiModel.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                settings.foodFinderGeminiModel = trimmed
+            }
         }
 
         if let aiLocationContextEnabled = try? container.decode(Bool.self, forKey: .aiLocationContextEnabled) {
