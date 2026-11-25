@@ -112,7 +112,11 @@ extension AIInsights {
 
         // Over the included meals.
         var medianRise: Double?
+        /// Median of each included meal's peak glucose, in mg/dL.
+        var medianPeakMgdl: Int?
         var medianPeakMinute: Int?
+        /// Median minutes after the meal until glucose is back at the starting level.
+        var medianReturnToBaselineMinute: Int?
         var medianInRange0to4h: Int?
         var lowCount: Int
         var rescueCount: Int
@@ -255,8 +259,12 @@ extension AIInsights {
                 ? Self.band(includedCurves, wide: includedCurves.count >= wideBandMinimum)
                 : []
             let peakMinutes: [Double] = outcomes.compactMap { $0.peakMinute.map { Double($0) } }
+            let peakValues: [Double] = outcomes.compactMap { $0.peakMgdl.map { Double($0) } }
+            let returnMinutes: [Double] = outcomes.compactMap { $0.returnToBaselineMinute.map { Double($0) } }
             let inRange: [Double] = outcomes.compactMap { $0.window(0, 240)?.inRangePercent.map { Double($0) } }
             let medianPeak: Int? = median(peakMinutes).map { Int($0.rounded()) }
+            let medianPeakValue: Int? = median(peakValues).map { Int($0.rounded()) }
+            let medianReturn: Int? = median(returnMinutes).map { Int($0.rounded()) }
             let medianInRange: Int? = median(inRange).map { Int($0.rounded()) }
             let needs: [MealOutcomeNeed] = outcomes.compactMap(\.need)
             let neededSorted: [Double] = needs.map(\.neededUnits).sorted()
@@ -273,7 +281,9 @@ extension AIInsights {
                 firstMealTime: withGlucose.first?.event.mealTime,
                 lastMealTime: withGlucose.last?.event.mealTime,
                 medianRise: median(outcomes.compactMap(\.riseMgdl)),
+                medianPeakMgdl: medianPeakValue,
                 medianPeakMinute: medianPeak,
+                medianReturnToBaselineMinute: medianReturn,
                 medianInRange0to4h: medianInRange,
                 lowCount: outcomes.filter(\.hadLow).count,
                 rescueCount: outcomes.filter(\.hadRescueCarbs).count,
