@@ -28,6 +28,7 @@ extension AIInsights {
         var foodFinderDoseGuardEnabled: Bool = true
         var foodFinderDoseGuardSamples: Int = 2
         var foodFinderPhotoEngine: FoodFinderPhotoEnginePreference = .automatic
+        var foodFinderGeminiModel: String = AIProvider.geminiFoodFinderModel
         var foodFinderUSDAAPIKey: String = ""
         // Feature C: Albert Heijn recent-purchase token (secret → keychain key
         // `ai_foodfinder_ah_token`, mirrors the USDA key; never in TrioSettings).
@@ -70,6 +71,7 @@ extension AIInsights {
             foodFinderDoseGuardEnabled = provider.settings.foodFinderDoseGuardEnabled
             foodFinderDoseGuardSamples = min(3, max(1, provider.settings.foodFinderDoseGuardSamples))
             foodFinderPhotoEngine = provider.settings.foodFinderPhotoEngine
+            foodFinderGeminiModel = provider.settings.foodFinderGeminiModel
             locationContextEnabled = provider.settings.aiLocationContextEnabled
             healthKitCaffeineEnabled = provider.settings.aiHealthKitCaffeineEnabled
             healthKitAlcoholEnabled = provider.settings.aiHealthKitAlcoholEnabled
@@ -125,6 +127,7 @@ extension AIInsights {
             settings.foodFinderDoseGuardEnabled = foodFinderDoseGuardEnabled
             settings.foodFinderDoseGuardSamples = min(3, max(1, foodFinderDoseGuardSamples))
             settings.foodFinderPhotoEngine = foodFinderPhotoEngine
+            settings.foodFinderGeminiModel = foodFinderGeminiModel
             settings.aiLocationContextEnabled = locationContextEnabled
             settings.aiHealthKitCaffeineEnabled = healthKitCaffeineEnabled
             settings.aiHealthKitAlcoholEnabled = healthKitAlcoholEnabled

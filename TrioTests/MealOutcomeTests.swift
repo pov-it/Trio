@@ -533,6 +533,7 @@ private func bolus(_ id: String, _ minute: Double, _ units: Double, smb: Bool = 
 
         let absolute = Summary.make(analyses: analyses(5), scale: .absolute, includeDisturbed: false)
         #expect(absolute.band.first { $0.minute == 60 }?.median == 160)
+        #expect(absolute.medianPeakMgdl == 160)
     }
 
     @Test("Disturbed meals are drawn but left out of the numbers unless included")

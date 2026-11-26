@@ -38,8 +38,7 @@ extension AIInsights {
         }
     }
 
-    /// Kept so older settings still decode. Meal photos always run both engines
-    /// when they can; this value no longer hides a column.
+    /// Which photo engines a scan may start. `.cloud` does not also run on-device.
     enum FoodFinderPhotoEnginePreference: String, CaseIterable, Identifiable, Codable, JSON, Sendable {
         case automatic
         case cloud
@@ -346,7 +345,7 @@ extension AIInsights {
         var rawJSON: String
     }
 
-    enum FoodFinderOnDeviceFailure: Error, Equatable {
+    enum FoodFinderOnDeviceFailure: Error, Equatable, Sendable {
         case emptyResult
         case generationFailed
         case unavailable(FoodFinderOnDeviceBlocker)
@@ -538,7 +537,9 @@ extension AIInsights {
                     throw AIInsights.FoodFinderOnDeviceFailure.unavailable(readiness)
                 }
 
-                let bitmaps = try bitmapImages(from: images)
+                let bitmaps = try await Task.detached(priority: .userInitiated) {
+                    try Self.bitmapImages(from: images)
+                }.value
                 guard !bitmaps.isEmpty else {
                     throw AIInsights.FoodFinderOnDeviceFailure.unreadableImage
                 }

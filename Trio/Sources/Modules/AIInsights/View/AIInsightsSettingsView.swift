@@ -239,7 +239,7 @@ extension AIInsights {
                 // MARK: - FoodFinder
                 Section(
                     header: Text("FoodFinder", comment: "FoodFinder AI settings section header"),
-                    footer: Text("Use the lookup agent during testing to let FoodFinder ground ingredients against configured food databases before falling back to AI estimates.", comment: "FoodFinder agent settings footer")
+                    footer: Text("The scan shows one estimate immediately, then looks up Open Food Facts and the web in the background. A scan does not wait for extra safety passes. Edit the numbers before you use them. Nothing is sent to the bolus calculator until you tap it.", comment: "FoodFinder agent settings footer")
                 ) {
                     Picker(String(localized: "Search method", comment: "FoodFinder lookup mode picker"), selection: $state.foodFinderLookupMode) {
                         ForEach(FoodFinderLookupMode.allCases) { mode in
@@ -289,12 +289,33 @@ extension AIInsights {
                     header: Text("Meal photos", comment: "FoodFinder photo engine section header"),
                     footer: Text(
                         """
-                        Each photo asks Gemini and, when Apple Intelligence is ready, the on-device model. \
-                        Both estimates stay on screen. Tap one to log it, then edit the numbers.
+                        Automatic runs Gemini and, when Apple Intelligence is ready, the on-device model. \
+                        Gemini or On this iPhone runs only that engine. The first estimate appears immediately; \
+                        source lookup continues in the background. Edit the numbers before you use them.
                         """,
                         comment: "FoodFinder photo comparison settings footer"
                     )
                 ) {
+                    Picker(
+                        String(localized: "Photo engine", comment: "FoodFinder photo engine picker"),
+                        selection: $state.foodFinderPhotoEngine
+                    ) {
+                        ForEach(FoodFinderPhotoEnginePreference.allCases) { engine in
+                            Text(engine.localizedTitle).tag(engine)
+                        }
+                    }
+                    .onChange(of: state.foodFinderPhotoEngine) {
+                        state.saveSettings()
+                    }
+                    TextField(
+                        String(localized: "Gemini model", comment: "FoodFinder Gemini model id"),
+                        text: $state.foodFinderGeminiModel
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .onChange(of: state.foodFinderGeminiModel) {
+                        state.saveSettings()
+                    }
                     Text(FoodFinderOnDeviceAnalyzer.statusText)
                         .font(.footnote)
                         .foregroundStyle(.secondary)

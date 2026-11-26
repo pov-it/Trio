@@ -38,6 +38,8 @@ extension AIInsights {
         /// The amount of `basisUnit` the stored macros correspond to (e.g. 100
         /// for "per 100 g", or the real serving grams). 0 means "not set".
         var basisAmount: Double = 0
+        /// Every source that contributed, best score first. Empty on meals saved before sources were kept.
+        var citations: [FoodSourceCitation] = []
 
         // NOTE: `adjusted*` is deliberately kept as `stored * portionMultiplier`
         // (unchanged). `basisUnit`/`basisAmount` only govern how the amount
@@ -48,6 +50,11 @@ extension AIInsights {
         var adjustedProtein: Double { protein * portionMultiplier }
         var adjustedFiber: Double { fiber * portionMultiplier }
         var adjustedCalories: Double { calories * portionMultiplier }
+
+        /// Badges to draw. Older saves fall back to the single `source` field.
+        var displayCitations: [FoodSourceCitation] {
+            citations.isEmpty ? [FoodSourceCitation.legacy(from: self)] : citations
+        }
 
         init(
             id: UUID = UUID(),
@@ -69,7 +76,8 @@ extension AIInsights {
             alternateMatches: [FoodLookupResult] = [],
             barcode: String? = nil,
             basisUnit: MeasurementUnit = .unknown,
-            basisAmount: Double = 0
+            basisAmount: Double = 0,
+            citations: [FoodSourceCitation] = []
         ) {
             self.id = id
             self.name = name
@@ -91,6 +99,7 @@ extension AIInsights {
             self.barcode = barcode
             self.basisUnit = basisUnit
             self.basisAmount = basisAmount
+            self.citations = citations
         }
 
         enum CodingKeys: String, CodingKey {
@@ -114,6 +123,7 @@ extension AIInsights {
             case barcode
             case basisUnit
             case basisAmount
+            case citations
         }
 
         init(from decoder: Decoder) throws {
@@ -138,6 +148,7 @@ extension AIInsights {
             barcode = try container.decodeIfPresent(String.self, forKey: .barcode)
             basisUnit = container.lossyDecode(MeasurementUnit.self, forKey: .basisUnit) ?? .unknown
             basisAmount = try container.decodeIfPresent(Double.self, forKey: .basisAmount) ?? 0
+            citations = container.lossyDecode([FoodSourceCitation].self, forKey: .citations) ?? []
         }
     }
 
@@ -328,6 +339,8 @@ extension AIInsights {
         var barcodeStatusIsSuccess: Bool = false
         var lastAddedFoodItemID: UUID?
         var currentResult: FoodAnalysisResult?
+        /// Set while background source lookup is still running for this meal. Not saved.
+        var searchingSourcesResultID: UUID?
         /// Post-meal 2h/4h summaries keyed by `FoodAnalysisResult.id`.
         var postMealSummaries: [UUID: FoodFinderPostMealSummary] = [:]
         var foodDescription: String = "" {
@@ -388,27 +401,34 @@ extension AIInsights {
         var foodFinderUSDAEnabled: Bool = false
         var foodFinderPreferredSource: FoodSourceID = .openFoodFacts
         var foodFinderUSDAAPIKey: String = ""
-        /// Bearer token for Marijn's self-hosted Albert Heijn nutrition endpoint
+        /// Bearer token for the Albert Heijn nutrition endpoint
         /// (foodfinder.pov-it.tech). Loaded from / saved to the keychain under
         /// `ai_foodfinder_ah_token`, mirroring the USDA key; never in TrioSettings.
         var foodFinderAHToken: String = ""
         var foodFinderDoseGuardEnabled: Bool = true
         var foodFinderDoseGuardSamples: Int = 2
         var foodFinderPhotoEngine: FoodFinderPhotoEnginePreference = .automatic
+        /// Empty or the old flash alias resolves to `gemini-3.8-flash`.
+        var foodFinderGeminiModel: String = AIProvider.geminiFoodFinderModel
         var maxFoodFinderImages: Int { max(1, providerType.foodFinderImageLimit) }
 
-        /// FoodFinder always uses Gemini Flash latest for Google, even if
-        /// persisted AI settings still point at a dated snapshot id.
+        /// FoodFinder pins `gemini-3.8-flash` unless settings name another model.
         private var foodFinderModel: String {
-            providerType == .google ? AIProvider.geminiFlashLatest : model
+            guard providerType == .google else { return model }
+            let configured = foodFinderGeminiModel.trimmingCharacters(in: .whitespacesAndNewlines)
+            if configured.isEmpty || configured == AIProvider.geminiFlashLatest {
+                return AIProvider.geminiFoodFinderModel
+            }
+            return configured
         }
 
         private var foodFinderBaseURL: String {
             guard providerType == .google else { return baseURL }
+            let modelID = foodFinderModel
             if baseURL.contains(":generateContent") || baseURL.contains(":streamGenerateContent") {
-                return AIProvider.rewritingGeminiModel(in: baseURL, to: AIProvider.geminiFlashLatest)
+                return AIProvider.rewritingGeminiModel(in: baseURL, to: modelID)
             }
-            return AIProvider.geminiGenerateContentURL(model: AIProvider.geminiFlashLatest)
+            return AIProvider.geminiGenerateContentURL(model: modelID)
         }
 
         @ObservationIgnored private let speechRecognizer = SFSpeechRecognizer(locale: Locale.current)
@@ -419,6 +439,7 @@ extension AIInsights {
         @ObservationIgnored private var aiAudioRecorder: AVAudioRecorder?
         @ObservationIgnored private var aiDictationAudioURL: URL?
         @ObservationIgnored private var isUsingAIDictation = false
+        @ObservationIgnored private var enrichmentTask: Task<Void, Never>?
 
         private struct ParsedFoodAnalysis: Sendable {
             var items: [FoodItem]
@@ -475,6 +496,7 @@ extension AIInsights {
             foodFinderDoseGuardEnabled = provider.settings.foodFinderDoseGuardEnabled
             foodFinderDoseGuardSamples = min(3, max(1, provider.settings.foodFinderDoseGuardSamples))
             foodFinderPhotoEngine = provider.settings.foodFinderPhotoEngine
+            foodFinderGeminiModel = provider.settings.foodFinderGeminiModel
             glucoseUnits = settingsManager.settings.units
 
             loadDraftDescription()
@@ -965,6 +987,9 @@ extension AIInsights {
                 applyLearnedPortions(to: &result)
                 rescaleCarbEstimateBounds(&result)
                 commitNewMeal(result)
+                if let resultID = currentResult?.id {
+                    beginSourceEnrichment(resultID: resultID, images: [])
+                }
 
             } catch let error as AIServiceAdapter.AIError {
                 errorMessage = error.errorDescription ?? error.localizedDescription
@@ -990,6 +1015,8 @@ extension AIInsights {
               "items": [
                 {
                   "name": "Spaghetti",
+                  "brand": "",
+                  "barcode": "",
                   "portion": "1 plate portion (250g cooked)",
                   "carbs": 75.0,
                   "fat": 2.0,
@@ -1018,6 +1045,7 @@ extension AIInsights {
             - Do not inflate vague labels (vegetable, sauce, curry, dal, vaji, salad, side) into a large starch portion unless the text or image clearly shows a large starch serving
             - Recognize embedded and hyphenated quantities as exact portions (e.g. "230-gram", "weighing 30 grams", "a 330ml can", "two 25g slices") and honor them precisely
             - Always include an approximate weight in grams (or volume in ml for drinks) in every item's "portion" string, e.g. "1 serving (150 g)", "2 slices (60 g)", "1 can (330 ml)". This lets the user re-scale by typing grams. Use a realistic standard weight when none is stated.
+            - When a packaged product is recognizable, put its brand in "brand" and its EAN/UPC digits in "barcode". Leave both empty when you are not sure.
             - If you cannot identify the food, respond with: {"mealName":"Unknown","mealPortion":"Unknown","confidence":0.1,"items":[]}
             - Food names and portion descriptions should match the user's app language when possible
             - Respond ONLY with the JSON object. No markdown, no explanation outside the JSON.
@@ -1097,14 +1125,17 @@ extension AIInsights {
             }
 
             let items = rawItems.map { item in
-                FoodItem(
+                let barcodeDigits = stringValue(item["barcode"] ?? item["code"], fallback: "").filter(\.isNumber)
+                return FoodItem(
                     name: stringValue(item["name"], fallback: String(localized: "Unknown", comment: "Unknown food item")),
                     portion: stringValue(item["portion"] ?? item["serving"], fallback: "1 serving"),
                     carbs: doubleValue(item["carbs"] ?? item["carbohydrates"]),
                     fat: doubleValue(item["fat"]),
                     protein: doubleValue(item["protein"] ?? item["proteins"]),
                     fiber: doubleValue(item["fiber"] ?? item["fibre"]),
-                    calories: doubleValue(item["calories"] ?? item["kcal"] ?? item["energy_kcal"])
+                    calories: doubleValue(item["calories"] ?? item["kcal"] ?? item["energy_kcal"]),
+                    sourceBrand: stringValue(item["brand"] ?? item["brands"], fallback: "").aiInsightsNilIfEmpty,
+                    barcode: (8 ... 14).contains(barcodeDigits.count) ? barcodeDigits : nil
                 )
             }
 
@@ -1137,9 +1168,8 @@ extension AIInsights {
             if foodFinderPreferredSource == .ah, !foodFinderAHTokenTrimmed.isEmpty {
                 sources.append(.ah)
             }
-            // Albert Heijn is Marijn's own purchase-aware endpoint; whenever a
-            // token is present, always query it (even when it isn't the
-            // preferred source) so a `purchased` match can win on score.
+            // When a token is present, always query Albert Heijn (even when it
+            // isn't the preferred source) so a purchase-history match can win on score.
             if !foodFinderAHTokenTrimmed.isEmpty, !sources.contains(.ah) {
                 sources.append(.ah)
             }
@@ -1186,7 +1216,7 @@ extension AIInsights {
             return itemByApplyingLookup(best, to: item, alternates: matches)
         }
 
-        private func lookupFoodSources(query: String) async -> [FoodLookupResult] {
+        private func lookupFoodSources(query: String, brand: String? = nil) async -> [FoodLookupResult] {
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return [] }
 
@@ -1199,12 +1229,12 @@ extension AIInsights {
                         do {
                             switch source {
                             case .openFoodFacts:
-                                return try await lookupOpenFoodFactsResults(trimmed)
+                                return try await lookupOpenFoodFactsResults(trimmed, brand: brand)
                             case .usda:
                                 return try await lookupUSDAResults(trimmed)
                             case .ah:
                                 return try await lookupAHResults(trimmed)
-                            case .aiEstimate:
+                            case .aiEstimate, .web:
                                 return []
                             }
                         } catch {
@@ -1275,6 +1305,12 @@ extension AIInsights {
             }()
             let basisUnit: MeasurementUnit = basisGrams > 0 ? .gram : .unknown
 
+            let primary = FoodFinderSourceMerge.citation(from: lookup)
+            var citations = item.citations
+            citations = FoodFinderSourceMerge.inserting(primary, into: citations)
+            for alternate in alternates where alternate.name != lookup.name || alternate.sourceID != lookup.sourceID {
+                citations = FoodFinderSourceMerge.inserting(FoodFinderSourceMerge.citation(from: alternate), into: citations)
+            }
             return FoodItem(
                 id: item.id,
                 name: item.name,
@@ -1289,13 +1325,14 @@ extension AIInsights {
                 sourceURL: lookup.sourceURL,
                 sourceVerified: lookup.sourceVerified,
                 sourceName: lookup.name,
-                sourceBrand: lookup.brand,
+                sourceBrand: lookup.brand ?? item.sourceBrand,
                 sourceImageURL: lookup.imageURL,
                 sourceScore: lookup.verifiedScore,
                 alternateMatches: alternates,
                 barcode: item.barcode,
                 basisUnit: basisUnit,
-                basisAmount: basisGrams
+                basisAmount: basisGrams,
+                citations: citations
             )
         }
 
@@ -1350,6 +1387,16 @@ extension AIInsights {
         }
 
         // MARK: - Helpers
+
+        /// Sets the carbohydrate grams the row shows, keeping the current multiplier.
+        func setAdjustedCarbs(for itemId: UUID, carbs: Double) {
+            guard var result = currentResult,
+                  let idx = result.items.firstIndex(where: { $0.id == itemId })
+            else { return }
+            let multiplier = max(0.01, result.items[idx].portionMultiplier)
+            result.items[idx].carbs = max(0, carbs) / multiplier
+            storeUpdatedResult(result)
+        }
 
         func updatePortion(for itemId: UUID, multiplier: Double) {
             guard var result = currentResult,
@@ -1584,14 +1631,17 @@ extension AIInsights {
 
             do {
                 let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+                let prepared = await Task.detached(priority: .userInitiated) {
+                    images.map { FoodFinderImagePrep.jpegData(from: $0, maxPixel: FoodFinderImagePrep.fastEstimateMaxPixel) }
+                }.value
                 let context = trimmedDescription.isEmpty ? "" : "\nUser context: \(trimmedDescription)"
-                let multi = images.count > 1
-                    ? "These \(images.count) photos show the items to add. "
+                let multi = prepared.count > 1
+                    ? "These \(prepared.count) photos show the items to add. "
                     : ""
                 let (candidate, _) = try await requestFoodAnalysisCandidates(
                     prompt: "\(multi)Analyze the food in the photo(s) and return items to add to an existing meal.\(context)",
-                    imageData: images.first,
-                    additionalImageData: Array(images.dropFirst()),
+                    imageData: prepared.first,
+                    additionalImageData: Array(prepared.dropFirst()),
                     description: trimmedDescription,
                     hasImage: true
                 )
@@ -1606,6 +1656,7 @@ extension AIInsights {
                 result.items.append(contentsOf: parsed.items)
                 result.items = mergeScannedBarcodeItems(into: result.items)
                 storeUpdatedResult(result)
+                beginSourceEnrichment(resultID: result.id, images: images)
                 foodDescription = ""
                 capturedImages.removeAll()
 
@@ -1777,9 +1828,8 @@ extension AIInsights {
             await analyzeImages([imageData], description: description)
         }
 
-        /// Runs the on-device model and Gemini together and keeps both estimates visible. As soon as Gemini has an
-        /// estimate the meal is shown and usable; the on-device column and the agreement fill in when that model
-        /// finishes. Without a Gemini estimate the on-device one is awaited as before.
+        /// Shows one fast Gemini estimate as soon as it returns, then keeps looking up sources.
+        /// On-device runs only when the photo-engine setting allows it.
         @MainActor
         func analyzeImages(_ images: [Data], description: String = "") async {
             guard !images.isEmpty else { return }
@@ -1793,13 +1843,41 @@ extension AIInsights {
             errorMessage = nil
             defer { isAnalyzing = false }
 
-            let deviceTask = Task { @MainActor in
-                await self.onDevicePhotoSnapshot(images: images, description: trimmedDescription)
+            let prepared = await FoodFinderSignpost.measure("FoodFinder.downscale") {
+                await Task.detached(priority: .userInitiated) {
+                    images.map { FoodFinderImagePrep.jpegData(from: $0, maxPixel: FoodFinderImagePrep.fastEstimateMaxPixel) }
+                }.value
             }
-            let cloud = await geminiPhotoSnapshot(images: images, description: trimmedDescription)
+            let plan = FoodFinderPhotoPlan.make(
+                preference: foodFinderPhotoEngine,
+                hasAPIKey: !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                onDeviceReady: FoodFinderOnDeviceAnalyzer.isReady
+            )
+            let barcodeContext = scannedBarcodePromptContext()
+            let deviceTask: Task<PhotoEngineSnapshot, Never>? = plan.runsOnDevice
+                ? Task(priority: .userInitiated) {
+                    await self.onDevicePhotoSnapshot(
+                        images: prepared,
+                        description: trimmedDescription,
+                        extraContext: barcodeContext
+                    )
+                }
+                : nil
+            let cloud: PhotoEngineSnapshot
+            if plan.runsCloud {
+                cloud = await geminiPhotoSnapshot(images: prepared, description: trimmedDescription)
+            } else {
+                cloud = PhotoEngineSnapshot(
+                    side: .unavailable(String(localized: "Gemini is turned off for meal photos.", comment: "FoodFinder cloud engine disabled"))
+                )
+            }
+
+            let onDevicePlaceholder: FoodFinderPhotoSide = plan.runsOnDevice
+                ? .pending
+                : .unavailable(String(localized: "On-device is turned off for meal photos.", comment: "FoodFinder on-device engine disabled"))
 
             if cloud.side.outcome == .ready, let parsed = cloud.parsed,
-               var comparison = FoodFinderPhotoComparison.make(onDevice: .pending, gemini: cloud.side)
+               var comparison = FoodFinderPhotoComparison.make(onDevice: onDevicePlaceholder, gemini: cloud.side)
             {
                 comparison.geminiLowerBound = cloud.diagnostics?.lowerBound
                 comparison.geminiUpperBound = cloud.diagnostics?.upperBound
@@ -1815,17 +1893,20 @@ extension AIInsights {
                     confidence: cloud.confidence
                 )
                 guard let resultID = currentResult?.id else {
-                    deviceTask.cancel()
+                    deviceTask?.cancel()
                     return
                 }
-                Task { @MainActor in
-                    let device = await deviceTask.value
-                    self.completeOnDevicePhoto(device.side, resultID: resultID)
+                beginSourceEnrichment(resultID: resultID, images: images)
+                if let deviceTask {
+                    Task { @MainActor in
+                        let device = await deviceTask.value
+                        self.completeOnDevicePhoto(device.side, resultID: resultID)
+                    }
                 }
                 return
             }
 
-            let device = await deviceTask.value
+            let device = await deviceTask?.value ?? PhotoEngineSnapshot(side: onDevicePlaceholder)
             guard var comparison = FoodFinderPhotoComparison.make(onDevice: device.side, gemini: cloud.side) else {
                 errorMessage = bothPhotoEnginesFailedMessage(onDevice: device.side, gemini: cloud.side)
                 return
@@ -1849,6 +1930,9 @@ extension AIInsights {
                 description: trimmedDescription,
                 confidence: adopted.confidence
             )
+            if let resultID = currentResult?.id {
+                beginSourceEnrichment(resultID: resultID, images: images)
+            }
             debug(
                 .service,
                 """
@@ -1896,17 +1980,22 @@ extension AIInsights {
             var diagnostics: FoodDoseGuardDiagnostics? = nil
         }
 
-        @MainActor
-        private func onDevicePhotoSnapshot(images: [Data], description: String) async -> PhotoEngineSnapshot {
+        private func onDevicePhotoSnapshot(
+            images: [Data],
+            description: String,
+            extraContext: String
+        ) async -> PhotoEngineSnapshot {
             guard FoodFinderOnDeviceAnalyzer.isReady else {
                 return PhotoEngineSnapshot(side: .unavailable(FoodFinderOnDeviceAnalyzer.statusText))
             }
             do {
-                let estimate = try await FoodFinderOnDeviceAnalyzer.analyze(
-                    images: images,
-                    description: description,
-                    extraContext: scannedBarcodePromptContext()
-                )
+                let estimate = try await FoodFinderSignpost.measure("FoodFinder.onDevice") {
+                    try await FoodFinderOnDeviceAnalyzer.analyze(
+                        images: images,
+                        description: description,
+                        extraContext: extraContext
+                    )
+                }
                 let parsed = parsedFoodAnalysis(from: estimate)
                 guard !parsed.items.isEmpty else {
                     return PhotoEngineSnapshot(side: .failed(photoEstimateRejectedMessage(itemsEmpty: true)))
@@ -2125,6 +2214,187 @@ extension AIInsights {
                 return photoEstimateRejectedMessage(itemsEmpty: true)
             case let .unavailable(blocker):
                 return blocker.localizedMessage
+            }
+        }
+
+        /// Looks up Open Food Facts, USDA, Albert Heijn, and one web-grounded Gemini call
+        /// without blocking the meal that is already on screen. Does not deliver a bolus.
+        @MainActor
+        private func beginSourceEnrichment(resultID: UUID, images: [Data]) {
+            guard isFoodLookupAgentEnabled else { return }
+            enrichmentTask?.cancel()
+            searchingSourcesResultID = resultID
+            enrichmentTask = Task { @MainActor in
+                await self.enrichPublishedMeal(resultID: resultID, images: images)
+            }
+        }
+
+        @MainActor
+        private func enrichPublishedMeal(resultID: UUID, images: [Data]) async {
+            defer {
+                if searchingSourcesResultID == resultID {
+                    searchingSourcesResultID = nil
+                }
+            }
+            guard let snapshot = storedMeal(id: resultID) else { return }
+            let targets = snapshot.items.filter { $0.source == .aiEstimate || $0.citations.isEmpty }
+            guard !targets.isEmpty else { return }
+
+            async let web = webNutrition(for: targets)
+            async let barcodes = barcodeLookups(in: images)
+            let webResult = await web
+            let barcodeResults = await barcodes
+
+            var enrichedByID: [UUID: FoodItem] = [:]
+            await withTaskGroup(of: (UUID, FoodItem).self) { group in
+                for item in targets {
+                    group.addTask { [self] in
+                        var lookups = await lookupFoodSources(query: item.name, brand: item.sourceBrand)
+                        if let code = item.barcode, let product = await self.barcodeLookupResult(code) {
+                            lookups.insert(product, at: 0)
+                        }
+                        for product in barcodeResults {
+                            lookups.append(product)
+                        }
+                        let merged = await FoodFinderSignpost.measure("FoodFinder.applySources") {
+                            FoodFinderSourceMerge.applying(
+                                lookups: lookups,
+                                webItems: webResult.items,
+                                webCitations: webResult.citations,
+                                to: item
+                            )
+                        }
+                        return (item.id, merged)
+                    }
+                }
+                for await pair in group {
+                    enrichedByID[pair.0] = pair.1
+                }
+            }
+            guard !Task.isCancelled, var latest = storedMeal(id: resultID) else { return }
+            let originals = Dictionary(uniqueKeysWithValues: snapshot.items.map { ($0.id, $0) })
+            if latest.hasManualMacroOverride {
+                for index in latest.items.indices {
+                    guard let merged = enrichedByID[latest.items[index].id] else { continue }
+                    latest.items[index].citations = FoodFinderSourceMerge.insertingMany(merged.citations, into: latest.items[index].citations)
+                }
+            } else {
+                for index in latest.items.indices {
+                    let current = latest.items[index]
+                    guard let merged = enrichedByID[current.id], let original = originals[current.id] else { continue }
+                    let userEditedMacros = abs(current.carbs - original.carbs) > 0.05
+                        || abs(current.fat - original.fat) > 0.05
+                        || abs(current.protein - original.protein) > 0.05
+                    if userEditedMacros {
+                        latest.items[index].citations = FoodFinderSourceMerge.insertingMany(merged.citations, into: current.citations)
+                        if current.source == .aiEstimate, let best = merged.citations.first {
+                            latest.items[index] = FoodFinderSourceMerge.applyingPrimary(best, to: latest.items[index])
+                        }
+                    } else {
+                        var replacement = merged
+                        replacement.portionMultiplier = current.portionMultiplier
+                        replacement.id = current.id
+                        latest.items[index] = replacement
+                    }
+                }
+            }
+            replaceStoredMeal(latest)
+        }
+
+        private func webNutrition(
+            for items: [FoodItem]
+        ) async -> (items: [FoodFinderWebNutritionItem], citations: [FoodFinderGrounding.Citation]) {
+            guard providerType == .google, !items.isEmpty else { return ([], []) }
+            let request = AIServiceAdapter.AIRequest(
+                model: foodFinderModel,
+                messages: [
+                    AIServiceAdapter.ChatMessagePayload(
+                        role: .system,
+                        content: "You look up published nutrition facts. Reply with JSON only. Never give insulin advice."
+                    ),
+                    AIServiceAdapter.ChatMessagePayload(role: .user, content: FoodFinderWebNutrition.prompt(for: items))
+                ],
+                temperature: 0,
+                topP: nil,
+                topK: nil,
+                maxTokens: 2048,
+                imageData: nil,
+                additionalImageData: [],
+                responseFormat: nil,
+                disableThinking: true,
+                timeout: 20
+            )
+            do {
+                let response = try await FoodFinderSignpost.measure("FoodFinder.webGrounding") {
+                    try await sendFoodFinder(request, geminiGrounding: true, urlContext: true)
+                }
+                return (FoodFinderWebNutrition.items(from: response.text), response.groundingCitations)
+            } catch {
+                return ([], [])
+            }
+        }
+
+        private func barcodeLookups(in images: [Data]) async -> [FoodLookupResult] {
+            guard foodFinderOpenFoodFactsEnabled, !images.isEmpty else { return [] }
+            let codes = await FoodFinderSignpost.measure("FoodFinder.barcodeScan") {
+                await Task.detached(priority: .userInitiated) {
+                    Array(Set(images.flatMap { FoodFinderBarcodeScan.codes(in: $0) }))
+                }.value
+            }
+            var results: [FoodLookupResult] = []
+            for code in codes {
+                if let product = await barcodeLookupResult(code) {
+                    results.append(product)
+                }
+            }
+            return results
+        }
+
+        private func barcodeLookupResult(_ barcode: String) async -> FoodLookupResult? {
+            guard let url = URL(string: openFoodFactsProductURL(for: barcode).absoluteString) else { return nil }
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            components?.queryItems = [
+                URLQueryItem(
+                    name: "fields",
+                    value: "code,product_name,brands,nutriments,serving_size,serving_quantity,nutrition_data_completeness,image_url,url"
+                )
+            ]
+            guard let requestURL = components?.url else { return nil }
+            var request = URLRequest(url: requestURL)
+            request.timeoutInterval = 20
+            request.setValue("TrioFoodFinder/1.0 (https://github.com/pov-it/Trio)", forHTTPHeaderField: "User-Agent")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            do {
+                let data = try await dataWithOneTimeoutRetry(for: request)
+                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      Int(doubleValue(json["status"])) == 1,
+                      let product = json["product"] as? [String: Any]
+                else { return nil }
+                return openFoodFactsLookupResult(from: product, fallbackName: barcode)
+            } catch {
+                return nil
+            }
+        }
+
+        private func storedMeal(id: UUID) -> FoodAnalysisResult? {
+            if let currentResult, currentResult.id == id { return currentResult }
+            if let recent = recentResults.first(where: { $0.id == id }) { return recent }
+            return frequentMeals.first(where: { $0.id == id })
+        }
+
+        private func replaceStoredMeal(_ result: FoodAnalysisResult) {
+            var result = result
+            rescaleCarbEstimateBounds(&result)
+            if currentResult?.id == result.id {
+                currentResult = result
+            }
+            if let index = recentResults.firstIndex(where: { $0.id == result.id }) {
+                recentResults[index] = result
+                saveRecentResults()
+            }
+            if let index = frequentMeals.firstIndex(where: { $0.id == result.id }) {
+                frequentMeals[index] = result
+                saveFrequentMeals()
             }
         }
 
@@ -2499,66 +2769,34 @@ extension AIInsights {
             var candidates: [FoodAnalysisCandidate] = []
             var lastError: Error?
 
-            // Agentic path: run `count` tool-using agents CONCURRENTLY, all
-            // sharing one lookup cache so identical ingredient lookups (rice,
-            // broccoli, chicken …) hit the network only once across the ensemble.
-            // Only engages when the verified-lookup agent is enabled.
-            if isFoodLookupAgentEnabled {
-                let cache = FoodLookupCache()
-                candidates = await withTaskGroup(of: FoodAnalysisCandidate?.self) { group -> [FoodAnalysisCandidate] in
-                    for _ in 0 ..< count {
-                        group.addTask { [self] in
-                            do {
-                                let parsed = try await runAgenticAnalysis(
-                                    prompt: prompt,
-                                    imageData: imageData,
-                                    additionalImageData: additionalImageData,
-                                    cache: cache
-                                )
-                                return FoodAnalysisCandidate(parsed: parsed, rawResponse: "")
-                            } catch {
-                                return nil
-                            }
-                        }
-                    }
-                    var out: [FoodAnalysisCandidate] = []
-                    for await candidate in group { if let candidate { out.append(candidate) } }
-                    return out
-                }
-            }
-
-            // Web-search fallback (Gemini): if the database tool loop resolved
-            // nothing, try a grounding-only pass — useful for obscure dishes the
-            // food databases don't carry — before the plain legacy path.
-            if candidates.isEmpty, isFoodLookupAgentEnabled, providerType == .google {
-                do {
-                    let parsed = try await runGroundingOnlyAnalysis(
+            // One fast structured call, no tools. Source lookup continues after the meal is on screen.
+            // `count` stays 1 here: extra dose-guard samples used to block the first paint.
+            _ = count
+            do {
+                let response = try await FoodFinderSignpost.measure("FoodFinder.fastEstimate") {
+                    try await requestFoodAnalysis(
                         prompt: prompt,
                         imageData: imageData,
                         additionalImageData: additionalImageData
                     )
-                    candidates.append(FoodAnalysisCandidate(parsed: parsed, rawResponse: ""))
-                } catch {
-                    lastError = error
                 }
+                let parsed = parseFoodAnalysis(from: response)
+                if !parsed.items.isEmpty {
+                    candidates.append(FoodAnalysisCandidate(parsed: parsed, rawResponse: response))
+                }
+            } catch {
+                lastError = error
             }
 
-            // Fallback (agentic failed / unsupported) or aiEstimateOnly mode:
-            // the original sequential estimate-then-verify pipeline.
+            // If the fast call failed, run the plain estimate and a no-photo web pass together.
             if candidates.isEmpty {
-                for _ in 0 ..< count {
-                    do {
-                        let response = try await requestFoodAnalysis(
-                            prompt: prompt,
-                            imageData: imageData,
-                            additionalImageData: additionalImageData
-                        )
-                        var parsed = parseFoodAnalysis(from: response)
-                        parsed.items = await enrichFoodItemsWithLookup(parsed.items)
-                        candidates.append(FoodAnalysisCandidate(parsed: parsed, rawResponse: response))
-                    } catch {
-                        lastError = error
-                    }
+                let fallback = await requestParallelFoodFallbacks(
+                    prompt: prompt,
+                    imageData: imageData,
+                    additionalImageData: additionalImageData
+                )
+                if let fallback {
+                    candidates.append(fallback)
                 }
             }
 
@@ -2648,16 +2886,114 @@ extension AIInsights {
                 imageData: imageData,
                 additionalImageData: additionalImageData,
                 responseFormat: foodFinderResponseFormat,
-                disableThinking: true
+                disableThinking: true,
+                timeout: 20
             )
 
-            let response = try await AIServiceAdapter.send(
-                request: request,
-                provider: providerType,
-                baseURL: foodFinderBaseURL,
-                apiKey: apiKey
-            )
+            let response = try await sendFoodFinder(request)
             return response.text
+        }
+
+        /// Plain JSON estimate and a web-grounded pass, started together. The first usable meal wins.
+        private func requestParallelFoodFallbacks(
+            prompt: String,
+            imageData: Data?,
+            additionalImageData: [Data]
+        ) async -> FoodAnalysisCandidate? {
+            await withTaskGroup(of: FoodAnalysisCandidate?.self) { group in
+                group.addTask { [self] in
+                    do {
+                        let response = try await FoodFinderSignpost.measure("FoodFinder.plainFallback") {
+                            try await requestFoodAnalysis(
+                                prompt: prompt,
+                                imageData: imageData,
+                                additionalImageData: additionalImageData
+                            )
+                        }
+                        let parsed = parseFoodAnalysis(from: response)
+                        guard !parsed.items.isEmpty else { return nil }
+                        return FoodAnalysisCandidate(parsed: parsed, rawResponse: response)
+                    } catch {
+                        return nil
+                    }
+                }
+                if isFoodLookupAgentEnabled {
+                    group.addTask { [self] in
+                        do {
+                            let parsed = try await runAgenticAnalysis(
+                                prompt: prompt,
+                                imageData: imageData,
+                                additionalImageData: additionalImageData,
+                                cache: FoodLookupCache()
+                            )
+                            guard !parsed.items.isEmpty else { return nil }
+                            return FoodAnalysisCandidate(parsed: parsed, rawResponse: "")
+                        } catch {
+                            return nil
+                        }
+                    }
+                }
+                if providerType == .google {
+                    group.addTask { [self] in
+                        do {
+                            let parsed = try await FoodFinderSignpost.measure("FoodFinder.groundingFallback") {
+                                try await runGroundingOnlyAnalysis(
+                                    prompt: prompt,
+                                    imageData: nil,
+                                    additionalImageData: []
+                                )
+                            }
+                            guard !parsed.items.isEmpty else { return nil }
+                            return FoodAnalysisCandidate(parsed: parsed, rawResponse: "")
+                        } catch {
+                            return nil
+                        }
+                    }
+                }
+                for await candidate in group {
+                    if let candidate {
+                        group.cancelAll()
+                        return candidate
+                    }
+                }
+                return nil
+            }
+        }
+
+        private func sendFoodFinder(
+            _ request: AIServiceAdapter.AIRequest,
+            tools: [AIServiceAdapter.ToolSpec] = [],
+            geminiGrounding: Bool = false,
+            urlContext: Bool = false
+        ) async throws -> AIServiceAdapter.AIResponse {
+            let send = {
+                try await AIServiceAdapter.send(
+                    request: request,
+                    provider: self.providerType,
+                    baseURL: self.foodFinderBaseURL,
+                    apiKey: self.apiKey,
+                    tools: tools,
+                    geminiGrounding: geminiGrounding,
+                    urlContext: urlContext,
+                    includeServerSideToolInvocations: geminiGrounding || urlContext
+                )
+            }
+            do {
+                return try await send()
+            } catch {
+                guard isFoodFinderTimeout(error) else { throw error }
+                return try await send()
+            }
+        }
+
+        private func isFoodFinderTimeout(_ error: Error) -> Bool {
+            if let urlError = error as? URLError, urlError.code == .timedOut { return true }
+            if case let AIServiceAdapter.AIError.networkError(inner) = error {
+                if let urlError = inner as? URLError, urlError.code == .timedOut { return true }
+                let nsError = inner as NSError
+                return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorTimedOut
+            }
+            return false
         }
 
         // MARK: - Agentic grounding loop
@@ -2698,10 +3034,11 @@ extension AIInsights {
 
         /// One agentic candidate: a ReAct loop where the model grounds itself via
         /// the search_food_database tool, then returns the final JSON meal.
-        /// Throws on failure so the caller can fall back. NOTE: Gemini rejects
-        /// combining Google Search grounding with function declarations in the
-        /// same request (HTTP 400), so this loop never enables grounding — web
-        /// search is offered separately via `runGroundingOnlyAnalysis`.
+        /// Gemini 3 can combine Google Search with function declarations when
+        /// `toolConfig.includeServerSideToolInvocations` is true. The scan path
+        /// does not use this loop: it shows one fast estimate, then looks up
+        /// sources in the background. Kept for a text fallback that still asks
+        /// the model to call `search_food_database`.
         private func runAgenticAnalysis(
             prompt: String,
             imageData: Data?,
@@ -2730,19 +3067,18 @@ extension AIInsights {
                     maxTokens: 2048,
                     imageData: round == 0 ? imageData : nil,
                     additionalImageData: round == 0 ? additionalImageData : [],
-                    responseFormat: nil,
-                    disableThinking: true
-                )
-                let response = try await AIServiceAdapter.send(
-                    request: request,
-                    provider: providerType,
-                    baseURL: foodFinderBaseURL,
-                    apiKey: apiKey,
-                    tools: tools,
-                    geminiGrounding: false
-                )
+                responseFormat: nil,
+                disableThinking: true,
+                timeout: 20
+            )
+            let response = try await sendFoodFinder(
+                request,
+                tools: tools,
+                geminiGrounding: providerType == .google,
+                urlContext: false
+            )
 
-                // No tool calls → treat as the final answer.
+            // No tool calls → treat as the final answer.
                 if response.toolCalls.isEmpty {
                     let parsed = parseFoodAnalysis(from: response.text)
                     guard !parsed.items.isEmpty else { throw AIServiceAdapter.AIError.noContent }
@@ -2798,26 +3134,23 @@ extension AIInsights {
                 imageData: nil,
                 additionalImageData: [],
                 responseFormat: nil,
-                disableThinking: true
+                disableThinking: true,
+                timeout: 20
             )
-            let finalResponse = try await AIServiceAdapter.send(
-                request: finalRequest,
-                provider: providerType,
-                baseURL: foodFinderBaseURL,
-                apiKey: apiKey,
+            let finalResponse = try await sendFoodFinder(
+                finalRequest,
                 tools: tools,
-                geminiGrounding: false
+                geminiGrounding: providerType == .google,
+                urlContext: false
             )
             let parsed = parseFoodAnalysis(from: finalResponse.text)
             guard !parsed.items.isEmpty else { throw AIServiceAdapter.AIError.noContent }
             return parsed
         }
 
-        /// Web-search grounded analysis (Gemini Google Search), used as a
-        /// fallback when the database tool loop can't resolve a meal — e.g. an
-        /// obscure restaurant or homemade dish the food databases don't carry.
-        /// Runs WITHOUT function tools, because Gemini forbids combining Google
-        /// Search grounding with function declarations in one request.
+        /// Web-search grounded analysis (Gemini Google Search and URL context).
+        /// Used when the fast estimate fails. Does not upload a photo when the
+        /// caller already has a name; pass `imageData` only for that failure path.
         private func runGroundingOnlyAnalysis(
             prompt: String,
             imageData: Data?,
@@ -2839,15 +3172,14 @@ extension AIInsights {
                 imageData: imageData,
                 additionalImageData: additionalImageData,
                 responseFormat: nil,
-                disableThinking: true
+                disableThinking: true,
+                timeout: 20
             )
-            let response = try await AIServiceAdapter.send(
-                request: request,
-                provider: providerType,
-                baseURL: foodFinderBaseURL,
-                apiKey: apiKey,
+            let response = try await sendFoodFinder(
+                request,
                 tools: [],
-                geminiGrounding: providerType == .google
+                geminiGrounding: providerType == .google,
+                urlContext: providerType == .google
             )
             let parsed = parseFoodAnalysis(from: response.text)
             guard !parsed.items.isEmpty else { throw AIServiceAdapter.AIError.noContent }
@@ -2932,32 +3264,9 @@ extension AIInsights {
             return parseFoodAnalysis(from: responseText).items.first
         }
 
-        private func lookupOpenFoodFactsResults(_ query: String) async throws -> [FoodLookupResult] {
-            guard var components = URLComponents(url: openFoodFactsSearchURL(), resolvingAgainstBaseURL: false) else {
-                return []
-            }
-            components.queryItems = [
-                URLQueryItem(name: "search_terms", value: query),
-                URLQueryItem(name: "fields", value: "code,product_name,brands,nutriments,serving_size,serving_quantity,nutrition_data_completeness,image_url,url"),
-                URLQueryItem(name: "page_size", value: "5"),
-                URLQueryItem(name: "json", value: "1")
-            ]
-            guard let url = components.url else { return [] }
-
-            var request = URLRequest(url: url)
-            let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
-            request.setValue("TrioAIInsights/\(appVersion) (https://github.com/pov-it/Trio)", forHTTPHeaderField: "User-Agent")
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let products = json["products"] as? [[String: Any]]
-            else {
-                return []
-            }
-
-            return products.compactMap { openFoodFactsLookupResult(from: $0, fallbackName: query) }
+        private func lookupOpenFoodFactsResults(_ query: String, brand: String? = nil) async throws -> [FoodLookupResult] {
+            let products = try await FoodFinderSearchALicious.products(matching: query, brand: brand, langs: "nl")
+            return FoodFinderSearchALicious.lookupResults(from: products, fallbackName: query)
         }
 
         private func openFoodFactsLookupResult(from product: [String: Any], fallbackName: String) -> FoodLookupResult? {
@@ -3049,30 +3358,16 @@ extension AIInsights {
             )
         }
 
-        /// Base URL of Marijn's self-hosted Albert Heijn nutrition endpoint.
-        private static let foodFinderAHBaseURL = "https://foodfinder.pov-it.tech"
-
         /// Query the AH endpoint for a single ingredient. The parent parse step
-        /// already splits a composite meal ("volkoren boterham met huttekäse")
-        /// into individual `FoodItem`s, so each ingredient reaches this call on
-        /// its own — matching the endpoint's documented per-ingredient workflow.
+        /// already splits a composite meal into individual `FoodItem`s, so each
+        /// ingredient reaches this call on its own.
+        /// The published OpenAPI only accepts `token` as a query parameter, so the
+        /// secret stays there until the route documents an Authorization header.
         private func lookupAHResults(_ query: String) async throws -> [FoodLookupResult] {
             let token = foodFinderAHTokenTrimmed
             guard !token.isEmpty else { return [] }
-
-            var components = URLComponents(string: "\(Self.foodFinderAHBaseURL)/nutrition")
-            components?.queryItems = [
-                URLQueryItem(name: "q", value: query),
-                URLQueryItem(name: "limit", value: "5"),
-                URLQueryItem(name: "token", value: token)
-            ]
-            guard let url = components?.url else { return [] }
-
-            var request = URLRequest(url: url)
-            let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
-            request.setValue("TrioAIInsights/\(appVersion) (https://github.com/pov-it/Trio)", forHTTPHeaderField: "User-Agent")
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.timeoutInterval = 12
+            guard var request = FoodFinderAHRequest.nutritionRequest(query: query, token: token) else { return [] }
+            request.timeoutInterval = 20
 
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200,
@@ -3106,8 +3401,8 @@ extension AIInsights {
                 ? String(localized: "100 ml", comment: "AH default portion (ml)")
                 : String(localized: "100 g", comment: "AH default portion (g)")
 
-            // A `purchased` match means Marijn actually has (or recently had)
-            // this exact product in his kitchen — the strongest possible signal.
+            // A `purchased` match means this product is in the account's recent
+            // purchases — the strongest possible signal.
             // Boost the score so it outranks generic OpenFoodFacts/USDA hits,
             // but stay conservative on short single-word receipt-name matches
             // (`match == "name"`), which the endpoint flags as false-positive-prone.
