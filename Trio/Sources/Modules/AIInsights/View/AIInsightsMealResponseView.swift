@@ -87,6 +87,17 @@ extension AIInsights {
                     .font(.subheadline.weight(.semibold))
             }
             .tint(.secondary)
+
+            if !summary.curves.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(String(localized: "All meals", comment: "Meal response: chart across saved meals with percentile bands"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    MealResponseGlucoseChart(summary: summary, units: units, endMinute: endMinute)
+                        .frame(height: 190)
+                }
+                .padding(.top, 4)
+            }
         }
 
         private func metricRow(_ summary: MealResponseSummary) -> some View {

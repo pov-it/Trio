@@ -16,7 +16,8 @@ extension AIInsights {
         var step: Double = 0.1
         var onTap: (() -> Void)?
         var onChange: (Double) -> Void
-        var hintColor: Color = .white
+        /// Called when the control arms or disarms, so the host can lift the row above its neighbours.
+        var onActiveChange: ((Bool) -> Void)?
         /// Photo controls draw a light track. Rows on a card draw a dark track.
         var trackOnPhoto: Bool = true
         @ViewBuilder var label: () -> Label
@@ -27,7 +28,6 @@ extension AIInsights {
         @State private var touchTick = 0
         @State private var stepTick = 0
         @State private var pressed = false
-        @State private var hintPulse = false
         @State private var touchTravel: CGFloat = 0
         @State private var touchStarted: Date?
         @State private var anchorY: CGFloat?
@@ -42,29 +42,21 @@ extension AIInsights {
             label()
                 .scaleEffect(pressed ? 1.06 : 1)
                 .overlay {
-                    if !armed {
-                        Circle()
-                            .stroke(hintColor.opacity(hintPulse ? 0 : 0.55), lineWidth: 2)
-                            .scaleEffect(hintPulse ? 1.22 : 0.92)
-                            .allowsHitTesting(false)
-                    }
-                }
-                .overlay(alignment: .bottomLeading) {
+                    // Centered on the control itself, so it unfolds from under the finger.
                     if armed {
                         PortionDragTrack(multiplier: live, range: range, onPhoto: trackOnPhoto)
                             .fixedSize()
-                            .offset(x: -84)
                             .allowsHitTesting(false)
-                            .transition(.opacity)
+                            .transition(.scale(scale: 0.6).combined(with: .opacity))
                     }
                 }
                 .contentShape(Rectangle())
                 .simultaneousGesture(pointer)
                 .onAppear {
                     live = multiplier
-                    withAnimation(.easeOut(duration: 1.05).repeatCount(3, autoreverses: false)) {
-                        hintPulse = true
-                    }
+                }
+                .onChange(of: armed) { _, isArmed in
+                    onActiveChange?(isArmed)
                 }
                 .onChange(of: multiplier) { _, newValue in
                     if !armed { live = newValue }
@@ -141,9 +133,12 @@ extension AIInsights {
             anchorY = nil
             armed = false
             pressed = true
-            touchTick += 1
             holdTask = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 350_000_000)
+                // A light tick shortly after touch-down says the control can be held. No visual hint.
+                try? await Task.sleep(nanoseconds: 140_000_000)
+                guard !Task.isCancelled, fingerDown, touchTravel < 10 else { return }
+                touchTick += 1
+                try? await Task.sleep(nanoseconds: 210_000_000)
                 guard !Task.isCancelled, fingerDown, touchTravel < 24 else { return }
                 origin = multiplier
                 live = multiplier
@@ -190,26 +185,32 @@ extension AIInsights {
                     .font(.caption2.weight(.bold))
                 Text(String(localized: "MORE", comment: "Portion drag increase"))
                     .font(.system(size: 9, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Capsule()
                     .fill(Color.white.opacity(0.35))
-                    .frame(width: 3, height: 36)
-                Text("× \(Self.label(multiplier))")
+                    .frame(width: 3, height: 30)
+                Text("×" + Self.label(multiplier))
                     .font(.caption.weight(.bold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(width: 44, height: 22)
                     .background(Capsule().fill(Color.white))
                     .foregroundStyle(.black)
                 Capsule()
                     .fill(Color.white.opacity(0.35))
-                    .frame(width: 3, height: 36)
+                    .frame(width: 3, height: 30)
                 Text(String(localized: "LESS", comment: "Portion drag decrease"))
                     .font(.system(size: 9, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Image(systemName: "minus")
                     .font(.caption2.weight(.bold))
             }
             .foregroundStyle(onPhoto ? Color.white : Color.primary)
             .padding(.vertical, 10)
-            .padding(.horizontal, 8)
+            .frame(width: 64)
             .background {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .fill(onPhoto ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Color(UIColor.secondarySystemBackground)))
@@ -269,41 +270,63 @@ extension AIInsights {
         }
     }
 
-    struct MealMacroOverlay: View {
+    /// Carbs hero, the round action buttons beside it, and one row of macros underneath.
+    /// Every number is monospaced and sits in a fixed cell, so a changing portion never moves the layout.
+    struct MealMacroOverlay<Trailing: View>: View {
         var carbs: Double
         var fat: Double
         var protein: Double
         var fiber: Double
         var calories: Double
+        @ViewBuilder var trailing: () -> Trailing
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(PortionDragTrack.label(carbs))
-                        .font(.system(size: 52, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color(red: 0.36, green: 0.62, blue: 0.98))
-                    Text(String(localized: "g carbs", comment: "FoodFinder carbs hero unit"))
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.white)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .bottom, spacing: 12) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        ZStack(alignment: .leading) {
+                            // Reserves room for three digits and a decimal so the unit never moves.
+                            Text("000.0").hidden()
+                            Text(PortionDragTrack.label(carbs))
+                                .foregroundStyle(Color(red: 0.36, green: 0.62, blue: 0.98))
+                        }
+                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        Text(String(localized: "g carbs", comment: "FoodFinder carbs hero unit"))
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                    Spacer(minLength: 8)
+                    trailing()
                 }
-                HStack(spacing: 12) {
-                    labeled(String(localized: "Fat", comment: "Fat macro"), fat, Color(red: 0.98, green: 0.78, blue: 0.22))
-                    labeled(String(localized: "Protein", comment: "Protein macro"), protein, Color(red: 0.96, green: 0.45, blue: 0.45))
-                    labeled(String(localized: "Fiber", comment: "Fiber macro"), fiber, Color(red: 0.45, green: 0.82, blue: 0.55))
-                    Text("\(Int(calories.rounded())) kcal")
-                        .foregroundStyle(.white)
+                HStack(spacing: 8) {
+                    macroCell(String(localized: "Fat", comment: "Fat macro"), fat, Color(red: 0.98, green: 0.78, blue: 0.22))
+                    macroCell(String(localized: "Protein", comment: "Protein macro"), protein, Color(red: 0.96, green: 0.45, blue: 0.45))
+                    macroCell(String(localized: "Fiber", comment: "Fiber macro"), fiber, Color(red: 0.45, green: 0.82, blue: 0.55))
+                    macroCell("kcal", calories, .white, whole: true)
                 }
                 .font(.subheadline.weight(.semibold))
             }
             .shadow(color: .black.opacity(0.55), radius: 6, y: 2)
         }
 
-        private func labeled(_ title: String, _ value: Double, _ color: Color) -> some View {
+        /// One value with its label. It shrinks before it would wrap, so neither the number nor the word splits.
+        private func macroCell(_ title: String, _ value: Double, _ color: Color, whole: Bool = false) -> some View {
             HStack(spacing: 3) {
-                Text(PortionDragTrack.label(value))
+                Text(whole ? "\(Int(value.rounded()))" : PortionDragTrack.label(value))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                 Text(title)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
             }
             .foregroundStyle(color)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

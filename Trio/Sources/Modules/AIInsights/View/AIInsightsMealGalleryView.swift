@@ -864,6 +864,8 @@ extension AIInsights {
         @State private var showStickyTitle = false
         @State private var showPhoto = false
         @State private var editingItem: FoodItem?
+        /// The ingredient whose portion track is open, so its row can draw above the rows around it.
+        @State private var activeDragItemID: UUID?
 
         private var displayImageData: Data? {
             result.imageData ?? photoData ?? meal.fullImageData
@@ -939,11 +941,14 @@ extension AIInsights {
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
+                        // Above the cards below it, so the portion track can unfold past the photo edge.
                         hero
+                            .zIndex(1)
                         VStack(alignment: .leading, spacing: 16) {
                             titleBlock
                             if !workingResult.items.isEmpty {
                                 itemsCard
+                                    .zIndex(activeDragItemID == nil ? 0 : 2)
                             }
                             responseCard
                             foldersCard
@@ -1031,21 +1036,18 @@ extension AIInsights {
                 .frame(height: 200)
                 .frame(maxHeight: .infinity, alignment: .bottom)
                 .allowsHitTesting(false)
-                HStack(alignment: .bottom, spacing: 12) {
-                    MealMacroOverlay(
-                        carbs: workingResult.totalCarbs,
-                        fat: workingResult.totalFat,
-                        protein: workingResult.totalProtein,
-                        fiber: workingResult.totalFiber,
-                        calories: workingResult.totalCalories
-                    )
-                    Spacer(minLength: 8)
+                MealMacroOverlay(
+                    carbs: workingResult.totalCarbs,
+                    fat: workingResult.totalFat,
+                    protein: workingResult.totalProtein,
+                    fiber: workingResult.totalFiber,
+                    calories: workingResult.totalCalories
+                ) {
                     heroButtons
                 }
                 .padding(16)
             }
             .frame(maxWidth: .infinity)
-            .clipped()
         }
 
         private var heroButtons: some View {
@@ -1131,17 +1133,26 @@ extension AIInsights {
                             onChange: { newValue in
                                 setIngredientMultiplier(newValue, for: item.id)
                             },
-                            hintColor: .blue,
+                            onActiveChange: { active in
+                                if active {
+                                    activeDragItemID = item.id
+                                } else if activeDragItemID == item.id {
+                                    activeDragItemID = nil
+                                }
+                            },
                             trackOnPhoto: false
                         ) {
                             Text("\(PortionDragTrack.label(item.adjustedCarbs)) g")
                                 .font(.subheadline.weight(.semibold))
+                                .monospacedDigit()
+                                .lineLimit(1)
                                 .foregroundStyle(.blue)
-                                .frame(minWidth: 52, alignment: .trailing)
+                                .frame(width: 64, alignment: .trailing)
                         }
                     }
                     .font(.subheadline)
                     .padding(.vertical, 4)
+                    .zIndex(activeDragItemID == item.id ? 1 : 0)
                     if item.id != workingResult.items.last?.id {
                         Divider()
                     }

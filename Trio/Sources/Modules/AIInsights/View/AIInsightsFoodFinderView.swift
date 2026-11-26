@@ -1077,12 +1077,13 @@ extension AIInsights {
                         onChange: { newValue in
                             state.updatePortion(for: item.id, multiplier: newValue)
                         },
-                        hintColor: .blue,
                         trackOnPhoto: false
                     ) {
                         HStack(alignment: .firstTextBaseline, spacing: 4) {
                             Text(PortionDragTrack.label(item.adjustedCarbs))
                                 .font(.title3.weight(.bold))
+                                .monospacedDigit()
+                                .lineLimit(1)
                                 .foregroundStyle(.blue)
                             Text(String(localized: "g carbs", comment: "FoodFinder carbs hero unit"))
                                 .font(.caption)
